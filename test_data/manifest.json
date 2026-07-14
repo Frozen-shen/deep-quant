@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-07-12T18:24:51.093439",
+  "generator_version": "1.0",
+  "datasets": {
+    "ohlcv": {
+      "files": 5,
+      "path": "datasets/ohlcv_*.csv"
+    },
+    "scenarios": {
+      "files": 9,
+      "path": "datasets/scenario_*.csv"
+    },
+    "known_signals": {
+      "signals": 2,
+      "path": "datasets/known_signals.csv"
+    },
+    "mock_events": {
+      "count": 8,
+      "path": "datasets/mock_events.csv"
+    }
+  },
+  "stocks": {
+    "600519": {
+      "name": "贵州茅台",
+      "market": "a",
+      "sector": "白酒消费"
+    },
+    "300750": {
+      "name": "宁德时代",
+      "market": "a",
+      "sector": "新能源电池"
+    },
+    "01810": {
+      "name": "小米集团",
+      "market": "hk",
+      "sector": "消费电子+汽车"
+    },
+    "00700": {
+      "name": "腾讯控股",
+      "market": "hk",
+      "sector": "互联网"
+    },
+    "000001": {
+      "name": "平安银行",
+      "market": "a",
+      "sector": "银行"
+    }
+  },
+  "usage": {
+    "回测测试": "python -c 'from test_data import loader; df = loader.load_ohlcv(\"600519\")'",
+    "场景测试": "python -c 'from test_data import loader; df = loader.load_scenario(\"bear_2018\")'",
+    "信号验证": "python -c 'from test_data import loader; df = loader.load_known_signals()'",
+    "LLM测试": "python -c 'from test_data import loader; df = loader.load_mock_events()'"
+  }
+}

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Database
+*.db
+
+# LLM Cache
+.llm_cache/
+
+# Backtest Charts
+backtest_*.png
+test_wfo_equity.png
+
+# Logs
+*.log
+orders.log
+alerts.log
+
+# Paper Trade
+paper_trade_comparison.csv
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# References (cloned repos)
+references/
