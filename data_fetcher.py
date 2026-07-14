@@ -31,9 +31,11 @@ MARKET_CONFIG = {
         "name": "A股",
         "currency": "CNY",
         "lot_size": 100,
-        "commission_default": 0.0003,      # 万三
-        "stamp_duty": 0.0005,               # 0.05% 卖方
-        "risk_free_rate": 0.02,             # ~2%
+        "commission_default": 0.0003,
+        "buy_commission":  0.0003,           # 万三
+        "sell_commission": 0.0008,           # 万三 + 印花税0.05%
+        "stamp_duty": 0.0005,
+        "risk_free_rate": 0.02,
         "t_plus": 1,                        # T+1
         "trading_days_per_year": 252,
         "price_limit": 0.10,                # ±10%
