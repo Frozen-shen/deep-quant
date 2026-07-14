@@ -32,7 +32,7 @@ SYMBOLS = ["01810","09988","03690","00981","00700","02318"]
 MARKET = "hk"
 START, END = "2024-01-01", "2026-07-10"
 
-API_KEY = os.environ.get("OPENAI_API_KEY", "sk-5d44c92140cc48f080f40e2dc82cec0e")
+API_KEY = os.environ.get("OPENAI_API_KEY")  # 从环境变量读取,不要硬编码!
 BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-chat"
 
