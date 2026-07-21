@@ -62,6 +62,13 @@ INITIAL_CAPITAL = 100_000
 MAX_HOLD_DAYS = 30
 MAX_DD_PCT = 0.15
 
+MARKET = "a"
+START, END = "2024-01-01", "2026-07-10"
+TOP_K = 4
+INITIAL_CAPITAL = 100_000
+MAX_HOLD_DAYS = 30
+MAX_DD_PCT = 0.15
+
 
 def main():
     storage.init_db()
@@ -115,6 +122,17 @@ def main():
             peer = peer_relative_factor(SYMBOLS, stock_data)
             for sym in scores:
                 scores[sym] = scores[sym] * 0.7 + peer.get(sym, 0) * 0.3
+            # 日内因子奖励 (最后60天)
+            if (end_dt - today).days < 60:
+                for sym in scores:
+                    if sym in stock_data:
+                        try:
+                            intra = iexec.fetcher.fetch_intraday_factors(sym, today_str)
+                            if intra:
+                                scores[sym] += (intra.get("intraday_trend",0)*10
+                                              - abs(intra.get("vwap_deviation",0))*5
+                                              + intra.get("tail_return",0)*8) * 0.1
+                        except: pass
         except: continue
 
         # 宏观叠加
