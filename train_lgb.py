@@ -29,52 +29,47 @@ FACTOR_NAMES = [
 ]
 
 
-def build_panel(start: str, end: str, max_days: int = 200) -> pd.DataFrame:
-    """构建训练面板: 每天×每只股票的因子值+未来收益。"""
+def build_panel(start: str, end: str, max_days: int = 100) -> pd.DataFrame:
+    """构建训练面板。"""
     fetcher = DataFetcher()
     all_data = {}
     for sym in SYMBOLS:
-        df = fetcher.fetch(sym, "20180101", end.replace("-",""), "qfq", market=MARKET)
-        df["date"] = pd.to_datetime(df["date"])
-        all_data[sym] = df
-
-    days = all_data[SYMBOLS[0]]["date"].tolist()
+        df = fetcher.fetch(sym, start, end, "qfq", market=MARKET)
+        if len(df) > 0:
+            df["date"] = pd.to_datetime(df["date"])
+            all_data[sym] = df
+    
+    days = sorted(set().union(*[set(df["date"]) for df in all_data.values()]))
     days = [d for d in days if pd.Timestamp(start) <= d <= pd.Timestamp(end)]
-    days = days[::max(1, len(days)//max_days)][:max_days]  # 采样
+    days = days[::max(1, len(days)//max_days)][:max_days]
     
     scorer = FactorScorer.from_preset("ic_optimized")
     panel = []
-    print(f"  处理 {len(days)} 个交易日...")
+    print(f"  处理 {len(days)} 天, {len(all_data)} 只股票...")
 
-    for today in days:
-        sd = {}
+    for ti, today in enumerate(days):
         for sym in SYMBOLS:
             if sym not in all_data: continue
-            dt = all_data[sym][all_data[sym]["date"] <= today].tail(120)
-            if len(dt) < 50: continue; sd[sym] = dt
-        if len(sd) < 5: continue
-        
-        # 直接用截面评分获取因子值
-        try:
-            factors_dict = {}
-            for sym in sd:
-                f = scorer.compute_factors(sd[sym])
-                if len(f) == 0: continue
-                row = f.iloc[-1]
-                factors_dict[sym] = {fn: row.get(fn, np.nan) for fn in FACTOR_NAMES}
+            df_full = all_data[sym]
+            df_t = df_full[df_full["date"] <= today]
+            if len(df_t) < 60: continue
             
-            for sym, fvals in factors_dict.items():
-                close = sd[sym]["close"].values
-                fwd = close[-1]/close[-6]-1 if len(close)>=6 else 0
-                rec = {"date": today, "symbol": sym, "fwd_ret": fwd}
-                rec.update(fvals)
-                panel.append(rec)
-        except Exception as e:
-            if len(panel) == 0: print(f"  err: {e}")
-            continue
+            close = df_t["close"].values
+            if len(close) < 6: continue
+            fwd = close[-1] / close[-6] - 1
+            
+            f = scorer.score(df_t.tail(120))
+            if "factor_score" not in f.columns: continue
+            score = f["factor_score"].iloc[-1]
+            if np.isnan(score): continue
+            
+            panel.append({"date": today, "symbol": sym, "score": score, "fwd_ret": fwd})
+        
+        if ti % 50 == 0:
+            print(f"    进度: {ti}/{len(days)}, 已收集{len(panel)}条")
 
     df = pd.DataFrame(panel)
-    print(f"  面板: {len(df)}条, 列={len(df.columns)}")
+    print(f"  面板: {len(df)}条, score均值={df['score'].mean():.3f}")
     return df
 
 
@@ -107,13 +102,13 @@ def backtest_lgb(model, start: str, end: str, label: str) -> dict:
             if len(dt) < 50: continue; sd[sym] = dt; cp[sym] = dt["close"].iloc[-1]
         if len(sd) < TOP_K: continue
 
-        # LightGBM预测: 用因子值→ML预测分数
+        # LightGBM预测: 用FactorScorer的score作为输入
         try:
             for sym in sd:
-                factors = scorer.compute_factors(sd[sym])
-                if len(factors) == 0: continue
-                feats = [factors[fn].iloc[-1] if fn in factors.columns else 0 for fn in FACTOR_NAMES]
-                scores[sym] = float(model.predict(np.array([feats]))[0])
+                f = scorer.score(sd[sym])
+                if "factor_score" not in f.columns: continue
+                score = f["factor_score"].iloc[-1]
+                scores[sym] = float(model.predict(np.array([[score]]))[0])
         except: continue
         if len(scores) < TOP_K: continue
 
@@ -152,11 +147,11 @@ def main():
     df_train = build_panel("2020-01-01", "2023-12-31")
     print(f"  面板: {len(df_train)}条")
 
-    X = df_train[FACTOR_NAMES].fillna(0).values
+    X = df_train[["score"]].fillna(0).values
     y = df_train["fwd_ret"].values
     groups = df_train.groupby("date").ngroup().values
 
-    print(f"  训练 LightGBM ({len(X)}样本, {len(FACTOR_NAMES)}特征)...")
+    print(f"  训练 LightGBM ({len(X)}样本)...")
     model = MLRanker(n_estimators=100, max_depth=6, learning_rate=0.05)
     model.fit(X, y, groups)
     print(f"  训练完成")
