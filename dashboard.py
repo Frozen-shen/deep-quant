@@ -47,7 +47,7 @@ st.sidebar.markdown(f"**标的**: {SYMBOL}")
 st.sidebar.markdown(f"**手续费**: {cfg['commission_default']*10000:.0f}bp")
 st.sidebar.markdown(f"**制度**: T+{cfg['t_plus']}")
 
-page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比"])
+page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "🧪 测试结果"])
 
 # ================================================================
 #  页面 1: 概览
@@ -213,3 +213,57 @@ elif page == "🆚 策略对比":
             st.image(f, caption=f, use_container_width=True)
     else:
         st.info("暂无回测图表，运行 main.py 或 main_test.py 生成")
+
+# ================================================================
+#  页面 5: 测试结果
+# ================================================================
+elif page == "🧪 测试结果":
+    st.title("🧪 A/B 测试结果")
+
+    # 查找最近的测试CSV
+    import glob
+    csv_files = sorted(glob.glob("test_results_*.csv"), reverse=True)
+    if not csv_files:
+        # 也从DB读
+        try:
+            bts = storage.get_backtests(limit=20)
+            if bts:
+                df_bt = pd.DataFrame(bts)
+                st.subheader(f"数据库测试记录 ({len(df_bt)} 条)")
+                st.dataframe(df_bt[["run_at","strategy","total_return","excess_return","total_trades"]],
+                           use_container_width=True)
+            else:
+                st.info("暂无测试记录。运行 python test_a_share.py 生成。")
+        except:
+            st.info("暂无测试记录")
+    else:
+        latest = csv_files[0]
+        df = pd.read_csv(latest)
+        st.subheader(f"最新测试: {latest}")
+
+        # 柱状图
+        st.bar_chart(df.set_index("name")[["total_return", "benchmark"]], use_container_width=True)
+
+        # 超额对比
+        st.subheader("超额收益对比")
+        cols = st.columns(len(df))
+        for i, (_, r) in enumerate(df.iterrows()):
+            with cols[i]:
+                color = "green" if r['excess'] > 0 else "red"
+                label = r['name'].split(":")[1].strip() if ":" in r['name'] else r['name']
+                st.metric(label, f"{r['excess']:+.1f}%",
+                         delta=f"{r['trades']:.0f}笔")
+
+        # 详细表格
+        st.subheader("详细数据")
+        st.dataframe(df[["name","total_return","benchmark","excess","trades"]],
+                    use_container_width=True)
+
+        # 历史测试记录
+        if len(csv_files) > 1:
+            st.subheader("历史测试记录")
+            history = []
+            for f in csv_files[:10]:
+                t = os.path.getmtime(f)
+                history.append({"文件": f, "时间": datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")})
+            st.dataframe(pd.DataFrame(history), use_container_width=True)
