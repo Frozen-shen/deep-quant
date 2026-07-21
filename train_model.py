@@ -117,45 +117,124 @@ def compute_icir(df_factors: pd.DataFrame, df_returns: pd.DataFrame) -> float:
 
 
 # ================================================================
-#  网格搜索 (训练期)
+#  网格搜索 (训练期) — 重写: 预计算因子值,然后搜权重
 # ================================================================
 
 def grid_search_weights(train_start: str, train_end: str) -> dict:
     """
-    在训练期上网格搜索最优因子权重。
+    训练期网格搜索最优权重。
 
-    每个因子权重在 [0, 0.05, 0.10, 0.15, 0.20] 中搜索。
-    为避免组合爆炸,采用逐步搜索: 先搜前3因子,固定最优再搜后面。
+    方法: 预计算每只股票每天的因子值 → 网格搜索权重组合 → 最大化ICIR
     """
     print(f"\n  [训练] 网格搜索最优权重 ({train_start}~{train_end})")
+    print(f"  预计算因子面板...")
 
-    df_f, df_r = prepare_data(train_start, train_end)
-    if len(df_f) == 0:
-        print("  训练数据为空!")
+    # 预计算: 每个交易日,每只股票的因子值 + 未来收益
+    fetcher = DataFetcher()
+    all_data = {}
+    for sym in SYMBOLS:
+        df = fetcher.fetch(sym, "20180101", train_end.replace("-",""), "qfq", market=MARKET)
+        df["date"] = pd.to_datetime(df["date"])
+        all_data[sym] = df
+
+    start_dt, end_dt = pd.Timestamp(train_start), pd.Timestamp(train_end)
+    days = all_data[SYMBOLS[0]]["date"].tolist()
+    days = [d for d in days if start_dt <= d <= end_dt]
+
+    # 用默认scorer预计算每天的因子值面板
+    scorer = FactorScorer.from_preset("ic_optimized")
+    panel = []  # [{date, symbol, fwd_ret, kmid2, klen, ...}]
+
+    for today_idx, today in enumerate(days):
+        sd = {}
+        for sym in SYMBOLS:
+            if sym not in all_data: continue
+            dt = all_data[sym][all_data[sym]["date"] <= today].tail(120)
+            if len(dt) < 50: continue; sd[sym] = dt
+        if len(sd) < 5: continue
+
+        # 计算每个因子的原始值(用compute_factors,不做标准化)
+        try:
+            for sym in sd:
+                factors = scorer.compute_factors(sd[sym])
+                if len(factors) == 0: continue
+                row = factors.iloc[-1]
+                close = sd[sym]["close"].values
+                fwd_ret = close[-1]/close[-6]-1 if len(close)>=6 else 0
+                rec = {"date": today, "symbol": sym, "fwd_ret": fwd_ret}
+                for fn in FACTOR_NAMES:
+                    if fn in factors.columns:
+                        rec[fn] = row[fn]
+                panel.append(rec)
+        except: continue
+
+        if today_idx % 100 == 0:
+            print(f"    进度: {today_idx}/{len(days)}")
+
+    if len(panel) < 100:
+        print("  训练数据不足!")
         return {}
 
-    # 逐步搜索: 每次固定前N个因子,搜索第N+1个
-    fixed_weights = {}
-    candidates = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+    df_p = pd.DataFrame(panel)
+    print(f"  因子面板: {len(df_p)} 条 ({len(days)}天)")
 
+    # 网格搜索: 对13个因子各搜 [0, 0.05, 0.10, 0.15, 0.20]
+    candidates = [0.0, 0.05, 0.10, 0.15, 0.20]
+    best_weights = None
+    best_icir = -999
+
+    # 为避免13^5的组合爆炸,只搜前8个核心因子,其余用0.05
+    core_factors = FACTOR_NAMES[:8]
+    search_space = list(itertools.product(candidates, repeat=len(core_factors)))
+    print(f"  搜索空间: {len(search_space)} 种组合 (8因子×5档)")
+
+    tested = 0
+    for combo in search_space:
+        weights = {}
+        for i, fn in enumerate(core_factors):
+            if combo[i] > 0:
+                weights[fn] = combo[i]
+        # 其余因子给默认小权重
+        for fn in FACTOR_NAMES[len(core_factors):]:
+            weights[fn] = 0.03
+
+        if not weights: continue
+
+        # 计算加权分数
+        df_p["score"] = 0.0
+        for fn, w in weights.items():
+            if fn in df_p.columns:
+                df_p["score"] += df_p[fn].fillna(0) * w
+
+        # 计算ICIR
+        ic_vals = []
+        for dt, group in df_p.groupby("date"):
+            if len(group) < 5: continue
+            if group["score"].std() == 0: continue
+            ic, _ = stats.spearmanr(group["score"], group["fwd_ret"])
+            if not np.isnan(ic): ic_vals.append(ic)
+
+        if len(ic_vals) < 50: continue
+        ic_arr = np.array(ic_vals)
+        icir = ic_arr.mean() / ic_arr.std() if ic_arr.std() > 0 else 0
+
+        tested += 1
+        if icir > best_icir:
+            best_icir = icir
+            best_weights = weights.copy()
+            if tested % 5000 == 0:
+                print(f"    已测试: {tested}/{len(search_space)}, 当前最优 ICIR={best_icir:+.4f}")
+
+    if best_weights is None:
+        print("  未找到有效权重组合!")
+        return {}
+
+    print(f"\n  搜索完成: {tested} 组合, 最优 ICIR={best_icir:+.4f}")
     for fn in FACTOR_NAMES:
-        best_w, best_icir = 0.0, -999
-        for w in candidates:
-            test_weights = {**fixed_weights, fn: w}
-            # 用这些权重打分
-            df_f["score"] = 0.0  # 简化:用单因子+已固定权重
-            # 计算ICIR
-            icir = compute_icir_single_factor(df_f, df_r, test_weights)
-            if icir > best_icir:
-                best_icir, best_w = icir, w
-        fixed_weights[fn] = best_w
-        if abs(best_icir) > 0.01:
-            print(f"    {fn:<22} best_w={best_w:.2f} ICIR={best_icir:+.4f}")
-
-    # 只保留非零权重
-    result = {k: v for k, v in fixed_weights.items() if v > 0}
-    print(f"    最优权重: {len(result)}/{len(FACTOR_NAMES)} 个非零因子")
-    return result
+        w = best_weights.get(fn, 0)
+        if w > 0:
+            print(f"    {fn:<22} w={w:.2f}")
+    return best_weights
 
 
 def compute_icir_single_factor(df_f, df_r, weights: dict) -> float:
