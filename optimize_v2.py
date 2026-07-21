@@ -124,13 +124,17 @@ def backtest_lgb(model, start: str, end: str, label: str,
             if len(dt) < 60: continue; sd[sym] = dt; cp[sym] = dt["close"].iloc[-1]
         if len(sd) < TOP_K: continue
 
-        # LightGBM预测分数
+        # LightGBM预测 + 线性打分 混合
         for sym in sd:
             f = scorer.compute_factors(sd[sym])
             if len(f) == 0: continue
             row = f.iloc[-1]
             feats = np.array([[float(row.get(fn, 0)) for fn in FACTORS]])
-            scores[sym] = float(model.predict(feats)[0])
+            lgb_score = float(model.predict(feats)[0])
+            # 同时计算线性分数
+            linear = scorer.cross_sectional_score(sd).get(sym, 0)
+            # 混合: LGB(50%) + 线性(50%)
+            scores[sym] = lgb_score * 0.5 + linear * 0.5
 
         if len(scores) < TOP_K: continue
 
