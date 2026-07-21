@@ -1,120 +1,126 @@
 # deep-quant
 
-港股多因子 Top-K 排名交易系统 — 12只港股截面评分 → 动态选股 → +32.35%超额收益
-
-## 一句话
-
-不再是"每只股票该不该买"，而是"12只里哪3只最强"——永远持有排名最高的K只。
+A股多因子 Top-K 排名量化交易系统 — 20只股票截面评分 → 动态选股
 
 ## 核心结果
 
+| 配置 | 股票池 | 策略收益 | 基准收益 | 超额收益 |
+|------|:--:|------|------|------|
+| IC优化 (ic_optimized) | 10只A股 | +636% | +150% | **+485.7%** |
+| IC优化 (ic_optimized) | 20只A股 | +167% | +72% | **+94.6%** |
+
+> 回测区间: 2024-01 ~ 2026-07 | 0 Token | 纯本地计算
+
+## 策略体系
+
 ```
-策略收益: +90.56%  |  等权基准: +58.22%  |  超额: +32.35%
-回测区间: 2024-01 ~ 2026-07  |  交易日: 618天  |  交易: 126笔
+日线因子打分 (8个IC验证因子)
+    → 截面排名 (z-score标准化)
+    → Top-K选股 (持有最强4只)
+    → 日内执行 (VWAP成交 + 信号确认 + 止损)
+    → 风控保护 (时间止损30天 + 回撤熔断15%)
 ```
 
-## 架构
+## 因子体系 (IC优化)
+
+| 因子 | 权重 | IC(20d) | 说明 |
+|------|:--:|:--:|------|
+| volatility_20d | +0.25 | +0.076 | 波动率(正向) |
+| ma5_ma20_spread | +0.20 | +0.052 | 短期均线偏离 |
+| ma10_ma20_spread | +0.15 | +0.059 | 中期均线偏离 |
+| ma20_ma60_spread | +0.10 | +0.044 | 长期趋势确认 |
+| ma5_cross_ma20 | +0.10 | +0.022 | 金叉死叉 |
+| vol_ratio | +0.10 | +0.021 | 放量确认 |
+| ma_bullish | +0.05 | - | 多头排列 |
+| position_20d | +0.05 | - | 价格位置 |
+
+## 日内交易四层
 
 ```
-deep-quant/
-├── 数据层
-│   ├── data_fetcher.py       A股(新浪)+港股(新浪) 双市场
-│   ├── event_fetcher.py      公司公告/研报采集
-│   └── news_fetcher.py       财经新闻采集
-├── 因子层
-│   ├── factor_engine.py      因子表达式DSL ("Mean($close,5)/$close-1")
-│   ├── factor_library.py     43个预定义因子
-│   ├── factor_scorer.py      截面评分 + 多因子加权
-│   └── indicators.py         9个技术指标 (RSI/MACD/BOLL/ATR/ADX/KDJ/OBV)
-├── 策略层
-│   ├── strategy.py           增强MA交叉 + RSI均值回复 + 策略路由器
-│   ├── portfolio_ranker.py   Top-K排名选股 (参考 Qlib TopkDropoutStrategy)
-│   └── signal_hub.py          多策略信号聚合
-├── 执行层
-│   ├── paper_trade_portfolio.py  多股票组合纸面交易
-│   ├── portfolio.py              持仓/资金管理
-│   ├── executor.py               模拟下单
-│   └── backtest.py               回测引擎 (T+0/T+1, ATR止损, 次日开盘价)
-├── 分析层
-│   ├── analysis.py            绩效指标 (Sharpe/Sortino/VaR/统计检验)
-│   ├── validator.py           滚动窗口验证 + 参数扫描
-│   └── stress_test.py         崩盘回放 + 手续费敏感性
-├── LLM层
-│   ├── llm_factor.py          DeepSeek事件评分 (4个后端)
-│   ├── fundamental_llm.py     DeepSeek基本面评分
-│   ├── llm_weight_optimizer.py LLM定制因子权重
-│   ├── macro_overlay.py       宏观叠加 (大盘+北向资金)
-│   └── validate_llm.py        LLM事件预测准确率验证
-├── 生产层
-│   ├── storage.py             SQLite 8张表
-│   ├── scheduler.py           APScheduler 定时调度
-│   ├── alerter.py             微信/钉钉通知
-│   └── dashboard.py           Streamlit 4页看板
-├── 辅助层
-│   ├── sector_analyzer.py     板块映射+同伴比较
-│   ├── alt_data.py            北向资金+融资融券因子
-│   ├── stock_filter.py        选股过滤器
-│   └── quick_validate.py      快速参数扫描
-└── 测试层
-    └── test_data/
-        ├── datasets/          18个CSV (5只股票 × 8年历史)
-        ├── generate.py        一键生成测试数据
-        ├── loader.py          便捷数据加载
-        ├── verify.py          独立算法交叉验证
-        └── scenarios.py       场景配置
+L1 自适应执行: 强信号抢筹(10min) / 弱信号VWAP(全天)
+L2 信号确认:   开盘跳空+量比 → 仓位调整0.5~1.2x
+L3 日内风控:   11:00时间止损 + 14:50尾盘清仓 + 5min跟踪止损
+L4 Alpha因子:  开盘跳空/早盘量比/午后反转/VWAP位置/大单异动
 ```
 
 ## 快速开始
 
 ```bash
-# 安装
 pip install -r requirements.txt
 
-# 单股票回测
-MARKET=hk python main.py
+# A股回测
+python paper_trade_a.py
 
-# Top-3 排名制组合交易 (推荐)
-python paper_trade_portfolio.py
+# A/B对比测试
+python test_a_share.py
 
-# 查看结果
+# IC因子分析
+python factor_analysis.py
+
+# Web看板
 streamlit run dashboard.py
+```
+
+## 项目结构
+
+```
+deep-quant/
+├── 数据层
+│   ├── data_fetcher.py         A股(新浪)+港股(新浪) 双市场
+│   ├── intraday_fetcher.py     新浪5分钟K线 + 日内因子
+│   └── event_fetcher.py        公司公告采集
+├── 因子层
+│   ├── factor_engine.py        因子表达式DSL
+│   ├── factor_library.py       43+6个预定义因子
+│   ├── factor_scorer.py        多因子加权 + 截面评分 + IC优化预设
+│   ├── factor_analysis.py      Spearman Rank IC/ICIR 验证
+│   └── indicators.py           9个技术指标
+├── 策略层
+│   ├── strategy.py             增强MA + RSI均值回复 + 策略路由器
+│   ├── portfolio_ranker.py     Top-K排名选股 (板块中性化)
+│   └── signal_hub.py           多策略信号聚合
+├── 执行层
+│   ├── paper_trade_a.py        A股Top-K纸面交易 (含日内执行)
+│   ├── intraday_executor.py    日内四层 (VWAP/确认/风控/Alpha)
+│   ├── portfolio.py            持仓资金管理
+│   ├── backtest.py             回测引擎 (T+0/T+1, ATR止损)
+│   └── executor.py             模拟下单
+├── ML/DL层
+│   ├── ml_ranker.py            LightGBM 回归排序器
+│   ├── dl_models.py            PyTorch LSTM + Transformer
+│   └── llm_weight_optimizer.py LLM定制因子权重
+├── 分析层
+│   ├── test_a_share.py         A/B对比测试框架
+│   ├── analysis.py             25+绩效指标 + 统计检验
+│   ├── validator.py            滚动窗口验证
+│   └── stress_test.py          压力测试
+├── 生产层
+│   ├── storage.py              SQLite 8张表
+│   ├── scheduler.py            APScheduler 定时调度
+│   ├── alerter.py              微信/钉钉通知
+│   └── dashboard.py            Streamlit 5页看板
+└── 辅助层
+    ├── macro_overlay.py         宏观叠加 (大盘+北向)
+    ├── fundamental_llm.py       DeepSeek 基本面评分
+    ├── sector_analyzer.py       板块映射 + 同伴比较
+    └── alt_data.py              北向资金 + 融资融券因子
 ```
 
 ## 运行模式
 
-| 命令 | 说明 |
-|------|------|
-| `python paper_trade_portfolio.py` | Top-3排名制, 12只港股 |
-| `MARKET=hk python main.py` | 单股票回测 (指定标的) |
-| `python paper_trade.py --symbol 01810` | 单股票纸面交易 |
-| `python scheduler.py --once` | 每日信号生成 |
-| `streamlit run dashboard.py` | Web看板 |
-
-## 市场支持
-
-| | A股 | 港股 |
-|------|:--:|:--:|
-| 数据源 | 新浪 | 新浪 |
-| 交易制度 | T+1 | T+0 |
-| 手续费 | 3bp | 14bp(逐项) |
-| 无风险利率 | 2% | 3.5% |
-
-## LLM 配置
-
-```bash
-# DeepSeek
-LLM_BACKEND=openai OPENAI_API_KEY=sk-xxx python validate_llm.py
-
-# 本地模型
-LLM_BACKEND=ollama LLM_MODEL=qwen2.5:7b python main.py
-```
+| 命令 | 说明 | Token |
+|------|------|:--:|
+| `python paper_trade_a.py` | A股Top-K回测 | 0 |
+| `python test_a_share.py` | A/B四组对比 | 0 |
+| `python factor_analysis.py` | IC/ICIR因子验证 | 0 |
+| `streamlit run dashboard.py` | Web看板 | 0 |
 
 ## 技术栈
 
-Python · pandas · numpy · akshare · scipy · matplotlib · streamlit · APScheduler · SQLite · DeepSeek API
+Python · pandas · numpy · akshare · scipy · matplotlib · streamlit · APScheduler · SQLite · PyTorch · LightGBM · DeepSeek API
 
 ## 参考
 
-- Qlib TopkDropoutStrategy (Microsoft)
-- Backtrader Cerebro引擎
-- VN.PY 事件驱动架构
+- Microsoft Qlib — 因子表达式引擎 + Alpha158 + TopkDropoutStrategy
+- Backtrader — Cerebro引擎 + 122指标
+- VN.PY — 事件驱动 + 中国市场
