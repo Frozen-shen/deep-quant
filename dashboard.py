@@ -48,7 +48,7 @@ st.sidebar.markdown(f"**手续费**: {cfg['commission_default']*10000:.0f}bp")
 st.sidebar.markdown(f"**制度**: T+{cfg['t_plus']}")
 st.sidebar.markdown(f"**初始资金**: {cfg['currency']} 100,000")
 
-page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "🧪 测试结果"])
+page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "🧪 测试结果", "📍 买卖标记"])
 
 # ================================================================
 #  页面 1: 概览
@@ -84,7 +84,7 @@ if page == "📈 概览":
 
     # 权益曲线
     st.subheader("权益曲线")
-    equity_data = storage.get_equity_log(limit=252)
+    equity_data = storage.get_equity_log(limit=9999)
     if equity_data:
         df_eq = pd.DataFrame(equity_data)
         df_eq["date"] = pd.to_datetime(df_eq["date"])
@@ -145,10 +145,16 @@ elif page == "📋 交易记录":
 
     if trades:
         df_tr = pd.DataFrame(trades)
-        # ★ 加股票名
-        from paper_trade_a import STOCK_NAMES as A_NAMES
-        names = {**A_NAMES}
-        df_tr["name"] = df_tr["symbol"].astype(str).map(names).fillna(df_tr["symbol"])
+        # ★ 加股票名 (20只A股)
+        A_NAMES = {"688981":"中芯","002371":"北华创","603986":"兆易","002049":"紫光",
+            "300033":"同花顺","002230":"讯飞","688111":"金山","300750":"宁德",
+            "002594":"比亚迪","601012":"隆基","600519":"茅台","000858":"五粮液",
+            "601318":"平安","600036":"招行","300760":"迈瑞","600276":"恒瑞",
+            "600760":"沈飞","000625":"长安","601668":"中建","601899":"紫金",
+            "688012":"中微","300782":"卓胜微","688396":"华润微","300454":"深信服",
+            "688561":"奇安信","300274":"阳光","688005":"容百","000568":"泸州",
+            "002714":"牧原","000001":"平安银行","300122":"智飞","688180":"君实"}
+        df_tr["name"] = df_tr["symbol"].astype(str).map(A_NAMES).fillna(df_tr["symbol"])
         total_buy = df_tr[df_tr["action"] == "BUY"]["qty"].sum()
         total_sell = df_tr[df_tr["action"] == "SELL"]["qty"].sum()
         total_comm = df_tr["commission"].sum()
@@ -272,3 +278,70 @@ elif page == "🧪 测试结果":
                 t = os.path.getmtime(f)
                 history.append({"文件": f, "时间": datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")})
             st.dataframe(pd.DataFrame(history), use_container_width=True)
+
+# ================================================================
+#  页面 6: 买卖标记
+# ================================================================
+elif page == "📍 买卖标记":
+    st.title("📍 买卖操作标记")
+
+    st.markdown("展示策略在哪些日期买入了哪些股票,在哪些日期卖出了。")
+
+    # 从DB读交易
+    trades = storage.get_trades(limit=9999)
+    if not trades:
+        st.info("暂无交易记录")
+    else:
+        df_tr = pd.DataFrame(trades)
+        df_tr["date"] = pd.to_datetime(df_tr["date"])
+
+        # 股票名映射
+        names = {"688981":"中芯","002371":"北华创","603986":"兆易","002049":"紫光",
+            "300033":"同花顺","002230":"讯飞","688111":"金山","300750":"宁德",
+            "002594":"比亚迪","601012":"隆基","600519":"茅台","000858":"五粮液",
+            "601318":"平安","600036":"招行","300760":"迈瑞","600276":"恒瑞",
+            "600760":"沈飞","000625":"长安","601668":"中建","601899":"紫金"}
+        df_tr["股票"] = df_tr["symbol"].astype(str).map(names).fillna(df_tr["symbol"])
+        df_tr["操作"] = df_tr["action"].map({"BUY": "🔴 买入", "SELL": "🟢 卖出"})
+
+        # 按股票筛选
+        syms = sorted(df_tr["symbol"].unique())
+        selected = st.selectbox("选择股票", syms, format_func=lambda s: names.get(s, s))
+
+        df_sym = df_tr[df_tr["symbol"] == selected]
+
+        # 拉价格曲线
+        try:
+            df_px = DataFetcher().fetch(selected, "20240101", "20260710", "qfq", market="a")
+            df_px["date"] = pd.to_datetime(df_px["date"])
+
+            st.subheader(f"{names.get(selected,selected)} 价格与操作")
+            # Matplotlib overlay
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(df_px["date"], df_px["close"], color="gray", alpha=0.6, linewidth=0.8, label="收盘价")
+
+            buys = df_sym[df_sym["action"] == "BUY"]
+            sells = df_sym[df_sym["action"] == "SELL"]
+            ax.scatter(buys["date"], buys["price"], marker="^", color="red", s=100, zorder=5, label=f"买入({len(buys)}次)")
+            ax.scatter(sells["date"], sells["price"], marker="v", color="green", s=100, zorder=5, label=f"卖出({len(sells)}次)")
+
+            ax.set_title(f"{names.get(selected,selected)} 买卖操作标记")
+            ax.legend(); ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+            plt.xticks(rotation=45)
+
+            st.pyplot(fig)
+
+            # 交易明细
+            st.dataframe(df_sym[["date","操作","qty","price","reason"]].sort_values("date"),
+                        use_container_width=True)
+        except Exception as e:
+            st.warning(f"价格数据获取失败: {e}")
+
+        # 总览表
+        st.subheader("全部交易")
+        df_all = df_tr[["date","股票","操作","qty","price"]].sort_values("date", ascending=False)
+        st.dataframe(df_all, use_container_width=True)
