@@ -37,7 +37,7 @@ st.set_page_config(
 storage.init_db()
 
 # 市场选择
-MARKET = os.environ.get("MARKET", "hk")
+MARKET = os.environ.get("MARKET", "a")   # 默认A股
 cfg = MARKET_CONFIG[MARKET]
 SYMBOL = os.environ.get("SYMBOL", "01810")
 
@@ -46,6 +46,7 @@ st.sidebar.markdown(f"**市场**: {cfg['name']} ({cfg['currency']})")
 st.sidebar.markdown(f"**标的**: {SYMBOL}")
 st.sidebar.markdown(f"**手续费**: {cfg['commission_default']*10000:.0f}bp")
 st.sidebar.markdown(f"**制度**: T+{cfg['t_plus']}")
+st.sidebar.markdown(f"**初始资金**: {cfg['currency']} 100,000")
 
 page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "🧪 测试结果"])
 
@@ -144,6 +145,10 @@ elif page == "📋 交易记录":
 
     if trades:
         df_tr = pd.DataFrame(trades)
+        # ★ 加股票名
+        from paper_trade_a import STOCK_NAMES as A_NAMES
+        names = {**A_NAMES}
+        df_tr["name"] = df_tr["symbol"].astype(str).map(names).fillna(df_tr["symbol"])
         total_buy = df_tr[df_tr["action"] == "BUY"]["qty"].sum()
         total_sell = df_tr[df_tr["action"] == "SELL"]["qty"].sum()
         total_comm = df_tr["commission"].sum()

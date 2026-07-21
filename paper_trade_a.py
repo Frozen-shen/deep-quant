@@ -16,6 +16,7 @@ from factor_scorer import FactorScorer
 from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
 from alt_data import peer_relative_factor
+from intraday_executor import IntradayExecutor
 from sector_analyzer import SectorAnalyzer
 
 # 20只A股 (科技7 + 新能源4 + 消费3 + 医药3 + 金融2 + 军工1)
@@ -70,6 +71,7 @@ def main():
                              sector_neutral=True)
     scorer = FactorScorer.from_preset("ic_optimized")
     macro = MacroOverlay(market=MARKET)
+    iexec = IntradayExecutor()  # 日内执行器
     macro.update()
 
     print(f"\n{'='*60}")
@@ -134,7 +136,7 @@ def main():
             qty = pos.get("qty", 0)
             if qty > 0 and sym in close_prices:
                 pm.apply_sell(sym, qty, close_prices[sym],
-                              commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
+                              trade_date=today_str, commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
                 hold_start.pop(sym, None)
 
         # 时间止损
@@ -144,7 +146,7 @@ def main():
                 qty = pos.get("qty", 0)
                 if qty > 0 and sym in close_prices:
                     pm.apply_sell(sym, qty, close_prices[sym],
-                                  commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
+                                  trade_date=today_str, commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
                     hold_start.pop(sym, None)
 
         # 买入
@@ -154,12 +156,18 @@ def main():
             cash_per = state.cash * 0.9 / len(to_buy)
             for sym in to_buy:
                 if sym in close_prices:
+                    # 日内VWAP执行 (最后60天)
+                    if (end_dt - today).days < 60:
+                        iexec_px = iexec.get_best_execution_price(sym, today_str, "BUY")
+                        px = iexec_px if iexec_px else close_prices[sym]
+                    else:
+                        px = close_prices[sym]
                     px = close_prices[sym]
                     qty = int(cash_per / px / cfg["lot_size"]) * cfg["lot_size"]
                     if qty >= cfg["lot_size"]:
                         comm = qty * px * cfg.get("buy_commission", 0.0003)
                         if pm.can_buy(sym, qty, px, comm)[0]:
-                            pm.apply_buy(sym, qty, px, commission=comm)
+                            pm.apply_buy(sym, qty, px, trade_date=today_str, commission=comm)
                             hold_start[sym] = today
 
         pm.snapshot(today_str, close_prices)
@@ -176,7 +184,7 @@ def main():
                 qty = pos.get("qty", 0)
                 if qty > 0 and sym in close_prices:
                     pm.apply_sell(sym, qty, close_prices[sym],
-                                  commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
+                                  trade_date=today_str, commission=qty*close_prices[sym]*cfg.get("sell_commission", 0.0008))
             peak_equity = current_equity
             hold_start.clear()
             continue

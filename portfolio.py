@@ -94,13 +94,14 @@ class PortfolioManager:
     #  交易操作
     # ================================================================
     def apply_buy(self, symbol: str, qty: int, price: float,
-                  commission: float = 0.0, reason: str = "") -> int:
+                  commission: float = 0.0, reason: str = "",
+                  trade_date: str = None) -> int:
         """
         执行买入：扣现金、增持仓、记录交易。
 
         返回 trade_id
         """
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = trade_date or datetime.now().strftime("%Y-%m-%d")
 
         # 获取当前持仓
         existing = storage.get_position(symbol)
@@ -121,12 +122,13 @@ class PortfolioManager:
         return tid
 
     def apply_sell(self, symbol: str, qty: int, price: float,
-                   commission: float = 0.0, reason: str = "") -> int:
+                   commission: float = 0.0, reason: str = "",
+                   trade_date: str = None) -> int:
         """
         执行卖出：增现金、减持仓、记录交易。
         如果全部卖出，删除持仓记录。
         """
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = trade_date or datetime.now().strftime("%Y-%m-%d")
 
         existing = storage.get_position(symbol)
         if not existing or existing["qty"] <= 0:
