@@ -43,7 +43,7 @@ class Factor(ABC):
 class FieldFactor(Factor):
     """字段引用: $close, $open, $high, $low, $volume, $amount"""
 
-    VALID_FIELDS = {"close", "open", "high", "low", "volume", "amount", "vwap", "turnover"}
+    VALID_FIELDS = {"close", "open", "high", "low", "volume", "amount", "vwap", "turnover", "outstanding_share"}
 
     def __init__(self, field: str):
         field = field.strip().lower()

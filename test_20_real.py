@@ -1,8 +1,5 @@
 """
-严格训练/测试分离 + 日内执行 — 20只A股诚实版本
-
-训练期(2020-2023): IC分析,选因子,定权重
-测试期(2025-07~2026-07): 跑一次,不调参 — 真实能力
+诚实版: 25+因子 → LightGBM lambdarank → 训练/验证/测试分离
 
 用法: python test_20_real.py
 """
@@ -12,81 +9,89 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pandas as pd, numpy as np
 from scipy import stats
 import storage
-from data_fetcher import DataFetcher, MARKET_CONFIG
-from data_cache import load_all, load
-from portfolio import PortfolioManager
+from data_fetcher import MARKET_CONFIG
+from data_cache import load_all
 from factor_scorer import FactorScorer
+from portfolio import PortfolioManager
 from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
 from alt_data import peer_relative_factor
+from ml_ranker import MLRanker
 
-SYMBOLS = ["688981","002371","603986","002049","300033","002230","300750","002594","600519","600036",
-           "688012","300782","688396","300454","688561","300274","688005","000568","002714","601318"]
-# 20只: 前面10只我们已经缓存,加10只新的
-MARKET, TOP_K, INITIAL = "a", 5, 100_000
-
-# 因子列表
-FACTORS = [
-    "volatility_20d","ma5_ma20_spread","ma10_ma20_spread","ma20_ma60_spread",
-    "ma5_cross_ma20","vol_ratio","kmid2","klen","ksft2",
-    "rsv_9","cntd_20","rank_20","turnover_ratio",
-]
+SYMBOLS = ["688981","002371","603986","002049","300033","002230","300750","002594","600519","600036"]
+MARKET, TOP_K, INITIAL = "a", 4, 100_000
 
 
-def compute_ic_panel(start: str, end: str):
-    """训练期: 计算每个因子的IC。"""
-    print(f"  [IC分析] {start}~{end}")
+def main():
+    print("="*60)
+    print("  诚实版: 25因子+LightGBM lambdarank")
+    print("="*60)
+
+    # 加载数据
+    print("\n[加载] 数据缓存...")
     all_data = load_all(SYMBOLS)
     if not all_data:
-        print("  缓存为空,请先运行 python data_cache.py --fetch")
-        return {}
+        print("缓存为空,请先: python data_cache.py --fetch")
+        return
+    print(f"  {len(all_data)}只, {len(all_data[SYMBOLS[0]])}天")
 
-    days = all_data[SYMBOLS[0]]["date"].tolist()
-    days = [d for d in days if pd.Timestamp(start)<=d<=pd.Timestamp(end)]
+    # IC分析(训练期)
+    print("\n[IC] 训练期2020-2023...")
     scorer = FactorScorer.from_preset("ic_optimized")
+    factor_names = sorted(scorer.factor_weights.keys())
+    print(f"  因子数: {len(factor_names)}")
 
-    ic_results = {fn: [] for fn in FACTORS}
-    for today in days[::3]:  # 每3天采样加速
+    # 构建训练面板
+    print("\n[训练] LightGBM lambdarank...")
+    X_list, y_list, group_list = [], [], []
+    days = sorted(set().union(*[set(df["date"].tolist()) for df in all_data.values()]))
+    train_days = [d for d in days if pd.Timestamp("2020-01-01")<=d<=pd.Timestamp("2023-12-31")]
+    train_days = train_days[::3]
+
+    for ti, today in enumerate(train_days):
         sd = {}
         for sym in SYMBOLS:
             if sym not in all_data: continue
             dt = all_data[sym][all_data[sym]["date"]<=today].tail(120)
-            if len(dt)<60: continue; sd[sym]=dt
-        if len(sd)<5: continue
+            if len(dt) < 60: continue
+            sd[sym] = dt
+        if len(sd) < 5: continue
         for sym in sd:
             f = scorer.compute_factors(sd[sym])
-            if len(f)==0: continue
+            if f is None or len(f) == 0: continue
             row = f.iloc[-1]; close = sd[sym]["close"].values
-            if len(close)<6: continue
-            fwd = close[-1]/close[-6]-1
-            for fn in FACTORS:
-                if fn in row.index:
-                    ic_results[fn].append({"date":today,"symbol":sym,"value":row[fn],"fwd":fwd})
+            if len(close) < 6: continue
+            try:
+                feats = [float(row.get(fn, 0)) for fn in factor_names]
+            except: continue
+            fwd = close[-1] / close[-6] - 1
+            X_list.append(feats); y_list.append(fwd)
+            group_list.append(today)
+        if ti == 0:
+            print(f"  第1天: sd={len(sd)}只, 收集{len(X_list)}条")
 
-    print(f"  因子IC (Spearman, vs 5d收益):")
-    valid_factors = {}
-    for fn in FACTORS:
-        df_f = pd.DataFrame(ic_results[fn])
-        if len(df_f)<50: continue
-        ic_vals = []
-        for dt, grp in df_f.groupby("date"):
-            if len(grp)<5: continue
-            ic,_ = stats.spearmanr(grp["value"],grp["fwd"])
-            if not np.isnan(ic): ic_vals.append(ic)
-        if len(ic_vals)<20: continue
-        ic_arr = np.array(ic_vals)
-        ic_mean = ic_arr.mean(); icir = ic_mean/ic_arr.std() if ic_arr.std()>0 else 0
-        mark = "✅" if abs(icir)>0.3 else ("⚠️" if abs(icir)>0.1 else "❌")
-        print(f"    {mark} {fn:<22} IC={ic_mean:+.4f} ICIR={icir:+.3f}")
-        if abs(icir)>0.1:
-            valid_factors[fn] = 0.10  # 通过IC验证→给权重
+    if len(X_list)<100:
+        print(f"  训练数据不足({len(X_list)}条)!")
+        return
 
-    print(f"  有效因子: {len(valid_factors)}/{len(FACTORS)}")
-    return valid_factors
+    X, y = np.array(X_list), np.array(y_list)
+    groups = pd.Series(group_list).astype(str).factorize()[0]
+    print(f"  训练集: {len(X)}条, 验证集: {int(len(X)*0.2)}条")
+
+    model = MLRanker(n_estimators=200, max_depth=6, learning_rate=0.05)
+    model.feature_names = factor_names
+    model.fit(X, y, groups, val_ratio=0.2)
+
+    # 验证+测试
+    for period_name, start, end in [
+        ("验证期(2024-2025H1)", "2024-01-01", "2025-06-30"),
+        ("测试期(2025H2-2026H1)", "2025-07-01", "2026-07-10"),
+    ]:
+        print(f"\n[{period_name}]")
+        run_backtest(model, scorer, factor_names, all_data, start, end, period_name)
 
 
-def backtest_test_period(weights: dict, start: str, end: str) -> dict:
-    """测试期回测 + 日内执行。"""
+def run_backtest(model, scorer, factor_names, all_data, start, end, label):
     db_path = os.path.join(os.path.dirname(__file__), "quant.db")
     if os.path.exists(db_path): os.remove(db_path)
     storage.init_db()
@@ -94,30 +99,35 @@ def backtest_test_period(weights: dict, start: str, end: str) -> dict:
     cfg = MARKET_CONFIG[MARKET]
     pm = PortfolioManager(market=MARKET, initial_capital=INITIAL)
     ranker = PortfolioRanker(top_k=TOP_K, n_drop=2, hold_thresh=10)
-    scorer = FactorScorer(factor_weights=weights, buy_threshold=0.15, sell_threshold=-0.10)
     macro = MacroOverlay(market=MARKET); macro.update()
-    all_data = load_all(SYMBOLS)
-    if not all_data: return {"strategy":0,"benchmark":0,"excess":0}
 
-    days = all_data[SYMBOLS[0]]["date"].tolist()
+    days = sorted(set().union(*[set(df["date"].tolist()) for df in all_data.values()]))
     days = [d for d in days if pd.Timestamp(start)<=d<=pd.Timestamp(end)]
     trade_count = 0
 
-    for today in days:
+    for ti, today in enumerate(days):
         ts = today.strftime("%Y-%m-%d")
-        sd, cp = {}, {}
+        sd, cp, scores = {}, {}, {}
         for sym in SYMBOLS:
             if sym not in all_data: continue
             dt = all_data[sym][all_data[sym]["date"]<=today].tail(120)
             if len(dt)<60: continue; sd[sym]=dt; cp[sym]=dt["close"].iloc[-1]
         if len(sd)<TOP_K: continue
 
-        try:
-            scores = scorer.cross_sectional_score(sd)
-            peer = peer_relative_factor(SYMBOLS, sd)
-            for s in scores: scores[s]=scores[s]*0.7+peer.get(s,0)*0.3
-            for s in scores: scores[s]*=(1+macro.score_at(today)*0.3)
-        except: continue
+        for sym in sd:
+            f = scorer.compute_factors(sd[sym])
+            if len(f)==0: continue
+            row = f.iloc[-1]
+            feats = np.array([[float(row.get(fn,0)) for fn in factor_names]])
+            try:
+                scores[sym] = float(model.predict(feats)[0])
+            except: scores[sym] = 0.0
+
+        if ti == 0:
+            print(f"  Day1: {len(sd)} stocks, {len(scores)} scores, spread={max(scores.values())-min(scores.values()):.4f}")
+
+        if len(scores)<TOP_K: continue
+        for s in scores: scores[s] *= (1+macro.score_at(today)*0.3)
 
         state = pm.load()
         holdings = [s for s,p in state.positions.items() if p["qty"]>0]
@@ -128,60 +138,24 @@ def backtest_test_period(weights: dict, start: str, end: str) -> dict:
             if qty>0 and s in cp:
                 pm.apply_sell(s,qty,cp[s],trade_date=ts,commission=qty*cp[s]*0.0008)
                 trade_count+=1
-
         for s in decision["buy"]:
             if s in cp:
                 state=pm.load(); cash_p=state.cash*0.9/max(1,len(decision["buy"]))
-                px = cp[s]
-                qty = int(cash_p/px/100)*100
+                px=cp[s]; qty=int(cash_p/px/100)*100
                 if qty>=100:
                     pm.apply_buy(s,qty,px,trade_date=ts,commission=qty*px*0.0003)
                     trade_count+=1
-
         pm.snapshot(ts, cp)
 
     summary = pm.get_summary(cp)
     ret = (summary["total_equity"]/INITIAL-1)*100
-
     bench_rets = []
     for sym in SYMBOLS:
         if sym in all_data:
-            bdf = all_data[sym][(all_data[sym]["date"]>=pd.Timestamp(start))&
-                                (all_data[sym]["date"]<=pd.Timestamp(end))]
+            bdf = all_data[sym][(all_data[sym]["date"]>=pd.Timestamp(start))&(all_data[sym]["date"]<=pd.Timestamp(end))]
             if len(bdf)>0: bench_rets.append(bdf["close"].iloc[-1]/bdf["close"].iloc[0]-1)
     bench_avg = np.mean(bench_rets)*100
-
     print(f"  策略: {ret:+.1f}%  基准: {bench_avg:+.1f}%  超额: {ret-bench_avg:+.1f}%  ({trade_count}笔)")
-    return {"strategy":ret, "benchmark":bench_avg, "excess":ret-bench_avg, "trades":trade_count}
-
-
-def main():
-    print("="*60)
-    print("  严格训练/测试分离 + 日内执行 — 20只A股")
-    print("="*60)
-
-    # Phase 1: IC分析 (训练期)
-    print("\n[1/3] IC分析 (训练期 2020-2023)")
-    valid_weights = compute_ic_panel("2020-01-01", "2023-12-31")
-    if not valid_weights:
-        print("  ⚠️ 无有效因子,使用默认权重")
-        valid_weights = FactorScorer.from_preset("ic_optimized").factor_weights
-
-    # Phase 2: 验证期
-    print(f"\n[2/3] 验证期 (2024-2025H1)")
-    r1 = backtest_test_period(valid_weights, "2024-01-01", "2025-06-30")
-
-    # Phase 3: 测试期 (只看一次)
-    print(f"\n[3/3] ★ 测试期 (2025H2-2026H1) — 真实能力")
-    r2 = backtest_test_period(valid_weights, "2025-07-01", "2026-07-10")
-
-    print(f"\n{'='*60}")
-    print(f"  最终结论")
-    print(f"{'='*60}")
-    print(f"  有效因子: {len(valid_weights)}个 (ICIR>0.1)")
-    print(f"  验证期超额: {r1['excess']:+.1f}%")
-    print(f"  ★ 测试期超额: {r2['excess']:+.1f}% ← 真实能力")
-    print(f"  日内执行: ✅ VWAP+信号确认")
 
 
 if __name__ == "__main__":

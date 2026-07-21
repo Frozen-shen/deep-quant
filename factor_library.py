@@ -159,6 +159,67 @@ NEW_BOLL_FACTORS = {
     "macd_ratio": "(EMA($close, 12) - EMA($close, 26)) / ($close + 0.01)",
 }
 
+# ================================================================
+#  Phase 1扩展: 多窗口 + 量价组合 + 通道突破 (35+因子)
+# ================================================================
+
+EXPANDED_FACTORS = {
+    # 多周期收益
+    "return_2d":  "Ref($close, 2) / $close - 1",
+    "return_3d":  "Ref($close, 3) / $close - 1",
+    "return_7d":  "Ref($close, 7) / $close - 1",
+    "return_15d": "Ref($close, 15) / $close - 1",
+    "return_30d": "Ref($close, 30) / $close - 1",
+    "return_90d": "Ref($close, 90) / $close - 1",
+
+    # 多周期波动率
+    "volatility_2d":  "Std(Ref($close, 1) / $close - 1, 2)",
+    "volatility_10d": "Std(Ref($close, 1) / $close - 1, 10)",
+    "volatility_30d": "Std(Ref($close, 1) / $close - 1, 30)",
+    "volatility_90d": "Std(Ref($close, 1) / $close - 1, 90)",
+
+    # 更多MA配对
+    "ma3_ma10_spread":  "Mean($close, 3) / Mean($close, 10) - 1",
+    "ma3_ma20_spread":  "Mean($close, 3) / Mean($close, 20) - 1",
+    "ma5_ma10_spread":  "Mean($close, 5) / Mean($close, 10) - 1",
+    "ma5_ma30_spread":  "Mean($close, 5) / Mean($close, 30) - 1",
+    "ma10_ma30_spread": "Mean($close, 10) / Mean($close, 30) - 1",
+    "ma10_ma60_spread": "Mean($close, 10) / Mean($close, 60) - 1",
+    "ma30_ma60_spread": "Mean($close, 30) / Mean($close, 60) - 1",
+
+    # Sharpe比
+    "sharpe_5d":  "Mean(Ref($close, 1) / $close - 1, 5) / (Std(Ref($close, 1) / $close - 1, 5) + 0.001)",
+    "sharpe_20d": "Mean(Ref($close, 1) / $close - 1, 20) / (Std(Ref($close, 1) / $close - 1, 20) + 0.001)",
+
+    # 通道突破
+    "channel_high_20": "($close - Max($high, 20)) / ($close + 0.01)",
+    "channel_low_20":  "($close - Min($low, 20)) / ($close + 0.01)",
+    "channel_high_60": "($close - Max($high, 60)) / ($close + 0.01)",
+
+    # 振幅
+    "amplitude_5d":  "Mean(($high - $low) / Ref($close, 1), 5)",
+    "amplitude_20d": "Mean(($high - $low) / Ref($close, 1), 20)",
+
+    # 偏度/峰度(已有Skew/Kurt算子)
+    "skew_20d":  "Skew($close, 20)",
+    "skew_60d":  "Skew($close, 60)",
+
+    # 换手率全系列
+    "turnover_vol":   "Std($turnover, 20) / (Mean($turnover, 20) + 0.01)",
+    "turnover_max5":  "Max($turnover, 5) / (Mean($turnover, 20) + 0.01)",
+    "turnover_trend": "Mean($turnover, 5) / Mean($turnover, 20) - 1",
+
+    # 市值因子
+    "market_cap":     "$close * $outstanding_share",
+    "liq_ratio":      "$volume / ($outstanding_share + 1)",
+    "amt_ratio_5d":   "Mean($amount, 5) / (Mean($amount, 20) + 0.01)",
+
+    # Boll变体
+    "boll_width_10":  "(Mean($close, 10) + 2 * Std($close, 10)) / (Mean($close, 10) - 2 * Std($close, 10) + 0.01) - 1",
+    "boll_width_30":  "(Mean($close, 30) + 2 * Std($close, 30)) / (Mean($close, 30) - 2 * Std($close, 30) + 0.01) - 1",
+    "macd_hist":      "EMA($close, 12) - EMA($close, 26) - EMA(EMA($close, 12) - EMA($close, 26), 9)",
+}
+
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
 

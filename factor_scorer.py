@@ -92,25 +92,20 @@ FACTOR_PRESETS = {
     "ic_optimized": {
         "name": "IC优化",
         "factors": {
-            # ★ IC=+0.076: 波动率(20d)
-            "volatility_20d": 0.20,
-            # ★ IC=+0.052~0.059: 均线偏离
-            "ma5_ma20_spread": 0.15,
-            "ma10_ma20_spread": 0.10,
-            "ma20_ma60_spread": 0.08,
-            # ★ 金叉 + 量比
-            "ma5_cross_ma20": 0.08,
-            "vol_ratio": 0.08,
-            # ★ 新增K线因子 (截面可比,天然分层)
-            "kmid2": 0.05,
-            "klen": 0.04,
-            "ksft2": 0.04,
-            # ★ 新增滚动因子
-            "rsv_9": 0.06,
-            "cntd_20": 0.04,
-            "rank_20": 0.04,
-            # ★ 换手率
-            "turnover_ratio": 0.05,
+            "volatility_20d": 0.15, "ma5_ma20_spread": 0.12,
+            "ma10_ma20_spread": 0.08, "ma20_ma60_spread": 0.06,
+            "ma5_cross_ma20": 0.06, "vol_ratio": 0.06,
+            "kmid2": 0.04, "klen": 0.03, "ksft2": 0.03,
+            "rsv_9": 0.05, "cntd_20": 0.03, "rank_20": 0.03,
+            "turnover_ratio": 0.04,
+            # ★ 扩展因子
+            "return_2d": 0.03, "return_7d": 0.04, "return_30d": 0.03,
+            "volatility_10d": 0.04, "volatility_30d": 0.03,
+            "ma3_ma20_spread": 0.04, "ma5_ma30_spread": 0.03,
+            "sharpe_20d": 0.04, "amplitude_5d": 0.03,
+            "channel_high_20": 0.03, "skew_20d": 0.02,
+            "turnover_vol": 0.03, "liq_ratio": 0.02,
+            "boll_width": 0.03, "macd_hist": 0.03,
         },
         "buy_threshold": 0.15,
         "sell_threshold": -0.10,
@@ -180,9 +175,10 @@ class FactorScorer:
         all_config = {}
         from factor_library import (PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS,
             CANDLESTICK_FACTORS, NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS,
-            NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS)
+            NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS, EXPANDED_FACTORS)
         for d in [PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS, CANDLESTICK_FACTORS,
-                  NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS, NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS]:
+                  NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS, NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS,
+                  EXPANDED_FACTORS]:
             all_config.update(d)
         return all_config.get(name, f"${name}")
 
