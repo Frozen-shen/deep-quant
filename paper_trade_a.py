@@ -66,8 +66,9 @@ def main():
     storage.init_db()
     cfg = MARKET_CONFIG[MARKET]
     pm = PortfolioManager(market=MARKET, initial_capital=INITIAL_CAPITAL)
-    ranker = PortfolioRanker(top_k=TOP_K, n_drop=1, hold_thresh=10)
-    scorer = FactorScorer.from_preset("trend_momentum")
+    ranker = PortfolioRanker(top_k=TOP_K, n_drop=1, hold_thresh=10,
+                             sector_neutral=True)
+    scorer = FactorScorer.from_preset("ic_optimized")
     macro = MacroOverlay(market=MARKET)
     macro.update()
 
@@ -123,7 +124,9 @@ def main():
         holdings = [s for s, p in state.positions.items() if p["qty"] > 0]
 
         # 带A股板块信息的排名
-        decision = ranker.rank(scores, holdings)
+        # 提取板块名 (A_SECTORS格式: {sym: (name, peers)})
+        sector_map = {s: v[0] for s, v in A_SECTORS.items()} if 'A_SECTORS' in dir() else {}
+        decision = ranker.rank(scores, holdings, sectors=sector_map)
 
         # 卖出
         for sym in list(decision["sell"]):

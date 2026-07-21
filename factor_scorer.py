@@ -88,6 +88,28 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
     },
 
+    # IC优化型 — 只保留IC>0的因子 (基于factor_analysis.py结果)
+    "ic_optimized": {
+        "name": "IC优化",
+        "factors": {
+            # ★ IC=+0.076: 波动率(20d) — 最高IC因子
+            "volatility_20d": 0.25,
+            # ★ IC=+0.052~0.059: 均线偏离 — 稳定正向
+            "ma5_ma20_spread": 0.20,
+            "ma10_ma20_spread": 0.15,
+            "ma20_ma60_spread": 0.10,
+            # ★ IC=+0.022: 金叉信号
+            "ma5_cross_ma20": 0.10,
+            # ★ IC=+0.021: 量比
+            "vol_ratio": 0.10,
+            # 辅助因子 (IC弱但方向对)
+            "ma_bullish": 0.05,
+            "position_20d": 0.05,
+        },
+        "buy_threshold": 0.15,
+        "sell_threshold": -0.10,
+    },
+
     # 均衡型 (通用)
     "balanced": {
         "name": "均衡",

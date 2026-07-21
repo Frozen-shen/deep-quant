@@ -19,33 +19,41 @@ from typing import Dict, List
 
 class PortfolioRanker:
     """
-    Top-K 排名选股器。
+    Top-K 排名选股器 (支持板块中性化)。
 
     参数:
-      top_k: 持有股票数量 (默认3)
-      n_drop: 每次最多替换数量 (默认1,避免过度换手)
-      hold_thresh: 最小持有天数 (默认3,防止频繁进出)
+      top_k: 持有数量
+      n_drop: 每次最多替换数
+      hold_thresh: 最小持有天数
+      sector_neutral: 是否板块中性化 (先板块内排名,再跨板块选)
     """
 
-    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 3):
+    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 3,
+                 sector_neutral: bool = False):
         self.top_k = top_k
         self.n_drop = n_drop
         self.hold_thresh = hold_thresh
+        self.sector_neutral = sector_neutral
         self._hold_since: Dict[str, int] = {}
         self._first_day = True  # 首日标识  # symbol → 持有天数
 
     def rank(self, scores: Dict[str, float],
-             current_holdings: List[str]) -> dict:
+             current_holdings: List[str],
+             sectors: Dict[str, str] = None) -> dict:
         """
-        根据分数排名,决定买卖。
+        排名决策 (支持板块中性化)。
 
         参数:
           scores: {symbol: score}
-          current_holdings: 当前持有的股票列表
+          current_holdings: 当前持仓
+          sectors: {symbol: sector_name} 板块映射 (可选)
 
-        返回:
-          {buy: [symbols], sell: [symbols], hold: [symbols]}
+        返回: {buy, sell, hold, top_k, ranked}
         """
+        # 板块中性化: 先板块内排名 → 再跨板块选
+        if self.sector_neutral and sectors:
+            scores = self._sector_neutralize(scores, sectors)
+
         # 1. 按分数降序排名
         ranked = sorted(scores.keys(), key=lambda s: scores[s], reverse=True)
         top_k = ranked[:self.top_k]
@@ -93,3 +101,27 @@ class PortfolioRanker:
             "top_k": top_k,
             "ranked": ranked,
         }
+
+    def _sector_neutralize(self, scores: Dict[str, float],
+                           sectors: Dict[str, str]) -> Dict[str, float]:
+        """
+        板块中性化: 每个板块内 z-score → 消除板块偏差。
+
+        半导体板块平均涨5%，白酒板块跌2% → 中性化后
+        半导体里的股票不会因为"在好板块"而天然高分。
+        """
+        # 按板块分组
+        sector_groups = {}
+        for sym, score in scores.items():
+            sec = sectors.get(sym, "其他")
+            sector_groups.setdefault(sec, {})[sym] = score
+
+        # 每个板块内 z-score
+        neutralized = {}
+        for sec, group in sector_groups.items():
+            vals = np.array(list(group.values()))
+            mean, std = vals.mean(), vals.std() if vals.std() > 0 else 1.0
+            for sym, score in group.items():
+                neutralized[sym] = (score - mean) / std
+
+        return neutralized
