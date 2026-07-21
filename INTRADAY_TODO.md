@@ -8,9 +8,16 @@
 
 | 接口 | 数据源 | 网络 | 备注 |
 |------|------|:--:|------|
-| `stock_zh_a_hist_min_em` | 东方财富 push2 | ❌ 被封 | 最常用,但网络不通 |
-| `stock_zh_a_tick_tx` | 腾讯 | ⚠️ 待验证 | Tick级,可能可用 |
-| 新浪分时API | 新浪 | ⚠️ 待验证 | curl可用,需解析 |
+| `stock_zh_a_hist_min_em` | 东方财富 push2 | ❌ 被封 | |
+| 新浪K线JSON API | 新浪 | ✅ **可用** | `money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh600519&scale=5` |
+| `stock_zh_a_tick_tx` | 腾讯 | ❌ 函数不存在 | akshare版本无此接口 |
+
+### 新浪API详情
+- URL: `https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData`
+- 参数: `symbol=sh600519&scale=5&datalen=20`
+- 支持scale: 5, 15, 30, 60 (分钟)
+- 返回: `[{day, open, high, low, close, volume}]`
+- **已验证可用: 20条5分钟K线**
 
 ### Tick级数据
 
