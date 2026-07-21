@@ -260,7 +260,6 @@ class FactorScorer:
             for sym in symbols:
                 if sym in values:
                     z = (values[sym] - mean) / std
-                    # 替换最后一行
                     idx = all_factors[sym].index[-1]
                     all_factors[sym].loc[idx, col] = z
 

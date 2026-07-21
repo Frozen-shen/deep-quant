@@ -7,3 +7,5 @@ scipy>=1.10.0
 apscheduler>=3.10.0
 streamlit>=1.30.0
 requests>=2.28.0
+lightgbm>=4.0.0
+# torch>=2.0.0  # 深度学习预留,暂不安装
