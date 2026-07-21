@@ -1,0 +1,15 @@
+{
+  "volatility_20d": 0.2,
+  "ma5_ma20_spread": 0.15,
+  "ma10_ma20_spread": 0.1,
+  "ma20_ma60_spread": 0.08,
+  "ma5_cross_ma20": 0.08,
+  "vol_ratio": 0.08,
+  "kmid2": 0.05,
+  "klen": 0.04,
+  "ksft2": 0.04,
+  "rsv_9": 0.06,
+  "cntd_20": 0.04,
+  "rank_20": 0.04,
+  "turnover_ratio": 0.05
+}
