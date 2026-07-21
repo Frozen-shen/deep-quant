@@ -196,7 +196,7 @@ class DataFetcher:
         df = pd.DataFrame(raw)
         # stock_hk_daily 返回: date, open, high, low, close, volume, amount
         # 列名已是英文，不需要重命名
-        keep_cols = ["date", "open", "high", "low", "close", "volume", "amount"]
+        keep_cols = ["date", "open", "high", "low", "close", "volume", "amount", "turnover"]
         df = df[[c for c in keep_cols if c in df.columns]]
 
         return DataFetcher._clean(df, start_date, end_date, symbol)

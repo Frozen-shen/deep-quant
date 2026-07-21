@@ -43,7 +43,7 @@ class Factor(ABC):
 class FieldFactor(Factor):
     """字段引用: $close, $open, $high, $low, $volume, $amount"""
 
-    VALID_FIELDS = {"close", "open", "high", "low", "volume", "amount", "vwap"}
+    VALID_FIELDS = {"close", "open", "high", "low", "volume", "amount", "vwap", "turnover"}
 
     def __init__(self, field: str):
         field = field.strip().lower()
@@ -110,6 +110,10 @@ class RollingFactor(Factor):
             return series.rolling(self.window, min_periods=3).skew()
         elif self.op_name == "Kurt":
             return series.rolling(self.window, min_periods=4).kurt()
+        elif self.op_name == "EMA":
+            return series.ewm(span=self.window, adjust=False).mean()
+        elif self.op_name == "Rank":
+            return series.rolling(self.window, min_periods=1).rank(pct=True)
         else:
             raise ValueError(f"未知滚动算子: {self.op_name}")
 
@@ -209,6 +213,35 @@ class CrossFactor(Factor):
 
     def __repr__(self):
         return f"Cross({self.a}, {self.b})"
+
+
+class RSVFactor(Factor):
+    """RSV (Raw Stochastic Value): ($close - Min($low,N)) / (Max($high,N) - Min($low,N) + eps)"""
+    def __init__(self, window: int = 9):
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        c, h, l = df["close"], df["high"], df["low"]
+        low_n = l.rolling(self.window, min_periods=1).min()
+        high_n = h.rolling(self.window, min_periods=1).max()
+        return (c - low_n) / (high_n - low_n + 1e-12)
+
+    def __repr__(self):
+        return f"RSV({self.window})"
+
+
+class _UnaryFunc(Factor):
+    """一元函数: Abs, Log, Sign 等"""
+    def __init__(self, child: Factor, func, name: str):
+        self.child = child
+        self.func = func
+        self.name = name
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        return self.func(self.child.evaluate(df))
+
+    def __repr__(self):
+        return f"{self.name}({self.child})"
 
 
 # ============================================================================
@@ -322,7 +355,7 @@ def _parse_expr(tokens: List[tuple], pos: int = 0) -> (Factor, int):
 def _make_func(name: str, args: List[Factor]) -> Factor:
     """根据函数名和参数创建因子节点。"""
     # 滚动算子: Mean(child, window)
-    rolling_ops = {"Ref", "Mean", "Std", "Max", "Min", "Sum", "Median", "Skew", "Kurt"}
+    rolling_ops = {"Ref", "Mean", "Std", "Max", "Min", "Sum", "Median", "Skew", "Kurt", "EMA", "Rank"}
     if name in rolling_ops:
         if len(args) != 2:
             raise SyntaxError(f"{name} 需要2个参数: (factor, window)")
@@ -340,6 +373,19 @@ def _make_func(name: str, args: List[Factor]) -> Factor:
         if len(args) != 2:
             raise SyntaxError("Cross 需要2个参数: (a, b)")
         return CrossFactor(args[0], args[1])
+
+    # RSV: RSV(window)
+    if name == "RSV":
+        if len(args) != 1:
+            raise SyntaxError("RSV 需要1个参数: (window)")
+        window = int(float(args[0].__repr__())) if isinstance(args[0], ConstFactor) else 9
+        return RSVFactor(window)
+
+    # Abs / Log / Sign
+    if name == "Abs" and len(args) == 1:
+        return _UnaryFunc(args[0], np.abs, "Abs")
+    if name == "Log" and len(args) == 1:
+        return _UnaryFunc(args[0], lambda x: np.log(np.maximum(x, 1e-12)), "Log")
 
     raise ValueError(f"未知函数: {name}")
 

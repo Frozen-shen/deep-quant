@@ -113,8 +113,51 @@ INTRADAY_FACTORS = {
 
 
 # ================================================================
-#  便捷工厂
+#  新增长江Alpha158因子 (Qlib参考)
 # ================================================================
+
+NEW_KLINE_FACTORS = {
+    "kmid":     "($close - $open) / ($open + 0.01)",
+    "klen":     "($high - $low) / ($open + 0.01)",
+    "kmid2":    "($close - $open) / ($high - $low + 0.01)",
+    "kup":      "($high - Max($close, $open)) / ($open + 0.01)",
+    "klow":     "(Min($close, $open) - $low) / ($open + 0.01)",
+    "ksft":     "(2 * $close - $high - $low) / ($open + 0.01)",
+    "ksft2":    "(2 * $close - $high - $low) / ($high - $low + 0.01)",
+}
+
+NEW_ROLLING_FACTORS = {
+    # RSV (KDJ前身)
+    "rsv_9":  "RSV(9)",
+    "rsv_14": "RSV(14)",
+
+    # 动量方向
+    "cntp_5":  "Mean($close > Ref($close, 1), 5)",
+    "cntp_20": "Mean($close > Ref($close, 1), 20)",
+    "cntd_5":  "Mean($close > Ref($close, 1), 5) - Mean($close < Ref($close, 1), 5)",
+    "cntd_20": "Mean($close > Ref($close, 1), 20) - Mean($close < Ref($close, 1), 20)",
+
+    # RSI-like
+    "sump_14": "Mean(($close - Ref($close, 1)) * ($close > Ref($close, 1)), 14) / (Std($close, 14) + 0.01)",
+    "ema_12":  "EMA($close, 12)",
+    "ema_26":  "EMA($close, 26)",
+    "rank_5":  "Rank($close, 5)",
+    "rank_20": "Rank($close, 20)",
+}
+
+NEW_TURNOVER_FACTORS = {
+    "turnover_ratio":   "$turnover / Mean($turnover, 5)",
+    "turnover_ma5":     "Mean($turnover, 5) / ($turnover + 0.01)",
+    "turnover_ma20":    "Mean($turnover, 20) / ($turnover + 0.01)",
+    "turnover_change":  "Mean($turnover, 5) / Ref(Mean($turnover, 5), 5) - 1",
+}
+
+NEW_BOLL_FACTORS = {
+    "boll_width":  "(Mean($close, 20) + 2 * Std($close, 20)) / (Mean($close, 20) - 2 * Std($close, 20) + 0.01) - 1",
+    "boll_pct":   "($close - (Mean($close, 20) - 2 * Std($close, 20))) / (4 * Std($close, 20) + 0.01)",
+    "macd_dif":   "EMA($close, 12) - EMA($close, 26)",
+    "macd_ratio": "(EMA($close, 12) - EMA($close, 26)) / ($close + 0.01)",
+}
 
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
