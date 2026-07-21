@@ -98,6 +98,86 @@ class IntradayExecutor:
                 return True
         return False
 
+    # ================================================================
+    #  L1+L2+L3+L4: 智能执行 + 信号确认 + 风控 + Alpha
+    # ================================================================
+
+    def get_best_execution_price(self, symbol: str, trade_date: str,
+                                  action: str = "BUY", signal_strength: float = 0.0
+                                  ) -> float:
+        """智能执行入口: 强信号抢筹,弱信号等回调。"""
+        vwap = self.adaptive_execute(symbol, trade_date, action, signal_strength)
+        if vwap is not None:
+            return vwap
+        df = self.fetcher.fetch(symbol, trade_date, scale=self.scale)
+        if len(df) > 0:
+            return float(df["open"].iloc[0])
+        return None
+
+    def adaptive_execute(self, symbol: str, trade_date: str, action: str,
+                         signal_strength: float = 0.0) -> float:
+        """信号>0.5抢筹, 0.15~0.5VWAP, <0.15等回调。"""
+        if abs(signal_strength) > 0.5:
+            return self.execute_vwap(symbol, trade_date, action, minutes=10)
+        elif abs(signal_strength) > 0.15:
+            return self.execute_vwap(symbol, trade_date, action, minutes=30)
+        else:
+            return self.execute_vwap(symbol, trade_date, action, minutes=240)
+
+    def confirm_signal(self, symbol: str, trade_date: str,
+                       action: str = "BUY") -> tuple:
+        """开盘跳空+量比验证日线信号。返回(confirmed,adjustment,reason)。"""
+        df = self.fetcher.fetch(symbol, trade_date, scale=self.scale)
+        if len(df) < 10:
+            return True, 1.0, "数据不足"
+        open_px, prev = df["open"].iloc[0], df["close"].iloc[0]
+        gap = (open_px / prev - 1) if prev > 0 else 0
+        vr = df["volume"].head(1).sum() / df["volume"].mean() if df["volume"].mean() > 0 else 1.0
+        if action == "BUY":
+            if gap > 0.03: return True, 0.5, f"高开{gap*100:.1f}%减半"
+            if gap < -0.02: return False, 0.0, f"低开{gap*100:.1f}%观望"
+            if vr < 0.5: return True, 0.5, f"缩量减半"
+            if vr > 2.0: return True, 1.2, f"放量加仓"
+            return True, 1.0, "确认"
+        if action == "SELL" and gap < -0.03:
+            return True, 1.2, "低开加速卖"
+        return True, 1.0, "通过"
+
+    def intraday_risk_check(self, symbol: str, trade_date: str,
+                            entry_price: float, time_stop_hour: int = 11) -> dict:
+        """时间止损+尾盘清仓。返回{stop,reason,action}。"""
+        df = self.fetcher.fetch(symbol, trade_date, scale=self.scale)
+        if len(df) < 5:
+            return {"stop": False, "reason": "", "action": "hold"}
+        morning = df[df["datetime"].dt.hour < time_stop_hour]
+        if len(morning) > 0 and entry_price > 0:
+            loss = float(morning["close"].iloc[-1] / entry_price - 1)
+            if loss < -0.01:
+                return {"stop": True, "reason": f"11:00跌{loss*100:.1f}%", "action": "reduce"}
+        afternoon = df[df["datetime"].dt.hour >= 14]
+        if len(afternoon) > 0 and entry_price > 0:
+            loss = float(afternoon["close"].iloc[-1] / entry_price - 1)
+            if loss < -0.005:
+                return {"stop": True, "reason": f"尾盘清{loss*100:.1f}%", "action": "close"}
+        return {"stop": False, "reason": "", "action": "hold"}
+
+    def compute_alpha_factors(self, symbol: str, trade_date: str) -> dict:
+        """5个日内Alpha因子。"""
+        df = self.fetcher.fetch(symbol, trade_date, scale=self.scale)
+        if len(df) < 20: return {}
+        c, v, n = df["close"], df["volume"], len(df)
+        f = {}
+        f["opening_gap"] = float(df["open"].iloc[0] / c.iloc[0] - 1)
+        f["morning_vol_ratio"] = float(v.head(min(6,n)).mean() / v.mean())
+        h = n // 2
+        if h > 0:
+            f["afternoon_reversal"] = float(c.iloc[-1]/c.iloc[h]-1) - float(c.iloc[h-1]/c.iloc[0]-1)
+        if v.sum() > 0:
+            f["vwap_position"] = float(c.iloc[-1] / ((c*v).sum()/v.sum()) - 1)
+        vr = v / v.rolling(5).mean().fillna(1)
+        f["large_order_bars"] = float((vr > 3).sum() / n)
+        return f
+
     def get_best_execution_price(self, symbol: str, trade_date: str,
                                   action: str = "BUY") -> float:
         """
