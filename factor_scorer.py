@@ -111,6 +111,29 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.10,
     },
 
+    # IC优化v2 — 基于30只股票2024-2026的IC分析 (因子权重按abs_IC分配)
+    "ic_optimized_v2": {
+        "name": "IC优化v2",
+        "factors": {
+            "sharpe_20d": 0.070, "ma5_ma30_spread": 0.068,
+            "ma3_ma20_spread": 0.064, "ma10_ma20_spread": 0.062,
+            "ma5_ma20_spread": 0.062, "return_7d": 0.059,
+            "rank_20": 0.058, "return_30d": 0.057,
+            "rsv_9": 0.057, "return_2d": 0.057,
+            "macd_hist": 0.049, "channel_high_20": 0.045,
+            "cntd_20": 0.043, "ma20_ma60_spread": 0.035,
+            "kmid2": 0.033, "ksft2": 0.026,
+            "skew_20d": 0.020, "ma5_cross_ma20": 0.017,
+            "amplitude_5d": 0.016, "turnover_ratio": 0.016,
+            "vol_ratio": 0.016, "volatility_10d": 0.013,
+            "klen": 0.013, "turnover_vol": 0.013,
+            "volatility_20d": 0.012, "liq_ratio": 0.009,
+            "volatility_30d": 0.007, "boll_width": 0.004,
+        },
+        "buy_threshold": 0.15,
+        "sell_threshold": -0.10,
+    },
+
     # 均衡型 (通用)
     "balanced": {
         "name": "均衡",

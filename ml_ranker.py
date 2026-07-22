@@ -1,11 +1,18 @@
 """
-ML 排序模型 — LightGBM lambdarank 替代固定权重求和 (参考 Qlib LGBModel 87行)
+ML 排序模型 — LightGBM Lambdarank (honest)
+
+学习目标: 给定每日截面股票因子值, 预测截面排名 (Top-K选股)。
+关键改进:
+  1. objective=lambdarank (直接优化排序,N个pairwise loss)
+  2. 标签=截面排名 (整数, 0=最差, N-1=最好)
+  3. 按日期分组切分训练/验证 (保证同一天股票不跨split)
+  4. L1正则化 + min_data_in_leaf 防过拟合
 
 用法:
   from ml_ranker import MLRanker
   ranker = MLRanker()
-  ranker.fit(factor_panels, return_panels)        # 训练
-  scores = ranker.predict(stock_data_today)        # 预测今日排名
+  ranker.fit(X, y, groups)        # 训练
+  scores = ranker.predict(X_new)  # 预测分数
 """
 
 import numpy as np
@@ -15,17 +22,24 @@ import lightgbm as lgb
 
 class MLRanker:
     """
-    LightGBM Lambdarank 排序器 (修复版)。
+    LightGBM Lambdarank 截面排序器。
 
-    学习目标: 给定N只股票的因子值,预测它们的截面排名。
-    包含: 时序训练/验证分离 + 早停 + 特征重要性
+    标签约定:
+      y: 整数截面排名 (0=最差, N-1=最好), 用于 lambdarank
+      groups: 日期ID, 同一天的样本属于同一个 ranking group
+
+    排序逻辑:
+      - 分数越高 → 排名越靠前 → 优先买入
     """
 
     def __init__(self, n_estimators: int = 200, max_depth: int = 6,
-                 learning_rate: float = 0.05):
+                 learning_rate: float = 0.05, lambda_l1: float = 0.5,
+                 min_data_in_leaf: int = 30):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.learning_rate = learning_rate
+        self.lambda_l1 = lambda_l1
+        self.min_data_in_leaf = min_data_in_leaf
         self.model = None
         self.feature_names = []
         self.feature_importance = {}
@@ -33,64 +47,95 @@ class MLRanker:
     def fit(self, X: np.ndarray, y: np.ndarray, groups: np.ndarray = None,
             val_ratio: float = 0.2):
         """
-        训练排序模型 (时序分割: 前80%训练,后20%验证)。
+        训练 Lambdarank 模型。
 
         参数:
-          X: (n_samples, n_features)
-          y: (n_samples,) 未来收益率
-          groups: (n_samples,) 日期分组
-          val_ratio: 验证集比例
-        """
-        self.feature_names = [f"f_{i}" for i in range(X.shape[1])]
+          X: (n_samples, n_features) 截面标准化后的因子值
+          y: (n_samples,) 整数截面排名 (0=最差, N-1=最好)
+          groups: (n_samples,) 日期分组ID, 同一天 = 同一 ranking group
+          val_ratio: 按日期数 (而非样本数) 分割的验证比例
 
-        # 时序分割
-        n = len(X)
-        split_idx = int(n * (1 - val_ratio))
-        X_train, y_train = X[:split_idx], y[:split_idx]
-        X_valid, y_valid = X[split_idx:], y[split_idx:]
+        NOTE: 切分按日期组边界, 而非样本索引。
+              保证同一天的所有股票不在 train/valid 之间分裂。
+        """
+        if not self.feature_names:
+            self.feature_names = [f"f_{i}" for i in range(X.shape[1])]
 
         if groups is None:
-            groups = np.arange(n) // 10
-        g_train = groups[:split_idx]
-        g_valid = groups[split_idx:] - groups[split_idx]  # 从0开始
+            groups = np.arange(len(X)) // 10
 
-        train_data = lgb.Dataset(X_train, label=y_train, group=_count_groups(g_train))
-        valid_data = lgb.Dataset(X_valid, label=y_valid, group=_count_groups(g_valid),
-                                  reference=train_data)
+        # ── 按 group (日期) 边界切分 ──
+        unique_groups = np.unique(groups)
+        n_groups = len(unique_groups)
+        split_g = int(n_groups * (1 - val_ratio))
+
+        train_groups_set = unique_groups[:split_g]
+        valid_groups_set = unique_groups[split_g:]
+
+        train_mask = np.isin(groups, train_groups_set)
+        valid_mask = np.isin(groups, valid_groups_set)
+
+        X_train, y_train = X[train_mask], y[train_mask]
+        X_valid, y_valid = X[valid_mask], y[valid_mask]
+        g_train_raw = groups[train_mask]
+        g_valid_raw = groups[valid_mask]
+
+        # 重新编码 group ID (从0开始连续)
+        g_train = pd.Series(g_train_raw).astype(str).factorize()[0]
+        g_valid = pd.Series(g_valid_raw).astype(str).factorize()[0]
+
+        print(f"  [MLRanker] 训练组: {len(g_train)}样本/{len(np.unique(g_train))}天, "
+              f"验证组: {len(g_valid)}样本/{len(np.unique(g_valid))}天")
+
+        train_data = lgb.Dataset(X_train, label=y_train,
+                                 group=_count_groups(g_train))
+        valid_data = lgb.Dataset(X_valid, label=y_valid,
+                                 group=_count_groups(g_valid),
+                                 reference=train_data)
 
         params = {
-            "objective": "regression",
-            "metric": "rmse",
+            "objective": "lambdarank",
+            "metric": "ndcg",
+            "ndcg_eval_at": [1, 3, 5],
             "boosting_type": "gbdt",
             "num_leaves": 2 ** self.max_depth,
             "learning_rate": self.learning_rate,
             "n_estimators": self.n_estimators,
+            "lambda_l1": self.lambda_l1,
+            "min_data_in_leaf": self.min_data_in_leaf,
             "verbose": -1,
             "early_stopping_rounds": 20,
+            "seed": 42,
+            "feature_fraction_seed": 42,
+            "bagging_seed": 42,
+            "deterministic": True,
         }
 
         self.model = lgb.train(params, train_data, valid_sets=[valid_data])
 
-        # 特征重要性
+        # ── 特征重要性 ──
         if self.model is not None:
             imp = self.model.feature_importance(importance_type="gain")
             self.feature_importance = {
                 self.feature_names[i]: imp[i]
                 for i in range(min(len(imp), len(self.feature_names)))
             }
-            top5 = sorted(self.feature_importance.items(), key=lambda x: -x[1])[:5]
-            print(f"  [LightGBM] 训练完成, Top5因子: {[(n, f'{v:.0f}') for n,v in top5]}")
+            top5 = sorted(self.feature_importance.items(),
+                          key=lambda x: -x[1])[:5]
+            nonzero = sum(1 for v in imp if v > 0)
+            print(f"  [MLRanker] 完成, 非零重要性因子: {nonzero}/{len(imp)}, "
+                  f"Top5: {[(n, f'{v:.0f}') for n, v in top5]}")
 
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """预测分数 (可用于排名)。"""
+        """预测分数 (越高越好, 用于排名选股)。"""
         if self.model is None:
-            raise ValueError("模型未训练,请先调用 fit()")
+            raise ValueError("模型未训练, 请先调用 fit()")
         return self.model.predict(X)
 
     def rank(self, X: np.ndarray) -> np.ndarray:
-        """返回排名 (0~1,越大越好)。"""
+        """返回排名 (0~1, 越大越好)。"""
         scores = self.predict(X)
         return pd.Series(scores).rank(pct=True).values
 
@@ -112,7 +157,7 @@ class MLRanker:
     def from_factor_data(cls, factor_panels: dict, return_panel: pd.DataFrame,
                          **kwargs) -> "MLRanker":
         """
-        从因子面板数据训练。
+        从因子面板数据训练 (兼容旧接口)。
 
         参数:
           factor_panels: {factor_name: DataFrame(date × symbol)}
@@ -126,13 +171,11 @@ class MLRanker:
         if not factor_names:
             raise ValueError("无有效因子")
 
-        # 找一个参考面板获取日期和股票
         ref = list(factor_panels.values())[0]
         common_dates = ref.index.intersection(return_panel.index)
 
         group_id = 0
         for d in common_dates:
-            # 获取当天的所有股票因子和收益
             stock_data = {}
             for fn in factor_names:
                 if d in factor_panels[fn].index:
@@ -146,8 +189,7 @@ class MLRanker:
                 continue
             ret_row = return_panel.loc[d]
 
-            features = []
-            targets = []
+            features, targets, syms = [], [], []
             for sym, factors in stock_data.items():
                 if sym not in ret_row.index:
                     continue
@@ -156,10 +198,22 @@ class MLRanker:
                     continue
                 features.append(vals)
                 targets.append(ret_row[sym])
+                syms.append(sym)
 
             if len(features) >= 5:
-                X_list.extend(features)
-                y_list.extend(targets)
+                # 截面特征标准化
+                feats = np.array(features)
+                mean = feats.mean(axis=0, keepdims=True)
+                std = feats.std(axis=0, keepdims=True)
+                std[std == 0] = 1.0
+                feats = (feats - mean) / std
+
+                # 截面排名标签 (lambdarank)
+                from scipy.stats import rankdata
+                labels = rankdata(np.array(targets)) - 1  # 0~N-1
+
+                X_list.extend(feats.tolist())
+                y_list.extend(labels.tolist())
                 groups_list.extend([group_id] * len(features))
                 group_id += 1
 
@@ -167,7 +221,7 @@ class MLRanker:
             raise ValueError(f"训练样本不足 ({len(X_list)}), 需要更多数据")
 
         X = np.array(X_list)
-        y = np.array(y_list)
+        y = np.array(y_list, dtype=int)
         groups = np.array(groups_list)
 
         ranker = cls(**kwargs)
@@ -177,26 +231,39 @@ class MLRanker:
 
 
 def _count_groups(groups: np.ndarray) -> np.ndarray:
-    """LightGBM要求的group计数。"""
+    """LightGBM 要求的 group 计数 (每个 group 的样本数)。"""
     _, counts = np.unique(groups, return_counts=True)
     return counts
 
 
 def demo():
-    """演示: 用随机数据训练 → 预测。"""
-    print("MLRanker 演示...")
+    """演示 Lambdarank 训练。"""
+    print("MLRanker (Lambdarank) 演示...")
     np.random.seed(42)
-    X = np.random.randn(500, 10)  # 500样本,10个因子
-    y = X[:, 0] * 0.3 + X[:, 1] * 0.2 + np.random.randn(500) * 0.5
-    groups = np.repeat(np.arange(50), 10)  # 50天,每天10只股票
 
-    ranker = MLRanker(n_estimators=50, max_depth=4)
+    # 模拟数据: 50天 × 10只股票 × 5个因子
+    X_list, y_list, g_list = [], [], []
+    for day in range(50):
+        X_day = np.random.randn(10, 5)
+        # 第一个因子有微弱预测力
+        true_score = X_day[:, 0] * 0.5 + np.random.randn(10) * 0.5
+        from scipy.stats import rankdata
+        labels = rankdata(true_score) - 1  # 0~9
+        X_list.extend(X_day.tolist())
+        y_list.extend(labels.tolist())
+        g_list.extend([day] * 10)
+
+    X = np.array(X_list)
+    y = np.array(y_list, dtype=int)
+    groups = np.array(g_list)
+
+    ranker = MLRanker(n_estimators=50, max_depth=4, lambda_l1=0.0)
     ranker.fit(X, y, groups)
 
     pred = ranker.predict(X[:10])
     print(f"  训练完成, 预测前10: {pred.round(3)}")
     print(f"  排名: {ranker.rank(X[:10]).round(2)}")
-    print("✅ MLRanker 正常")
+    print("✅ MLRanker (Lambdarank) 正常")
 
 
 if __name__ == "__main__":
