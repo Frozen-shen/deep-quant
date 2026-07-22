@@ -117,22 +117,14 @@ class TradingRules:
 
     def is_suspended(self, symbol: str, df_today: pd.DataFrame) -> bool:
         """
-        检测停牌 (volume == 0 或 close 连续相等)。
-        
-        Args:
-          symbol: 股票代码
-          df_today: 该股票截至今日的K线DataFrame (tail 120)
+        检测停牌 (volume == 0)。
+        注意: 不检测一字横盘, 避免误杀低波动股票。
         """
         if df_today is None or len(df_today) == 0:
             return True
         vol = df_today["volume"].values
         if len(vol) == 0 or vol[-1] == 0:
             return True
-        # 也检查一字横盘 (连续N天close完全相同)
-        if len(df_today) >= 3:
-            closes = df_today["close"].values[-3:]
-            if len(set(round(c, 2) for c in closes)) == 1 and vol[-1] < 100:
-                return True
         return False
 
     def is_limit_hit(self, symbol: str, df_today: pd.DataFrame) -> tuple:
@@ -174,38 +166,14 @@ class TradingRules:
     def filter_tradeable(self, sd: dict, cp_today: dict) -> tuple:
         """
         过滤掉不可交易的股票。
-        
-        Args:
-          sd: {symbol: DataFrame} — 当日可用股票
-          cp_today: {symbol: close_price}
-        
-        Returns:
-          (filtered_sd, filtered_cp)
+        只移除停牌股(volume==0), 一字板保留在池中用于排名,
+        具体买卖约束由 can_buy/can_sell 处理。
         """
-        untradeable = []
         for sym in list(sd.keys()):
             df = sd[sym]
-            
-            # 停牌检测
             if self.is_suspended(sym, df):
-                untradeable.append((sym, "suspended"))
-                continue
-            
-            # 涨跌停检测
-            is_up, is_down, is_word = self.is_limit_hit(sym, df)
-            if is_word:
-                untradeable.append((sym, "one_word_board"))
-                continue
-            
-            # 涨停不能买 (但我们仍可持有/卖出)
-            # 跌停不能卖 (但我们仍可持有)
-            # 在具体买卖时再判断
-        
-        # 移除不可交易股票
-        for sym, reason in untradeable:
-            sd.pop(sym, None)
-            cp_today.pop(sym, None)
-        
+                sd.pop(sym, None)
+                cp_today.pop(sym, None)
         return sd, cp_today
 
     def can_buy(self, symbol: str, df_today: pd.DataFrame) -> bool:

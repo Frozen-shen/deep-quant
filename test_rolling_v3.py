@@ -26,7 +26,7 @@ from factor_cache import FactorCache
 from portfolio import PortfolioManager
 from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
-from ml_ranker import MLRanker
+from ml_ranker import MLRanker  # Phase 3: DEnsembleRanker 验证后切换
 from evaluator import ModelEvaluator
 from trading_rules import TradingRules, calc_buy_commission, calc_sell_commission
 from risk_manager import RiskManager
@@ -252,6 +252,8 @@ for wi, w in enumerate(windows):
     )
     model.feature_names = factor_names
     model.fit(X, y, groups, val_ratio=0.2)
+    
+    # ★ Phase 3: 稳定后可切换为 DEnsembleRanker
 
     # 记录特征重要性
     feature_importance_log[f"W{wi+1}"] = dict(
@@ -280,13 +282,11 @@ for wi, w in enumerate(windows):
 
     trades = 0
     cp = {}
-    # ★ 交易规则 + 风控
+    # ★ 交易规则
     rules = TradingRules()
-    risk_mgr = RiskManager(
-        max_position_pct=0.25, max_total_exposure=0.95,
-        max_daily_loss_pct=0.05, max_drawdown_pct=0.25,
-        stop_loss_pct=0.08, trail_stop_pct=0.05, take_profit_pct=0.30,
-    )
+    # Phase 2: RiskManager 代码完成, 但在Top-K换仓策略中默认不启用
+    # (固定止损与换仓逻辑冲突, 适合趋势跟踪策略)
+    risk_mgr = None  # RiskManager(...)
     # ★ 逐笔交易明细 + 权益曲线
     trade_details = []
     position_entry = {}   # symbol → {"entry_price", "entry_date", "qty"}
@@ -356,12 +356,15 @@ for wi, w in enumerate(windows):
         state = pm.load()
         holdings = [s for s, p in state.positions.items() if p["qty"] > 0]
         decision = ranker.rank(scores, holdings)
-
-        # ★ 风控检查
-        highs_today = {s: sd[s]["high"].iloc[-1] for s in sd if s in sd}
-        lows_today = {s: sd[s]["low"].iloc[-1] for s in sd if s in sd}
-        decision = risk_mgr.check(decision, position_entry, state, cp_today,
-                                  highs_today, lows_today)
+        # 风控检查 (可选: risk_mgr 不为 None 时启用)
+        if risk_mgr is not None:
+            holdings_val = sum(cp_today.get(s, 0) * p["qty"]
+                              for s, p in state.positions.items() if p["qty"] > 0)
+            state.total_equity_val = state.cash + holdings_val
+            highs_today = {s: sd[s]["high"].iloc[-1] for s in sd if s in sd}
+            lows_today = {s: sd[s]["low"].iloc[-1] for s in sd if s in sd}
+            decision = risk_mgr.check(decision, position_entry, state, cp_today,
+                                      highs_today, lows_today)
 
         for s in decision["sell"]:
             pos = state.positions.get(s, {})
@@ -394,10 +397,10 @@ for wi, w in enumerate(windows):
                     pm.apply_buy(s, qty, px, trade_date=ts,
                                  commission=calc_buy_commission(qty, px))
                     # ★ 记录开仓 + 止损参数
-                    hi = highs_today.get(s, px)
-                    lo = lows_today.get(s, px)
                     position_entry[s] = risk_mgr.init_stop(
-                        s, px, ts, qty, px, hi, lo)
+                        s, px, ts, qty, px,
+                        highs_today.get(s, px), lows_today.get(s, px)) if risk_mgr else \
+                        {"entry_price": px, "entry_date": ts, "qty": qty}
                     trades += 1
 
         pm.snapshot(ts, cp_today)

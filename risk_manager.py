@@ -26,8 +26,8 @@ class RiskManager:
                  max_daily_loss_pct: float = 0.05,    # 日内亏损熔断 (5%)
                  max_drawdown_pct: float = 0.25,      # 回撤熔断 (25%)
                  stop_loss_pct: float = 0.08,         # 默认止损 8%
-                 trail_stop_pct: float = 0.05,        # 追踪止损 5%
-                 take_profit_pct: float = 0.30,       # 止盈 30%
+                 trail_stop_pct: float = 0.08,        # 追踪止损 8% (fix: 5%→8% 减少误杀)
+                 take_profit_pct: float = 0.40,       # 止盈 40% (fix: 30%→40%)
                  atr_stop_multiple: float = 2.0,      # ATR止损倍数
                  max_positions: int = 6,              # 最大持仓数
                  ):
@@ -47,12 +47,17 @@ class RiskManager:
         self.halted = False
         self.halt_reason = ""
 
-    def init_day(self, current_equity: float):
-        """每日开盘时初始化。"""
-        if self.day_start_equity is None:
-            self.day_start_equity = current_equity
+    def init_day(self, current_equity: float, prev_day_equity: float = None):
+        """每日开盘时初始化 — 重置日内熔断, 更新峰值。"""
+        self.day_start_equity = current_equity
         if self.peak_equity is None or current_equity > self.peak_equity:
             self.peak_equity = current_equity
+        # 每天重置熔断 (除非是回撤熔断)
+        if not self.halted or self.halt_reason.startswith("回撤"):
+            pass  # 回撤熔断不自动恢复
+        elif prev_day_equity and current_equity > prev_day_equity:
+            self.halted = False  # 权益回升, 恢复交易
+            self.halt_reason = ""
 
     # ════════════════════════════════════
     #  止损追踪
@@ -106,21 +111,21 @@ class RiskManager:
             if sym not in cp_today:
                 continue
             px = cp_today[sym]
+            stype = entry.get("stop_type", "fixed")
 
-            # --- 追踪止损: 随价格上涨上移 ---
-            if entry.get("stop_type") in ("trail", "fixed"):
-                # 更新最高价
+            # --- 追踪止损: 只有 trail 模式才随价格上涨上移 ---
+            if stype == "trail":
                 hi = highs.get(sym, px)
                 if hi > entry.get("trail_high", entry["entry_price"]):
                     entry["trail_high"] = hi
-                    # 上移止损
                     new_stop = hi * (1 - entry.get("trail_pct", self.trail_stop_pct))
                     if new_stop > entry.get("stop_price", 0):
                         entry["stop_price"] = new_stop
-                        entry["stop_type"] = "trail"  # 转为追踪模式
+            # --- 固定止损: 永不移动 ---
+            # (no action needed for "fixed" type)
 
             # --- ATR止损: 最高价 - N*ATR ---
-            if entry.get("stop_type") == "atr":
+            if stype == "atr":
                 hi = highs.get(sym, px)
                 atr = entry.get("atr_entry_atr", 0)
                 if hi > entry.get("trail_high", entry["entry_price"]):
@@ -201,22 +206,23 @@ class RiskManager:
           过滤后的 decision
         """
         # ── 1. 熔断检查 ──
-        total_equity = getattr(portfolio_state, 'total_equity',
-                               getattr(portfolio_state, 'cash', 100000))
-        self.init_day(total_equity)
+        # 优先读注入的 total_equity_val, 否则用 state.total_equity (可能为0)
+        total_equity = getattr(portfolio_state, 'total_equity_val',
+                       getattr(portfolio_state, 'total_equity',
+                       getattr(portfolio_state, 'cash', 100000)))
+        prev_equity = getattr(self, '_prev_equity', total_equity)
+        self.init_day(total_equity, prev_equity)
+        self._prev_equity = total_equity
 
         if self.halted:
-            return {"buy": [], "sell": list(position_entry.keys()), "hold": []}
-
-        # 日内亏损熔断
-        if self.day_start_equity and total_equity > 0:
-            daily_pnl = (total_equity - self.day_start_equity) / self.day_start_equity
-            if daily_pnl < -self.max_daily_loss_pct:
-                self.halted = True
-                self.halt_reason = f"日内亏损熔断 ({daily_pnl*100:.1f}%)"
+            # 每天检查是否恢复
+            if hasattr(self, '_prev_equity') and total_equity > self._prev_equity:
+                self.halted = False
+                self.halt_reason = ""
+            else:
                 return {"buy": [], "sell": list(position_entry.keys()), "hold": []}
 
-        # 回撤熔断
+        # 回撤熔断 (仅此一项，日内亏损熔断太敏感)
         if self.peak_equity and total_equity > 0:
             dd = (total_equity - self.peak_equity) / self.peak_equity
             if dd < -self.max_drawdown_pct:
