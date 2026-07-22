@@ -64,6 +64,18 @@ GRADE_THRESHOLDS = {
     "worst_window":      {"min": -0.25,"good": -0.10,"great": 0.00, "weight": 10},
     # 正窗口比例
     "pos_window_pct":    {"min": 0.50, "good": 0.75, "great": 0.90, "weight": 6},
+    # ★ Phase 1 新增: 统计分布
+    "skewness":          {"min": -0.5, "good": 0.0,  "great": 0.50, "weight": 5},
+    # ★ Phase 1 新增: 捕获率
+    "up_capture":        {"min": 0.5,  "good": 0.8,  "great": 1.20, "weight": 5},
+    # ★ Phase 1 新增: 溃疡指数性能
+    "upi":               {"min": 0.3,  "good": 0.8,  "great": 1.50, "weight": 6},
+    # ★ Phase 1 新增: 系统质量
+    "sqn":               {"min": 1.0,  "good": 2.0,  "great": 3.00, "weight": 5},
+    # ★ Phase 1 新增: 滚动夏普稳定性
+    "rolling_sharpe_min": {"min": 0.0,  "good": 0.5,  "great": 1.00, "weight": 5},
+    # ★ Phase 1 新增: DSR
+    "deflated_sharpe":   {"min": 0.0,  "good": 0.3,  "great": 0.70, "weight": 6},
 }
 
 
@@ -75,9 +87,11 @@ def _score_metric(value: float, thresholds: dict, invert: bool = False) -> float
         return 1.0
     if value >= thresholds["good"]:
         return 0.7 + 0.3 * (value - thresholds["good"]) / (thresholds["great"] - thresholds["good"])
-    if value >= thresholds["min"]:
+    if thresholds["min"] > 0 and value >= thresholds["min"]:
         return 0.3 + 0.4 * (value - thresholds["min"]) / (thresholds["good"] - thresholds["min"])
-    return max(0.0, 0.3 * value / thresholds["min"])
+    if thresholds["min"] <= 0 and value > 0:
+        return 0.3 + 0.4 * value / thresholds["good"]  # min=0 时用 good 做参考
+    return max(0.0, 0.3 * value / max(thresholds["min"], 0.001))
 
 
 # ================================================================
@@ -122,6 +136,10 @@ class ModelEvaluator:
         downside = daily_returns[daily_returns < 0]
         downside_std = float(downside.std() * np.sqrt(252)) if len(downside) > 0 else 0.0
 
+        # ── 统计分布 ──
+        skewness = float(stats.skew(daily_returns)) if len(daily_returns) > 2 else 0.0
+        kurtosis = float(stats.kurtosis(daily_returns)) if len(daily_returns) > 2 else 0.0
+
         # ── 超额收益 (相对无风险) ──
         excess_daily = daily_returns - self.risk_free_rate / 252
         excess_annual = float(excess_daily.mean() * 252)
@@ -147,6 +165,10 @@ class ModelEvaluator:
 
         # ── Calmar ──
         calmar = float(annual_return / abs(max_dd)) if max_dd != 0 else 0.0
+
+        # ── Ulcer Index & UPI ──
+        ulcer = float(np.sqrt(np.mean(drawdowns ** 2))) if len(drawdowns) > 0 else 0.0
+        upi = float((total_return - self.risk_free_rate * n_years) / ulcer) if ulcer > 0 else 0.0
 
         # ── VaR / CVaR ──
         var_95 = float(np.percentile(daily_returns, 5))
@@ -185,6 +207,23 @@ class ModelEvaluator:
         excess_vs_bench = total_return - bench_total
         annual_excess = annual_return - benchmark_annual
 
+        # ── Capture Ratio (Up/Down) ──
+        up_capture = 1.0
+        down_capture = 1.0
+        if benchmark_returns is not None and len(benchmark_returns) == len(daily_returns):
+            bench_up = benchmark_returns > 0
+            bench_down = benchmark_returns < 0
+            if bench_up.sum() > 0:
+                up_capture = float(daily_returns[bench_up].mean() / benchmark_returns[bench_up].mean())
+            if bench_down.sum() > 0:
+                down_capture = float(daily_returns[bench_down].mean() / benchmark_returns[bench_down].mean())
+
+        # ── DSR (Deflated Sharpe Ratio) ──
+        dsr = _deflated_sharpe(sr, n_days, skewness, kurtosis)
+
+        # ── Rolling Sharpe ──
+        rolling_sr = _rolling_sharpe_stats(daily_returns, window=126)  # 6M
+
         # ── 交易质量 (基于逐笔交易) ──
         tq = self._analyze_trades(trades, n_years) if trades else {}
 
@@ -194,14 +233,21 @@ class ModelEvaluator:
             "initial_capital": initial_capital, "final_equity": round(final_equity, 2),
             "total_return": total_return, "annual_return": annual_return,
             "annual_volatility": annual_vol, "downside_std": downside_std,
+            "skewness": skewness, "kurtosis": kurtosis,
             "max_drawdown": max_dd, "max_dd_duration_days": max_dd_duration,
             "sharpe_ratio": sr, "sortino_ratio": sortino, "calmar_ratio": calmar,
+            "ulcer_index": ulcer, "upi": upi,
             "var_95": var_95, "var_99": var_99, "cvar_95": cvar_95, "omega_ratio": omega,
             "win_rate_daily": win_rate_daily,
             "benchmark_return": bench_total, "excess_vs_benchmark": excess_vs_bench,
             "annual_excess": annual_excess,
+            "up_capture": up_capture, "down_capture": down_capture,
             "tracking_error": tracking_err, "information_ratio": ir,
             "alpha": alpha, "beta": beta,
+            "deflated_sharpe": dsr,
+            "rolling_sharpe_min": rolling_sr["min"],
+            "rolling_sharpe_mean": rolling_sr["mean"],
+            "rolling_sharpe_std": rolling_sr["std"],
             **tq,
         }
 
@@ -250,6 +296,9 @@ class ModelEvaluator:
         total_volume = df["qty"].sum() if "qty" in df.columns else 0
         turnover = total_volume / n_years if n_years > 0 else 0.0
 
+        # SQN (System Quality Number)
+        sqn = float(np.sqrt(n_trades) * pnls.mean() / pnls.std()) if n_trades > 1 and pnls.std() > 0 else 0.0
+
         # 胜率最高的前N笔
         hold_days = df["hold_days"].values if "hold_days" in df.columns else np.zeros(n_trades)
         avg_hold = float(hold_days.mean()) if len(hold_days) > 0 else 0.0
@@ -262,6 +311,7 @@ class ModelEvaluator:
             "avg_win": avg_win, "avg_loss": avg_loss,
             "max_consecutive_losses": max_consec_loss,
             "avg_hold_days": avg_hold, "turnover_annual": turnover,
+            "sqn": sqn,
         }
 
     # ════════════════════════════════════
@@ -361,7 +411,8 @@ class ModelEvaluator:
         # ★ 近期加权平均: annual_return, sharpe, max_drawdown
         recent_weighted = {}
         for key in ["annual_return", "annual_excess", "sharpe_ratio",
-                    "max_drawdown", "calmar_ratio"]:
+                    "max_drawdown", "calmar_ratio", "up_capture", "upi",
+                    "skewness", "deflated_sharpe", "rolling_sharpe_min"]:
             vals = [m.get(key, 0) for m in window_metrics]
             recent_weighted[key] = sum(v * w for v, w in zip(vals, recent_weights)) / n
 
@@ -380,7 +431,7 @@ class ModelEvaluator:
             elif metric_name == "worst_window":
                 val = worst_window
             elif metric_name in ("win_rate_trade", "payoff_ratio", "profit_factor",
-                                "expectancy_pct"):
+                                "expectancy_pct", "sqn"):
                 tq = self._analyze_trades(all_trades, 1.0)
                 val = tq.get(metric_name, 0)
             elif metric_name in recent_weighted:
@@ -426,6 +477,54 @@ def _final_grade(score: float) -> str:
     if score >= 55: return "C"
     if score >= 50: return "C-"
     return "D"
+
+
+# ════════════════════════════════════════
+#  辅助函数: DSR + Rolling Sharpe
+# ════════════════════════════════════════
+
+def _deflated_sharpe(sr: float, n_days: int, skew: float, kurt: float,
+                     n_trials: int = 6) -> float:
+    """
+    Deflated Sharpe Ratio (Harvey & Liu 2015).
+    考虑多重测试后 Sharpe 的统计显著性。
+    """
+    if sr <= 0 or n_days < 20:
+        return 0.0
+    # 夏普标准误 (Lo 2002)
+    se = np.sqrt((1 + 0.5 * sr**2 - skew * sr + kurt * sr**2 / 4) / n_days)
+    if se <= 0:
+        return 0.0
+    # Expected Max SR under null
+    from scipy.stats import norm
+    gamma = 0.5772  # Euler-Mascheroni constant
+    e_max = norm.ppf(1 - 1/n_trials) if n_trials > 0 else 0.0
+    # Deflated SR
+    dsr_val = (sr - e_max * se) / se
+    return float(max(0.0, norm.cdf(dsr_val)))
+
+
+def _rolling_sharpe_stats(daily_returns: np.ndarray, window: int = 126) -> dict:
+    """计算滚动夏普的统计量。window=126 ≈ 6个月。"""
+    n = len(daily_returns)
+    if n < window:
+        return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+    rolling_sr = []
+    for i in range(window, n):
+        rets = daily_returns[i-window:i]
+        mu = rets.mean()
+        sigma = rets.std()
+        if sigma > 0:
+            rolling_sr.append(float(mu / sigma * np.sqrt(252)))
+    if not rolling_sr:
+        return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+    arr = np.array(rolling_sr)
+    return {
+        "mean": float(arr.mean()),
+        "std": float(arr.std()),
+        "min": float(arr.min()),
+        "max": float(arr.max()),
+    }
 
 
 # ================================================================

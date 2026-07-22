@@ -28,6 +28,7 @@ from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
 from ml_ranker import MLRanker
 from evaluator import ModelEvaluator
+from trading_rules import TradingRules, calc_buy_commission, calc_sell_commission
 
 # ════════════════════════════════════════
 #  配置
@@ -278,6 +279,8 @@ for wi, w in enumerate(windows):
 
     trades = 0
     cp = {}
+    # ★ 交易规则
+    rules = TradingRules()
     # ★ 逐笔交易明细 + 权益曲线
     trade_details = []
     position_entry = {}   # symbol → {"entry_price", "entry_date", "qty"}
@@ -301,6 +304,11 @@ for wi, w in enumerate(windows):
                 sd[sym] = dt
                 cp_today[sym] = dt["close"].iloc[-1]
 
+        if len(sd) < TOP_K:
+            continue
+
+        # ★ 过滤不可交易股票 (停牌/一字板/ST)
+        sd, cp_today = rules.filter_tradeable(sd, cp_today)
         if len(sd) < TOP_K:
             continue
 
@@ -348,17 +356,17 @@ for wi, w in enumerate(windows):
             qty = pos.get("qty", 0)
             if qty > 0 and s in cp_today:
                 px = cp_today[s]
-                pm.apply_sell(s, qty, px, trade_date=ts,
-                              commission=qty * px * 0.0008)
+                comm = calc_sell_commission(qty, px)
+                pm.apply_sell(s, qty, px, trade_date=ts, commission=comm)
                 # ★ 记录平仓明细
                 entry = position_entry.pop(s, {})
                 entry_px = entry.get("entry_price", px)
                 entry_date = entry.get("entry_date", ts)
-                pnl = (px - entry_px) * qty - qty * px * 0.0008
+                pnl = (px - entry_px) * qty - calc_sell_commission(qty, px)
                 hold_days = (today - pd.Timestamp(entry_date)).days if entry_date != ts else 0
                 trade_details.append({
                     "date": ts, "symbol": s, "action": "SELL",
-                    "price": px, "qty": qty, "commission": qty * px * 0.0008,
+                    "price": px, "qty": qty, "commission": float(comm),
                     "pnl": pnl, "entry_price": entry_px, "entry_date": entry_date,
                     "hold_days": hold_days,
                 })
@@ -372,7 +380,7 @@ for wi, w in enumerate(windows):
                 qty = int(cash_per / px / 100) * 100
                 if qty >= cfg["lot_size"]:
                     pm.apply_buy(s, qty, px, trade_date=ts,
-                                 commission=qty * px * 0.0003)
+                                 commission=calc_buy_commission(qty, px))
                     # ★ 记录开仓信息
                     position_entry[s] = {"entry_price": px, "entry_date": ts, "qty": qty}
                     trades += 1

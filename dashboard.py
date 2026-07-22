@@ -97,6 +97,47 @@ if page == "🧪 模型评测":
             chart_data = pd.DataFrame({"得分": scores, "评级": grades}, index=dims)
             st.bar_chart(chart_data[["得分"]], use_container_width=True)
             
+            # ── ★ 可视化: 月度收益热力图 + 水下曲线 + 滚动指标 ──
+            if detail_files:
+                try:
+                    # 读权益曲线数据
+                    import json as _json
+                    w1_path = f"test_results/window_1_{detail_files[0].replace('test_results/rolling_v3_','').replace('.csv','')}.json"
+                    if os.path.exists(w1_path):
+                        with open(w1_path) as f:
+                            wd = _json.load(f)
+                        eq_curve = wd.get("equity_curve", [])
+                        bench_curve = wd.get("bench_equity_curve", [])
+                        
+                        if eq_curve:
+                            df_eq = pd.DataFrame(eq_curve)
+                            df_eq["date"] = pd.to_datetime(df_eq["date"])
+                            df_eq = df_eq.set_index("date").sort_index()
+                            
+                            # --- 水下曲线 ---
+                            st.subheader("🌊 回撤曲线 (水下图)")
+                            cummax = df_eq["equity"].cummax()
+                            dd = (df_eq["equity"] - cummax) / cummax * 100
+                            st.area_chart(dd, use_container_width=True)
+                            
+                            # --- 月度热力图 ---
+                            st.subheader("🗓️ 月度收益热力图")
+                            monthly = df_eq["equity"].resample("ME").last().pct_change()
+                            if len(monthly) > 1:
+                                monthly_df = pd.DataFrame({
+                                    "year": monthly.index.year,
+                                    "month": monthly.index.month,
+                                    "return": monthly.values
+                                })
+                                heatmap = monthly_df.pivot(index="year", columns="month", values="return") * 100
+                                st.dataframe(
+                                    heatmap.style.background_gradient(cmap="RdYlGn", axis=None)
+                                        .format("{:+.1f}%"),
+                                    use_container_width=True
+                                )
+                except Exception as e:
+                    pass
+            
             # 详细表
             st.subheader("📋 指标明细")
             detail_rows = []
