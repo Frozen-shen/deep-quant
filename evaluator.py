@@ -32,20 +32,38 @@ from dataclasses import dataclass, field
 
 
 # ================================================================
-#  评级阈值
+#  评级阈值 — 实盘导向 (对标真实投资标准, 非学术指标)
+#
+#  核心理念: 赚不到真金白银 = 不合格, 不管超额多好看
+#  每一档含义:
+#    min  = 勉强可用的底线 (不到此线直接0分)
+#    good = 值得投入真金白银的水平
+#    great = 优秀的量化策略
 # ================================================================
 
 GRADE_THRESHOLDS = {
-    "annual_excess":     {"min": 0.03, "good": 0.10, "great": 0.20, "weight": 15},
-    "sharpe_ratio":      {"min": 0.3,  "good": 0.80, "great": 1.50, "weight": 15},
-    "max_drawdown":      {"min": -0.35,"good": -0.20,"great": -0.12, "weight": 10},
-    "calmar_ratio":      {"min": 0.2,  "good": 0.50, "great": 1.00, "weight": 10},
-    "profit_factor":     {"min": 1.1,  "good": 1.50, "great": 2.00, "weight": 12},
-    "win_rate_trade":    {"min": 0.35, "good": 0.50, "great": 0.60, "weight": 8},
-    "payoff_ratio":      {"min": 1.0,  "good": 1.50, "great": 2.50, "weight": 8},
-    "expectancy_pct":    {"min": 0.001,"good": 0.005,"great": 0.015,"weight": 7},
-    "pos_window_pct":    {"min": 0.50, "good": 0.70, "great": 0.85, "weight": 8},
-    "excess_ir":         {"min": 0.3,  "good": 0.80, "great": 1.50, "weight": 7},
+    # ★ 绝对收益 (新增) — 实盘赚钱才是硬道理
+    "annual_return":     {"min": 0.05, "good": 0.12, "great": 0.20, "weight": 14},
+    # 超额收益 — 保留但降权
+    "annual_excess":     {"min": 0.03, "good": 0.10, "great": 0.20, "weight": 8},
+    # 夏普 — 大幅提升门槛 (0.3太宽松, 实盘<1.0没人敢用)
+    "sharpe_ratio":      {"min": 0.5,  "good": 1.00, "great": 1.50, "weight": 12},
+    # 最大回撤 — 收紧 (实盘-35%已爆仓)
+    "max_drawdown":      {"min": -0.30,"good": -0.20,"great": -0.12, "weight": 10},
+    # Calmar
+    "calmar_ratio":      {"min": 0.3,  "good": 0.60, "great": 1.20, "weight": 8},
+    # 盈亏因子 — 1.1太低(<1.5说明模型不稳定)
+    "profit_factor":     {"min": 1.3,  "good": 1.60, "great": 2.00, "weight": 10},
+    # 胜率 — 35%太宽容
+    "win_rate_trade":    {"min": 0.40, "good": 0.50, "great": 0.60, "weight": 8},
+    # 盈亏比
+    "payoff_ratio":      {"min": 1.2,  "good": 1.60, "great": 2.50, "weight": 8},
+    # 期望收益
+    "expectancy_pct":    {"min": 0.002,"good": 0.006,"great": 0.015,"weight": 6},
+    # ★ 最差窗口惩罚 (新增) — 一个窗口崩盘=不合格
+    "worst_window":      {"min": -0.25,"good": -0.10,"great": 0.00, "weight": 10},
+    # 正窗口比例
+    "pos_window_pct":    {"min": 0.50, "good": 0.75, "great": 0.90, "weight": 6},
 }
 
 
@@ -304,10 +322,13 @@ class ModelEvaluator:
 
     def grade(self, window_metrics: List[Dict], trades: List[Dict] = None) -> Dict:
         """
-        综合评级 — 基于所有窗口的平均指标打分。
+        综合评级 — 基于所有窗口的平均指标打分 (实盘导向)。
+
+        ★ 近期窗口权重更高 (最近半年 > 去年 > 前年)
+        ★ 最差窗口有单独惩罚项
 
         Returns:
-          {"grade": "B+", "score": 72.5, "pass": True, "details": {...}}
+          {"grade": "C+", "score": 55.2, "pass": False, "details": {...}}
         """
         cross = self.analyze_cross_window(window_metrics)
         agg = cross.get("per_metric", {})
@@ -320,6 +341,30 @@ class ModelEvaluator:
         if trades:
             all_trades = trades
 
+        # ★ 最差窗口
+        window_returns = [m.get("total_return", 0) for m in window_metrics]
+        worst_window = min(window_returns) if window_returns else 0.0
+
+        # ★ 近期加权: 最近窗口权重×3, 次近×2, 其余×1
+        n = len(window_metrics)
+        recent_weights = []
+        for i in range(n):
+            if i == n - 1:      # 最近窗口
+                recent_weights.append(3.0)
+            elif i == n - 2:    # 次近
+                recent_weights.append(2.0)
+            else:
+                recent_weights.append(1.0)
+        w_sum = sum(recent_weights)
+        recent_weights = [w / w_sum * n for w in recent_weights]  # 归一化, 保持总权重=n
+
+        # ★ 近期加权平均: annual_return, sharpe, max_drawdown
+        recent_weighted = {}
+        for key in ["annual_return", "annual_excess", "sharpe_ratio",
+                    "max_drawdown", "calmar_ratio"]:
+            vals = [m.get(key, 0) for m in window_metrics]
+            recent_weighted[key] = sum(v * w for v, w in zip(vals, recent_weights)) / n
+
         total_score = 0.0
         total_weight = 0.0
         details = {}
@@ -329,14 +374,17 @@ class ModelEvaluator:
             weight = cfg["weight"]
             total_weight += weight
 
+            # ── 特殊指标 ──
             if metric_name == "pos_window_pct":
                 val = cross.get("pos_window_pct", 0)
-            elif metric_name == "excess_ir":
-                val = cross.get("cross_window_ir", 0)
+            elif metric_name == "worst_window":
+                val = worst_window
             elif metric_name in ("win_rate_trade", "payoff_ratio", "profit_factor",
                                 "expectancy_pct"):
                 tq = self._analyze_trades(all_trades, 1.0)
                 val = tq.get(metric_name, 0)
+            elif metric_name in recent_weighted:
+                val = recent_weighted[metric_name]
             elif metric_name in agg:
                 val = agg[metric_name]["mean"]
             else:

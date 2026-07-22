@@ -85,26 +85,17 @@ if page == "🧪 模型评测":
             p_w = cross.get("pos_windows", 0)
             st.metric("正窗口", f"{p_w}/{n_w}", delta=f"{p_w/n_w*100:.0f}%" if n_w > 0 else None)
 
-        # ── 维度得分雷达图 ──
+        # ── 维度得分柱状图 ──
         st.subheader("📊 各维度得分")
         details = grade.get("details", {})
         if details:
-            # 柱状图替代雷达图 (streamlit原生支持)
-            import plotly.graph_objects as go
             dims = list(details.keys())
             scores = [details[d]["score"] * 100 for d in dims]
             grades = [details[d]["grade"] for d in dims]
-            colors = ["green" if s >= 70 else "orange" if s >= 40 else "red" for s in scores]
             
-            fig = go.Figure(data=[
-                go.Bar(x=scores, y=dims, orientation='h', marker_color=colors,
-                       text=[f"{s:.0f} ({g})" for s, g in zip(scores, grades)],
-                       textposition='outside')
-            ])
-            fig.update_layout(height=400, xaxis_range=[0, 100], 
-                            xaxis_title="得分", yaxis_title="",
-                            margin=dict(l=200))
-            st.plotly_chart(fig, use_container_width=True)
+            # 用 streamlit 原生柱状图
+            chart_data = pd.DataFrame({"得分": scores, "评级": grades}, index=dims)
+            st.bar_chart(chart_data[["得分"]], use_container_width=True)
             
             # 详细表
             st.subheader("📋 指标明细")
