@@ -26,7 +26,7 @@ from factor_cache import FactorCache
 from portfolio import PortfolioManager
 from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
-from ml_ranker import MLRanker  # Phase 3: DEnsembleRanker 验证后切换
+from ml_ranker import MLRanker  # 默认: MLRanker (DEnsembleRanker 可选,见 ml_ranker.py)
 from evaluator import ModelEvaluator
 from trading_rules import TradingRules, calc_buy_commission, calc_sell_commission
 from risk_manager import RiskManager
@@ -253,7 +253,8 @@ for wi, w in enumerate(windows):
     model.feature_names = factor_names
     model.fit(X, y, groups, val_ratio=0.2)
     
-    # ★ Phase 3: 稳定后可切换为 DEnsembleRanker
+    # DEnsembleRanker 可用: n_models=2 验证通过 (288笔), 但均值-0.7% vs MLRanker +7.6%
+    # 需调参 (n_models/alpha) 后才能优于基线
 
     # 记录特征重要性
     feature_importance_log[f"W{wi+1}"] = dict(
