@@ -29,6 +29,7 @@ from macro_overlay import MacroOverlay
 from ml_ranker import MLRanker
 from evaluator import ModelEvaluator
 from trading_rules import TradingRules, calc_buy_commission, calc_sell_commission
+from risk_manager import RiskManager
 
 # ════════════════════════════════════════
 #  配置
@@ -279,8 +280,13 @@ for wi, w in enumerate(windows):
 
     trades = 0
     cp = {}
-    # ★ 交易规则
+    # ★ 交易规则 + 风控
     rules = TradingRules()
+    risk_mgr = RiskManager(
+        max_position_pct=0.25, max_total_exposure=0.95,
+        max_daily_loss_pct=0.05, max_drawdown_pct=0.25,
+        stop_loss_pct=0.08, trail_stop_pct=0.05, take_profit_pct=0.30,
+    )
     # ★ 逐笔交易明细 + 权益曲线
     trade_details = []
     position_entry = {}   # symbol → {"entry_price", "entry_date", "qty"}
@@ -351,6 +357,12 @@ for wi, w in enumerate(windows):
         holdings = [s for s, p in state.positions.items() if p["qty"] > 0]
         decision = ranker.rank(scores, holdings)
 
+        # ★ 风控检查
+        highs_today = {s: sd[s]["high"].iloc[-1] for s in sd if s in sd}
+        lows_today = {s: sd[s]["low"].iloc[-1] for s in sd if s in sd}
+        decision = risk_mgr.check(decision, position_entry, state, cp_today,
+                                  highs_today, lows_today)
+
         for s in decision["sell"]:
             pos = state.positions.get(s, {})
             qty = pos.get("qty", 0)
@@ -381,8 +393,11 @@ for wi, w in enumerate(windows):
                 if qty >= cfg["lot_size"]:
                     pm.apply_buy(s, qty, px, trade_date=ts,
                                  commission=calc_buy_commission(qty, px))
-                    # ★ 记录开仓信息
-                    position_entry[s] = {"entry_price": px, "entry_date": ts, "qty": qty}
+                    # ★ 记录开仓 + 止损参数
+                    hi = highs_today.get(s, px)
+                    lo = lows_today.get(s, px)
+                    position_entry[s] = risk_mgr.init_stop(
+                        s, px, ts, qty, px, hi, lo)
                     trades += 1
 
         pm.snapshot(ts, cp_today)

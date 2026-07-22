@@ -220,6 +220,19 @@ EXPANDED_FACTORS = {
     "macd_hist":      "EMA($close, 12) - EMA($close, 26) - EMA(EMA($close, 12) - EMA($close, 26), 9)",
 }
 
+# ================================================================
+#  Phase 2扩展: 价量相关 + 趋势质量
+# ================================================================
+
+PHASE2_FACTORS = {
+    # 价量相关性 (Qlib: CORR)
+    "corr_pv_10":   "Corr($close, Log($volume + 1), 10)",
+    "corr_pv_20":   "Corr($close, Log($volume + 1), 20)",
+    # 趋势拟合度 (Qlib: RSQR)
+    "rsqr_20":      "RSqr($close, 20)",
+    "rsqr_60":      "RSqr($close, 60)",
+}
+
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
 

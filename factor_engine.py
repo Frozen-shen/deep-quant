@@ -240,6 +240,55 @@ class _UnaryFunc(Factor):
     def evaluate(self, df: pd.DataFrame) -> pd.Series:
         return self.func(self.child.evaluate(df))
 
+
+class CorrFactor(Factor):
+    """滚动相关系数: Corr($field1, $field2, N) — 价量相关性"""
+    def __init__(self, child_a: Factor, child_b: Factor, window: int):
+        self.child_a = child_a
+        self.child_b = child_b
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        a = self.child_a.evaluate(df)
+        b = self.child_b.evaluate(df)
+        return a.rolling(self.window, min_periods=max(5, self.window // 2)).corr(b)
+
+    def __repr__(self):
+        return f"Corr({self.child_a},{self.child_b},{self.window})"
+
+
+class RSqrFactor(Factor):
+    """R² 趋势拟合度: 滚动线性回归的拟合优度"""
+    def __init__(self, child: Factor, window: int):
+        self.child = child
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        s = self.child.evaluate(df)
+        n = self.window
+        result = pd.Series(np.nan, index=s.index)
+        for i in range(n - 1, len(s)):
+            y = s.iloc[i - n + 1:i + 1].values
+            x = np.arange(n, dtype=float)
+            if np.std(y) == 0:
+                result.iloc[i] = 0.0
+                continue
+            mx, my = x.mean(), y.mean()
+            ss_xy = np.sum((x - mx) * (y - my))
+            ss_xx = np.sum((x - mx) ** 2)
+            ss_yy = np.sum((y - my) ** 2)
+            if ss_xx > 0 and ss_yy > 0:
+                slope = ss_xy / ss_xx
+                y_pred = my + slope * (x - mx)
+                ss_res = np.sum((y - y_pred) ** 2)
+                result.iloc[i] = max(0.0, 1.0 - ss_res / ss_yy)
+            else:
+                result.iloc[i] = 0.0
+        return result
+
+    def __repr__(self):
+        return f"RSqr({self.child},{self.window})"
+
     def __repr__(self):
         return f"{self.name}({self.child})"
 
@@ -380,6 +429,20 @@ def _make_func(name: str, args: List[Factor]) -> Factor:
             raise SyntaxError("RSV 需要1个参数: (window)")
         window = int(float(args[0].__repr__())) if isinstance(args[0], ConstFactor) else 9
         return RSVFactor(window)
+
+    # Corr: Corr(a, b, window) — 滚动相关系数
+    if name == "Corr":
+        if len(args) != 3:
+            raise SyntaxError("Corr 需要3个参数: (field_a, field_b, window)")
+        window = int(float(args[2].__repr__())) if isinstance(args[2], ConstFactor) else 10
+        return CorrFactor(args[0], args[1], window)
+
+    # RSqr: RSqr(field, window) — 趋势拟合度
+    if name == "RSqr":
+        if len(args) != 2:
+            raise SyntaxError("RSqr 需要2个参数: (field, window)")
+        window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
+        return RSqrFactor(args[0], window)
 
     # Abs / Log / Sign
     if name == "Abs" and len(args) == 1:
