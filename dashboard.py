@@ -48,12 +48,111 @@ st.sidebar.markdown(f"**手续费**: {cfg['commission_default']*10000:.0f}bp")
 st.sidebar.markdown(f"**制度**: T+{cfg['t_plus']}")
 st.sidebar.markdown(f"**初始资金**: {cfg['currency']} 100,000")
 
-page = st.sidebar.radio("页面", ["🧪 测试结果", "📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "📍 买卖标记"])
+page = st.sidebar.radio("页面", ["🧪 模型评测", "🧪 测试结果", "📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "📍 买卖标记"])
 
 # ================================================================
-#  页面 1: 测试结果 (默认首页)
+#  页面 0: 模型评测 (默认首页)
 # ================================================================
-if page == "🧪 测试结果":
+if page == "🧪 模型评测":
+    st.title("🧪 模型评测")
+    
+    import json
+    import glob as glob_mod
+    
+    # 读取最新评测报告
+    report_files = sorted(glob_mod.glob("test_results/report_card_*.json"), reverse=True)
+    detail_files = sorted(glob_mod.glob("test_results/rolling_v3_*.csv"), reverse=True)
+    
+    if report_files:
+        with open(report_files[0]) as f:
+            report = json.load(f)
+        grade = report["grade"]
+        cross = report["cross_window"]
+        
+        # ── 核心评级 ──
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            grade_color = {"A": "green", "B": "blue", "C": "orange", "D": "red"}
+            gc = grade_color.get(grade["grade"][0], "gray")
+            st.markdown(f"### 综合评级")
+            st.markdown(f"<h1 style='color:{gc};font-size:72px;'>{grade['grade']}</h1>", unsafe_allow_html=True)
+        with col2:
+            st.metric("得分", f"{grade['score']}/100", delta="合格" if grade["pass"] else "不合格")
+        with col3:
+            st.metric("多窗口IR", f"{cross.get('cross_window_ir', 0):.2f}")
+        with col4:
+            n_w = cross.get("n_windows", 0)
+            p_w = cross.get("pos_windows", 0)
+            st.metric("正窗口", f"{p_w}/{n_w}", delta=f"{p_w/n_w*100:.0f}%" if n_w > 0 else None)
+
+        # ── 维度得分雷达图 ──
+        st.subheader("📊 各维度得分")
+        details = grade.get("details", {})
+        if details:
+            # 柱状图替代雷达图 (streamlit原生支持)
+            import plotly.graph_objects as go
+            dims = list(details.keys())
+            scores = [details[d]["score"] * 100 for d in dims]
+            grades = [details[d]["grade"] for d in dims]
+            colors = ["green" if s >= 70 else "orange" if s >= 40 else "red" for s in scores]
+            
+            fig = go.Figure(data=[
+                go.Bar(x=scores, y=dims, orientation='h', marker_color=colors,
+                       text=[f"{s:.0f} ({g})" for s, g in zip(scores, grades)],
+                       textposition='outside')
+            ])
+            fig.update_layout(height=400, xaxis_range=[0, 100], 
+                            xaxis_title="得分", yaxis_title="",
+                            margin=dict(l=200))
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 详细表
+            st.subheader("📋 指标明细")
+            detail_rows = []
+            for metric, d in details.items():
+                val = d["value"]
+                if abs(val) > 100:
+                    val_str = f"{val:.0f}"
+                elif abs(val) > 1:
+                    val_str = f"{val:.2f}"
+                else:
+                    val_str = f"{val:.4f}"
+                detail_rows.append({
+                    "指标": metric, "数值": val_str,
+                    "得分": f"{d['score']*100:.0f}",
+                    "评级": d["grade"],
+                    "权重": d["weight"],
+                })
+            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+
+        # ── 历史对比 ──
+        if len(report_files) > 1:
+            st.subheader("📁 历史评测")
+            history = []
+            for f in report_files[:10]:
+                t = f.replace("test_results/report_card_", "").replace(".json", "")
+                t_str = f"{t[:4]}-{t[4:6]}-{t[6:8]} {t[9:11]}:{t[11:13]}"
+                try:
+                    with open(f) as fh:
+                        r = json.load(fh)
+                    history.append({"时间": t_str, "评级": r["grade"]["grade"],
+                                   "得分": r["grade"]["score"],
+                                   "合格": "✅" if r["grade"]["pass"] else "❌"})
+                except: pass
+            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+
+    elif detail_files:
+        # Fallback: no report card yet, show basic results
+        st.info("📝 评测报告尚未生成。运行 python test_rolling_v3.py 生成。当前显示最新测试结果:")
+        df = pd.read_csv(detail_files[0])
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("暂无测试数据。运行 python test_rolling_v3.py 生成评测报告。")
+
+# ================================================================
+#  页面 1: 测试结果
+# ================================================================
+elif page == "🧪 测试结果":
     st.title("🧪 滚动重训练 — 测试结果")
 
     # 优先读取 v3 测试结果

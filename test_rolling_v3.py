@@ -13,6 +13,7 @@
 
 import os, sys
 sys.path.insert(0, os.path.dirname(__file__))
+import json
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -26,6 +27,7 @@ from portfolio import PortfolioManager
 from portfolio_ranker import PortfolioRanker
 from macro_overlay import MacroOverlay
 from ml_ranker import MLRanker
+from evaluator import ModelEvaluator
 
 # ════════════════════════════════════════
 #  配置
@@ -276,6 +278,16 @@ for wi, w in enumerate(windows):
 
     trades = 0
     cp = {}
+    # ★ 逐笔交易明细 + 权益曲线
+    trade_details = []
+    position_entry = {}   # symbol → {"entry_price", "entry_date", "qty"}
+    equity_curve = []
+    bench_equity_curve = []
+    # 基准: 等权组合
+    bench_init = {sym: ALL_DATA[sym][(ALL_DATA[sym]["date"] >= pd.Timestamp(w["test_start"])) &
+                                      (ALL_DATA[sym]["date"] <= pd.Timestamp(w["test_end"]))]
+                  for sym in SYMBOLS if sym in ALL_DATA}
+    bench_first = {sym: bdf["close"].iloc[0] for sym, bdf in bench_init.items() if len(bdf) > 0}
 
     for ti, today in enumerate(test_days):
         ts = today.strftime("%Y-%m-%d")
@@ -292,7 +304,7 @@ for wi, w in enumerate(windows):
         if len(sd) < TOP_K:
             continue
 
-        # 从缓存获取特征 (不调用 compute_factors!)
+        # 从缓存获取特征
         sym_feats = []
         syms_with_data = []
         for sym in sd:
@@ -305,13 +317,11 @@ for wi, w in enumerate(windows):
             continue
 
         feats_arr = np.array(sym_feats)
-        # 截面标准化 (预测时也需要)
         mean = feats_arr.mean(axis=0, keepdims=True)
         std = feats_arr.std(axis=0, keepdims=True)
         std[std == 0] = 1.0
         feats_norm = (feats_arr - mean) / std
 
-        # LightGBM 预测
         try:
             preds = model.predict(feats_norm)
             for i, sym in enumerate(syms_with_data):
@@ -323,7 +333,6 @@ for wi, w in enumerate(windows):
         if len(scores) < TOP_K:
             continue
 
-        # 宏观叠加 (容错)
         try:
             for s in scores:
                 scores[s] *= (1 + macro.score_at(today) * 0.3)
@@ -341,6 +350,18 @@ for wi, w in enumerate(windows):
                 px = cp_today[s]
                 pm.apply_sell(s, qty, px, trade_date=ts,
                               commission=qty * px * 0.0008)
+                # ★ 记录平仓明细
+                entry = position_entry.pop(s, {})
+                entry_px = entry.get("entry_price", px)
+                entry_date = entry.get("entry_date", ts)
+                pnl = (px - entry_px) * qty - qty * px * 0.0008
+                hold_days = (today - pd.Timestamp(entry_date)).days if entry_date != ts else 0
+                trade_details.append({
+                    "date": ts, "symbol": s, "action": "SELL",
+                    "price": px, "qty": qty, "commission": qty * px * 0.0008,
+                    "pnl": pnl, "entry_price": entry_px, "entry_date": entry_date,
+                    "hold_days": hold_days,
+                })
                 trades += 1
 
         for s in decision["buy"]:
@@ -352,10 +373,26 @@ for wi, w in enumerate(windows):
                 if qty >= cfg["lot_size"]:
                     pm.apply_buy(s, qty, px, trade_date=ts,
                                  commission=qty * px * 0.0003)
+                    # ★ 记录开仓信息
+                    position_entry[s] = {"entry_price": px, "entry_date": ts, "qty": qty}
                     trades += 1
 
         pm.snapshot(ts, cp_today)
         cp = cp_today
+
+        # ★ 记录权益曲线
+        try:
+            eq_data = storage.get_equity_log(limit=1)
+            if eq_data:
+                equity_curve.append({"date": ts, "equity": eq_data[0]["total_equity"]})
+        except:
+            pass
+
+        # ★ 基准权益 (等权)
+        if bench_first:
+            bench_val = np.mean([cp_today.get(s, 0) / bench_first.get(s, 1)
+                                for s in bench_first if s in cp_today])
+            bench_equity_curve.append({"date": ts, "equity": INITIAL * bench_val})
 
     # ── 绩效 ──
     summary = pm.get_summary(cp)
@@ -384,6 +421,18 @@ for wi, w in enumerate(windows):
         "trades": trades,
         "samples": len(X_list),
     })
+
+    # ★ 保存窗口详细数据 (逐笔交易 + 权益曲线)
+    window_detail = {
+        "window": wi + 1,
+        "trade_details": trade_details,
+        "equity_curve": equity_curve,
+        "bench_equity_curve": bench_equity_curve,
+    }
+    detail_path = os.path.join(RESULTS_DIR, f"window_{wi+1}_{TIMESTAMP}.json")
+    with open(detail_path, "w") as f:
+        json.dump(window_detail, f, default=str)
+
     mark = "✅" if excess > 0 else "❌"
     print(f"  策略: {ret:+.1f}%  基准: {bench_avg:+.1f}%  "
           f"超额: {excess:+.1f}%  {trades}笔 {mark}")
@@ -415,6 +464,67 @@ if all_results:
     results_csv = os.path.join(RESULTS_DIR, f"rolling_v3_{TIMESTAMP}.csv")
     df.to_csv(results_csv, index=False)
     print(f"\n  📁 结果已保存: {results_csv}")
+
+    # ── ★ 模型评测 ──
+    evaluator = ModelEvaluator()
+    window_metrics = []
+    all_trades_flat = []
+
+    for wi in range(1, len(all_results) + 1):
+        detail_path = os.path.join(RESULTS_DIR, f"window_{wi}_{TIMESTAMP}.json")
+        if not os.path.exists(detail_path):
+            continue
+        with open(detail_path) as f:
+            wd = json.load(f)
+
+        trades_w = wd.get("trade_details", [])
+        all_trades_flat.extend(trades_w)
+        equity_arr = np.array([e["equity"] for e in wd.get("equity_curve", [])])
+        bench_arr = np.array([e["equity"] for e in wd.get("bench_equity_curve", [])])
+
+        if len(equity_arr) > 1:
+            daily_ret = np.diff(equity_arr) / equity_arr[:-1]
+            bench_ret = np.diff(bench_arr) / bench_arr[:-1] if len(bench_arr) > 1 else None
+            n = len(daily_ret)
+            if bench_ret is not None and len(bench_ret) != n:
+                bench_ret = None
+
+            wm = evaluator.analyze_window(
+                equity_arr, daily_ret,
+                bench_ret if bench_ret is not None else None,
+                trades_w, INITIAL,
+            )
+        else:
+            wm = {"total_return": all_results[wi-1]["strategy"] / 100,
+                  "excess_vs_benchmark": all_results[wi-1]["excess"] / 100}
+
+        wm["window"] = wi
+        window_metrics.append(wm)
+
+    # 评测报告
+    report = evaluator.analyze_cross_window(window_metrics)
+    grade = evaluator.grade(window_metrics, all_trades_flat)
+
+    print(f"\n{'=' * 70}")
+    print(f"  📊 模型评测报告")
+    print(f"{'=' * 70}")
+    print(f"  综合评级: {grade['grade']} (得分: {grade['score']}/100)")
+    print(f"  合格判定: {'✅ 合格' if grade['pass'] else '❌ 不合格'}")
+    print(f"  多窗口IR: {report.get('cross_window_ir', 0):.2f}")
+    print(f"\n  各维度得分:")
+    for metric, d in grade.get("details", {}).items():
+        bar = "█" * int(d["score"] * 10) + "░" * (10 - int(d["score"] * 10))
+        print(f"    {metric:<25} {d['value']:>8.4f}  {d['grade']}  {bar}")
+
+    # 保存评测报告
+    report_path = os.path.join(RESULTS_DIR, f"report_card_{TIMESTAMP}.json")
+    with open(report_path, "w") as f:
+        json.dump({
+            "grade": grade,
+            "cross_window": {k: v for k, v in report.items() if k != "per_metric"},
+            "timestamp": TIMESTAMP,
+        }, f, default=str)
+    print(f"\n  📁 评测报告: {report_path}")
 
     # 保存特征重要性
     imp_csv = os.path.join(RESULTS_DIR, f"feature_importance_{TIMESTAMP}.csv")
