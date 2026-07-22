@@ -48,17 +48,84 @@ st.sidebar.markdown(f"**手续费**: {cfg['commission_default']*10000:.0f}bp")
 st.sidebar.markdown(f"**制度**: T+{cfg['t_plus']}")
 st.sidebar.markdown(f"**初始资金**: {cfg['currency']} 100,000")
 
-page = st.sidebar.radio("页面", ["📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "🧪 测试结果", "📍 买卖标记"])
+page = st.sidebar.radio("页面", ["🧪 测试结果", "📈 概览", "📡 信号历史", "📋 交易记录", "🆚 策略对比", "📍 买卖标记"])
 
 # ================================================================
-#  页面 1: 概览
+#  页面 1: 测试结果 (默认首页)
 # ================================================================
-if page == "📈 概览":
+if page == "🧪 测试结果":
+    st.title("🧪 滚动重训练 — 测试结果")
+
+    # 优先读取 v3 测试结果
+    import glob
+    v3_files = sorted(glob.glob("test_results/rolling_v3_*.csv"), reverse=True)
+    
+    if v3_files:
+        latest_v3 = v3_files[0]
+        df = pd.read_csv(latest_v3)
+        test_time = latest_v3.replace("test_results/rolling_v3_", "").replace(".csv", "")
+        test_time_str = f"{test_time[:4]}-{test_time[4:6]}-{test_time[6:8]} {test_time[9:11]}:{test_time[11:13]}:{test_time[13:15]}"
+
+        st.subheader(f"📊 最新滚动重训练: {test_time_str}")
+        
+        avg_excess = df["excess"].mean()
+        pos_windows = (df["excess"] > 0).sum()
+        total_windows = len(df)
+        median_ex = df["excess"].median()
+        std_ex = df["excess"].std()
+        ir = avg_excess / std_ex if std_ex > 0 else 0
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("平均超额", f"{avg_excess:+.1f}%", delta="🎯≥10%" if avg_excess >= 10 else None)
+        with col2:
+            st.metric("信息比率", f"{ir:.2f}")
+        with col3:
+            st.metric("正窗口", f"{pos_windows}/{total_windows}")
+        with col4:
+            st.metric("中位数超额", f"{median_ex:+.1f}%")
+        with col5:
+            st.metric("超额标准差", f"{std_ex:.1f}%")
+
+        if avg_excess >= 10:
+            st.success(f"🎉 目标达成! 平均超额 {avg_excess:+.1f}% ≥ 10%")
+        elif avg_excess > 0:
+            st.info(f"📈 超额为正, 距10%目标差 {10-avg_excess:+.1f}%")
+        else:
+            st.warning("⚠️ 超额为负, 需要继续优化")
+
+        st.subheader("📊 各窗口超额收益")
+        st.bar_chart(df.set_index("window")[["excess"]], use_container_width=True)
+
+        st.subheader("📋 窗口详情")
+        display_df = df[["window","train","test","strategy","benchmark","excess","trades"]].copy()
+        display_df.columns = ["窗口","训练期","测试期","策略%","基准%","超额%","交易数"]
+        st.dataframe(display_df.style.applymap(
+            lambda v: "color: green" if v > 0 else "color: red", subset=["超额%"]), 
+            use_container_width=True)
+
+        if len(v3_files) > 1:
+            st.subheader("📁 历史测试记录")
+            history = []
+            for f in v3_files[:10]:
+                t = f.replace("test_results/rolling_v3_","").replace(".csv","")
+                t_str = f"{t[:4]}-{t[4:6]}-{t[6:8]} {t[9:11]}:{t[11:13]}"
+                try:
+                    df_h = pd.read_csv(f)
+                    history.append({"时间": t_str, "平均超额": f"{df_h['excess'].mean():+.1f}%",
+                                   "正窗口": f"{(df_h['excess']>0).sum()}/{len(df_h)}"})
+                except: pass
+            st.dataframe(pd.DataFrame(history), use_container_width=True)
+    else:
+        st.info("暂无测试记录。运行 python test_rolling_v3.py 生成。")
+
+# ================================================================
+#  页面 2: 概览
+# ================================================================
+elif page == "📈 概览":
     st.title("📈 概览")
 
     pm = PortfolioManager(market=MARKET)
-
-    # 拉最新价格
     try:
         fetcher = DataFetcher()
         df_price = fetcher.fetch(SYMBOL, "20260701", "20260712", "qfq", market=MARKET)
@@ -69,8 +136,6 @@ if page == "📈 概览":
         last_date = "N/A"
 
     summary = pm.get_summary({SYMBOL: last_price})
-
-    # 核心指标
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("总权益", f"{cfg['currency']} {summary['total_equity']:,.0f}",
@@ -82,7 +147,6 @@ if page == "📈 概览":
     with col4:
         st.metric(f"{SYMBOL} 最新价", f"{cfg['currency']} {last_price:.2f}")
 
-    # 权益曲线
     st.subheader("权益曲线")
     equity_data = storage.get_equity_log(limit=9999)
     if equity_data:
@@ -91,24 +155,21 @@ if page == "📈 概览":
         df_eq = df_eq.sort_values("date")
         st.line_chart(df_eq.set_index("date")["total_equity"])
     else:
-        st.info("暂无权益数据，请先运行 scheduler.py")
+        st.info("暂无权益数据，请先运行 test_rolling_v3.py")
 
-    # 持仓明细
     st.subheader("持仓明细")
     if summary["positions"]:
-        df_pos = pd.DataFrame(summary["positions"])
-        st.dataframe(df_pos, use_container_width=True)
+        st.dataframe(pd.DataFrame(summary["positions"]), use_container_width=True)
     else:
         st.info("当前无持仓")
 
 # ================================================================
-#  页面 2: 信号历史
+#  页面 3: 信号历史
 # ================================================================
 elif page == "📡 信号历史":
     st.title("📡 信号历史")
 
     signals = storage.get_pending_signals()
-    # 也获取已执行的
     conn = storage.get_db()
     all_sigs = conn.execute(
         "SELECT * FROM signals ORDER BY date DESC LIMIT 500"
@@ -119,8 +180,6 @@ elif page == "📡 信号历史":
     if all_sigs:
         df_sig = pd.DataFrame(all_sigs)
         df_sig["action"] = df_sig["signal"].map({1: "BUY", -1: "SELL", 0: "HOLD"})
-
-        # 统计
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("总信号数", len(df_sig))
@@ -129,14 +188,13 @@ elif page == "📡 信号历史":
         with col3:
             buy_pct = (df_sig["signal"] == 1).mean() * 100
             st.metric("BUY占比", f"{buy_pct:.0f}%")
-
-        st.dataframe(df_sig[["date", "strategy", "action", "confidence", "reason", "executed"]],
+        st.dataframe(df_sig[["date","strategy","action","confidence","reason","executed"]],
                      use_container_width=True)
     else:
         st.info("暂无信号数据")
 
 # ================================================================
-#  页面 3: 交易记录
+#  页面 4: 交易记录
 # ================================================================
 elif page == "📋 交易记录":
     st.title("📋 交易记录")
@@ -224,60 +282,6 @@ elif page == "🆚 策略对比":
             st.image(f, caption=f, use_container_width=True)
     else:
         st.info("暂无回测图表，运行 main.py 或 main_test.py 生成")
-
-# ================================================================
-#  页面 5: 测试结果
-# ================================================================
-elif page == "🧪 测试结果":
-    st.title("🧪 A/B 测试结果")
-
-    # 查找最近的测试CSV
-    import glob
-    csv_files = sorted(glob.glob("test_results_*.csv"), reverse=True)
-    if not csv_files:
-        # 也从DB读
-        try:
-            bts = storage.get_backtests(limit=20)
-            if bts:
-                df_bt = pd.DataFrame(bts)
-                st.subheader(f"数据库测试记录 ({len(df_bt)} 条)")
-                st.dataframe(df_bt[["run_at","strategy","total_return","excess_return","total_trades"]],
-                           use_container_width=True)
-            else:
-                st.info("暂无测试记录。运行 python test_a_share.py 生成。")
-        except:
-            st.info("暂无测试记录")
-    else:
-        latest = csv_files[0]
-        df = pd.read_csv(latest)
-        st.subheader(f"最新测试: {latest}")
-
-        # 柱状图
-        st.bar_chart(df.set_index("name")[["total_return", "benchmark"]], use_container_width=True)
-
-        # 超额对比
-        st.subheader("超额收益对比")
-        cols = st.columns(len(df))
-        for i, (_, r) in enumerate(df.iterrows()):
-            with cols[i]:
-                color = "green" if r['excess'] > 0 else "red"
-                label = r['name'].split(":")[1].strip() if ":" in r['name'] else r['name']
-                st.metric(label, f"{r['excess']:+.1f}%",
-                         delta=f"{r['trades']:.0f}笔")
-
-        # 详细表格
-        st.subheader("详细数据")
-        st.dataframe(df[["name","total_return","benchmark","excess","trades"]],
-                    use_container_width=True)
-
-        # 历史测试记录
-        if len(csv_files) > 1:
-            st.subheader("历史测试记录")
-            history = []
-            for f in csv_files[:10]:
-                t = os.path.getmtime(f)
-                history.append({"文件": f, "时间": datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")})
-            st.dataframe(pd.DataFrame(history), use_container_width=True)
 
 # ================================================================
 #  页面 6: 买卖标记
