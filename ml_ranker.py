@@ -45,7 +45,7 @@ class MLRanker:
         self.feature_importance = {}
 
     def fit(self, X: np.ndarray, y: np.ndarray, groups: np.ndarray = None,
-            val_ratio: float = 0.2):
+            val_ratio: float = 0.2, sample_weight: np.ndarray = None):
         """
         训练 Lambdarank 模型。
 
@@ -54,6 +54,7 @@ class MLRanker:
           y: (n_samples,) 整数截面排名 (0=最差, N-1=最好)
           groups: (n_samples,) 日期分组ID, 同一天 = 同一 ranking group
           val_ratio: 按日期数 (而非样本数) 分割的验证比例
+          sample_weight: (n_samples,) 样本权重 (DEnsemble迭代重训练用)
 
         NOTE: 切分按日期组边界, 而非样本索引。
               保证同一天的所有股票不在 train/valid 之间分裂。
@@ -80,6 +81,10 @@ class MLRanker:
         g_train_raw = groups[train_mask]
         g_valid_raw = groups[valid_mask]
 
+        # 样本权重 (如果有)
+        train_w = sample_weight[train_mask] if sample_weight is not None else None
+        valid_w = sample_weight[valid_mask] if sample_weight is not None else None
+
         # 重新编码 group ID (从0开始连续)
         g_train = pd.Series(g_train_raw).astype(str).factorize()[0]
         g_valid = pd.Series(g_valid_raw).astype(str).factorize()[0]
@@ -88,9 +93,11 @@ class MLRanker:
               f"验证组: {len(g_valid)}样本/{len(np.unique(g_valid))}天")
 
         train_data = lgb.Dataset(X_train, label=y_train,
-                                 group=_count_groups(g_train))
+                                 group=_count_groups(g_train),
+                                 weight=train_w if train_w is not None else None)
         valid_data = lgb.Dataset(X_valid, label=y_valid,
                                  group=_count_groups(g_valid),
+                                 weight=valid_w if valid_w is not None else None,
                                  reference=train_data)
 
         params = {
@@ -234,6 +241,88 @@ def _count_groups(groups: np.ndarray) -> np.ndarray:
     """LightGBM 要求的 group 计数 (每个 group 的样本数)。"""
     _, counts = np.unique(groups, return_counts=True)
     return counts
+
+
+# ════════════════════════════════════
+#  DEnsemble: 迭代样本重加权 (Qlib DEnsembleModel)
+# ════════════════════════════════════
+
+class DEnsembleRanker:
+    """
+    迭代集成排序器: N个子模型, 每次重训时给"难样本"更高权重。
+    
+    原理:
+      1. Train model_0 with equal weights
+      2. Predict → compute per-sample rank error within each group
+      3. Assign higher weight to samples with larger errors
+      4. Train model_1 with updated weights
+      5. Repeat N times → weighted average prediction
+    """
+
+    def __init__(self, n_models: int = 3, alpha: float = 0.5,
+                 **model_kwargs):
+        self.n_models = n_models
+        self.alpha = alpha  # 难样本权重放大系数
+        self.model_kwargs = model_kwargs
+        self.models = []
+        self.feature_names = []
+
+    def fit(self, X: np.ndarray, y: np.ndarray, groups: np.ndarray = None,
+            val_ratio: float = 0.2):
+        """迭代训练N个子模型。"""
+        n = len(X)
+        weights = np.ones(n)
+
+        for i in range(self.n_models):
+            print(f"  [DEnsemble] 训练子模型 {i+1}/{self.n_models}...")
+            m = MLRanker(**self.model_kwargs)
+            m.feature_names = self.feature_names or [f"f_{j}" for j in range(X.shape[1])]
+            m.fit(X, y, groups, val_ratio, sample_weight=weights)
+            self.models.append(m)
+            self.feature_names = m.feature_names
+
+            if i == self.n_models - 1:
+                break  # 最后一轮不需要更新权重
+
+            # ── 计算难样本权重 ──
+            preds = m.predict(X)
+            # 在每组内计算排名误差
+            unique_g = np.unique(groups)
+            errors = np.zeros(n)
+            for g in unique_g:
+                mask = groups == g
+                if mask.sum() < 2:
+                    continue
+                group_preds = preds[mask]
+                group_labels = y[mask]
+                # 预测排名 vs 真实排名 的绝对差异
+                pred_rank = pd.Series(group_preds).rank(pct=True).values
+                true_rank = pd.Series(group_labels).rank(pct=True).values
+                errors[mask] = np.abs(pred_rank - true_rank)
+
+            # 归一化误差 → 新权重
+            if errors.max() > 0:
+                errors = errors / errors.max()
+                weights = 1.0 + self.alpha * errors
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """加权平均预测。"""
+        if not self.models:
+            raise ValueError("模型未训练")
+        preds = np.zeros(len(X))
+        for m in self.models:
+            preds += m.predict(X)
+        return preds / len(self.models)
+
+    @property
+    def model(self):
+        """兼容单模型接口: 返回最后一个子模型。"""
+        return self.models[-1].model if self.models else None
+
+    @property
+    def feature_importance(self):
+        """返回最后一个子模型的特征重要性。"""
+        return self.models[-1].feature_importance if self.models else {}
 
 
 def demo():
