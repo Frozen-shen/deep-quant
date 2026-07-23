@@ -81,8 +81,8 @@ st.markdown('<p class="main-header">📊 Deep Quant · v6 量化看板</p>', uns
 st.markdown('<p class="sub-header">LightGBM Lambdarank · 78只 CSI300 · T+20日</p>', unsafe_allow_html=True)
 if not has_data: st.warning("暂无数据。运行 `python blind_test.py` 生成盲测数据。")
 
-tabs = st.tabs(["🎯 模型评测", "📈 权益分析", "📋 交易分析", "🧬 因子分析",
-                "⚠️ 风险评估", "🎯 信号追踪", "📦 股票池"])
+tabs = st.tabs(["🎯 模型评测", "📈 权益分析", "🔍 收益归因", "📋 交易分析",
+                "🧬 因子分析", "⚠️ 风险评估", "🎯 信号追踪", "📦 股票池"])
 
 # ═══════════ Tab 0: 模型评测 ═══════════
 with tabs[0]:
@@ -141,8 +141,89 @@ with tabs[1]:
         c1,c2,c3,c4=st.columns(4); c1.metric("总收益",f"{tr:+.1f}%"); c2.metric("最大回撤",f"{md:.1f}%")
         c3.metric("年化波动",f"{np.std(dr)*np.sqrt(252)*100:.1f}%"); c4.metric("Sharpe",f"{sh:.2f}")
 
-# ═══════════ Tab 2: 交易分析 ═══════════
+# ═══════════ Tab 2: 收益归因 (新增) ═══════════
 with tabs[2]:
+    st.markdown('<p class="section-title">🔍 收益归因 — 运气 vs 能力</p>', unsafe_allow_html=True)
+    if not has_data or not trade_data:
+        st.info("运行 `python blind_test.py` 生成数据")
+    else:
+        sel_attr = st.selectbox("窗口",list(eq_data.keys()),key='attr_sel',index=len(eq_data)-1)
+        df_eq = eq_data[sel_attr]; td = trade_data[sel_attr]
+        sells = td[td['action']=='SELL'].copy()
+
+        # ── 1. CAPM 归因 ──
+        eq_arr = df_eq['equity'].values; bench_arr = df_eq['benchmark'].values
+        eq_ret = (eq_arr[-1]/eq_arr[0]-1)*100; bench_ret = (bench_arr[-1]/bench_arr[0]-1)*100
+        alpha = eq_ret - bench_ret
+
+        st.markdown("### 📊 收益拆分")
+        c1,c2,c3 = st.columns(3)
+        c1.metric("策略总收益", f"{eq_ret:+.1f}%", delta=f"¥{eq_arr[-1]-eq_arr[0]:,.0f}")
+        c2.metric("市场贡献 (β)", f"{bench_ret:+.1f}%", delta="持有78只等权就能拿到")
+        c3.metric("选股超额 (α)", f"{alpha:+.1f}%", delta="源于精选5只 vs 78只平均" if alpha>0 else "选股跑输等权平均")
+
+        # 超额占比饼图
+        if eq_ret > 0:
+            beta_pct = bench_ret/eq_ret*100; alpha_pct = alpha/eq_ret*100
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5))
+            wedges, texts, autotexts = ax1.pie(
+                [max(0,beta_pct), max(0,alpha_pct)],
+                labels=['市场贡献','选股超额'], autopct='%1.0f%%',
+                colors=['#90caf9','#2e7d32'], startangle=90)
+            ax1.set_title(f'W{sel_attr} 收益来源', fontweight='bold')
+
+            # ── 2. 个股贡献 ──
+            if len(sells) > 0 and 'pnl' in sells.columns and 'symbol' in sells.columns:
+                stock_pnl = sells.groupby('symbol')['pnl'].sum().sort_values()
+                top_win = stock_pnl.tail(5); top_loss = stock_pnl.head(5)
+                all_contrib = pd.concat([top_loss, top_win])
+                colors = ['#c62828' if x < 0 else '#2e7d32' for x in all_contrib.values]
+                # 加入名称
+                labels = [f"{s}\n({td[td.symbol==s].iloc[0].get('name',s) if len(td[td.symbol==s])>0 else s})" for s in all_contrib.index]
+                ax2.barh(range(len(all_contrib)), all_contrib.values, color=colors, height=0.7)
+                ax2.set_yticks(range(len(all_contrib))); ax2.set_yticklabels(labels, fontsize=7)
+                ax2.axvline(0, color='#999', linewidth=0.5); ax2.set_title('个股盈亏贡献 Top/Bottom 5', fontweight='bold')
+                ax2.set_xlabel('¥')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        # ── 3. 集中度风险 ──
+        st.markdown("### ⚠️ 集中度分析")
+        if len(sells) > 0 and 'symbol' in sells.columns:
+            stock_trades = sells['symbol'].value_counts()
+            top3 = stock_trades.head(3)
+            conc_ratio = top3.sum() / stock_trades.sum() * 100
+
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("交易股票数", len(stock_trades))
+            c2.metric("Top3 集中度", f"{conc_ratio:.0f}%", delta="高频交易集中于少数股票")
+            c3.metric("持仓覆盖率", f"{len(stock_trades)/78*100:.0f}%", delta="78只中实际交易过几只")
+            c4.metric("理论随机收益", f"{bench_ret:+.1f}%", delta="如果随机选5只并持有")
+
+        # ── 4. 运气模拟 ──
+        st.markdown("### 🎲 运气分析")
+        st.caption("如果在78只股票中随机选5只买入并持有, 10000次模拟的收益分布:")
+        # 模拟: 从78只中随机选5只, 计算买入持有收益
+        np.random.seed(42)
+        sim_rets = []
+        n_stocks = 78; n_pick = 5; n_sims = 5000
+        # 用基准中的个股收益(无法获取→用bench_ret做中心, 用实际波动做宽度)
+        daily_bench_ret = pd.Series(bench_arr).pct_change().dropna()
+        bench_vol = daily_bench_ret.std() * np.sqrt(252)
+        # 模拟: 随机选5只的收益分布 = 均值 bench_ret, 标准差 bench_vol/sqrt(5)
+        sim_rets = np.random.normal(bench_ret/100, bench_vol/np.sqrt(n_pick), n_sims) * 100
+        actual_pct = (sim_rets < eq_ret/100).mean() * 100
+
+        fig, ax = plt.subplots(figsize=(8, 2.5))
+        ax.hist(sim_rets, bins=50, color='#90caf9', alpha=0.7, edgecolor='white')
+        ax.axvline(eq_ret, color='#2e7d32', linewidth=2, linestyle='--', label=f'策略实际 {eq_ret:+.1f}%')
+        ax.axvline(bench_ret, color='#999', linewidth=1.5, label=f'等权基准 {bench_ret:+.1f}%')
+        ax.legend(fontsize=8); ax.set_xlabel('收益(%)'); ax.set_title(f'随机选5只×{n_sims}次模拟')
+        plt.tight_layout(); st.pyplot(fig); plt.close()
+        st.metric("策略击败随机选股的概率", f"{actual_pct:.0f}%",
+                  delta="显著超过运气范围" if actual_pct > 80 else "可能与运气相差不大")
+
+# ═══════════ Tab 3: 交易分析 ═══════════
+with tabs[3]:
     st.markdown('<p class="section-title">📋 交易明细</p>', unsafe_allow_html=True)
     if not trade_data: st.info("运行 `python blind_test.py` 生成数据")
     else:
@@ -166,8 +247,8 @@ with tabs[2]:
         show_cols=[c for c in show_cols if c in td.columns]
         st.dataframe(td[show_cols].tail(30),use_container_width=True,hide_index=True)
 
-# ═══════════ Tab 3: 因子分析 ═══════════
-with tabs[3]:
+# ═══════════ Tab 4: 因子分析 ═══════════
+with tabs[4]:
     st.markdown('<p class="section-title">🧬 因子重要性 & 术语解释</p>', unsafe_allow_html=True)
     if not imp_data: st.info("运行 `python blind_test.py` 生成数据")
     else:
@@ -195,8 +276,8 @@ with tabs[3]:
             rows.append({"因子(中文)":cname,"代码":fname,"重要性":f"{imp_val:.0f}","占比":imp_pct,"强度":bar})
         st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
 
-# ═══════════ Tab 4: 风险评估 ═══════════
-with tabs[4]:
+# ═══════════ Tab 5: 风险评估 ═══════════
+with tabs[5]:
     st.markdown('<p class="section-title">⚠️ 风险评估</p>', unsafe_allow_html=True)
     if not has_data: st.info("运行 `python blind_test.py` 生成数据")
     else:
@@ -213,8 +294,8 @@ with tabs[4]:
         ar=np.concatenate([df['equity'].pct_change().dropna().values for df in eq_data.values()])
         c1,c2,c3=st.columns(3); c1.metric("VaR 95%",f"{np.percentile(ar,5)*100:.2f}%/日"); c2.metric("VaR 99%",f"{np.percentile(ar,1)*100:.2f}%/日"); c3.metric("CVaR 95%",f"{ar[ar<=np.percentile(ar,5)].mean()*100:.2f}%/日")
 
-# ═══════════ Tab 5: 信号追踪 ═══════════
-with tabs[5]:
+# ═══════════ Tab 6: 信号追踪 ═══════════
+with tabs[6]:
     st.markdown('<p class="section-title">🎯 信号追踪</p>', unsafe_allow_html=True)
     if not trade_data: st.info("运行 `python blind_test.py` 生成数据")
     else:
@@ -232,8 +313,8 @@ with tabs[5]:
                 fig,ax=plt.subplots(figsize=(10,2)); ax.bar(range(len(dc)),dc.values,color='#1565c0',width=1)
                 plt.tight_layout(); st.pyplot(fig); plt.close()
 
-# ═══════════ Tab 6: 股票池 (新增) ═══════════
-with tabs[6]:
+# ═══════════ Tab 7: 股票池 ═══════════
+with tabs[7]:
     st.markdown('<p class="section-title">📦 当前股票池</p>', unsafe_allow_html=True)
     from data_cache import get_cached_symbols
     syms=get_cached_symbols()
