@@ -251,48 +251,60 @@ with tabs[2]:
 
         if len(td) > 0:
             sells = td[td['action'] == 'SELL'].copy()
-            buys = td[td['action'] == 'BUY'].copy() if 'BUY' in td['action'].values else td[td['action']!='SELL']
+            buys  = td[td['action'] == 'BUY'].copy()
 
-            # 盈亏分布
-            fig3, (ax_pnl, ax_hist) = plt.subplots(1, 2, figsize=(10, 3.5))
-
+            # 买卖统计
+            tc1,tc2,tc3,tc4 = st.columns(4)
+            tc1.metric("总交易数", f"{len(td)} 笔", delta=f"买{len(buys)} 卖{len(sells)}")
             if len(sells) > 0 and 'pnl' in sells.columns:
-                pnls = sells['pnl'].values
-                # 累计盈亏
-                cumsum = np.cumsum(pnls)
-                colors = ['#2e7d32' if p >= 0 else '#c62828' for p in pnls]
-                ax_pnl.bar(range(len(pnls)), pnls, color=colors, width=1)
-                ax_pnl.plot(range(len(pnls)), cumsum, color='#1565c0', linewidth=1.5, label='累计盈亏')
-                ax_pnl.axhline(0, color='#999', linewidth=0.5)
-                ax_pnl.set_title('逐笔盈亏'); ax_pnl.legend(fontsize=8)
-                ax_pnl.set_ylabel('¥')
+                tc2.metric("卖出总盈亏", f"¥{sells['pnl'].sum():,.0f}")
+                tc3.metric("卖盈占比", f"{(sells['pnl']>0).mean()*100:.0f}%")
+                tc4.metric("卖均盈亏", f"¥{sells['pnl'].mean():,.0f}")
+            if 'commission' in td.columns:
+                st.caption(f"总手续费: ¥{td['commission'].sum():,.0f}")
 
-                # 直方图
+            # 买卖时间线
+            st.markdown("---")
+            st.markdown("### 📊 买卖信号时间线")
+            if 'date' in td.columns and 'symbol' in td.columns:
+                fig6, ax = plt.subplots(figsize=(10, 3))
+                bd = pd.to_datetime(buys['date']) if len(buys) > 0 else pd.Series(dtype='datetime64[ns]')
+                sd_ = pd.to_datetime(sells['date']) if len(sells) > 0 else pd.Series(dtype='datetime64[ns]')
+                if len(bd) > 0:
+                    ax.scatter(bd, buys['symbol'], color='#2e7d32', s=40, marker='^', label=f'买入({len(buys)})', alpha=0.7)
+                if len(sd_) > 0:
+                    ax.scatter(sd_, sells['symbol'], color='#c62828', s=40, marker='v', label=f'卖出({len(sells)})', alpha=0.7)
+                ax.legend(fontsize=8); ax.grid(alpha=0.3)
+                ax.set_title(f'W{sel_w} 买卖信号'); plt.xticks(rotation=30, fontsize=7)
+                plt.tight_layout()
+                st.pyplot(fig6)
+                plt.close()
+
+            # 盈亏分析 (卖出)
+            if len(sells) > 0 and 'pnl' in sells.columns:
+                st.markdown("---")
+                st.markdown("### 💰 卖出盈亏分析")
+                fig3, (ax_pnl, ax_hist) = plt.subplots(1, 2, figsize=(10, 3.5))
+                pnls = sells['pnl'].values
+                cumsum = np.cumsum(pnls)
+                colors_pnl = ['#2e7d32' if p >= 0 else '#c62828' for p in pnls]
+                ax_pnl.bar(range(len(pnls)), pnls, color=colors_pnl, width=1)
+                ax_pnl.plot(range(len(pnls)), cumsum, color='#1565c0', linewidth=1.5, label='累计')
+                ax_pnl.axhline(0, color='#999', linewidth=0.5)
+                ax_pnl.set_title('逐笔盈亏'); ax_pnl.legend(fontsize=8); ax_pnl.set_ylabel('¥')
                 ax_hist.hist(pnls, bins=30, color='#1565c0', alpha=0.7, edgecolor='white')
                 ax_hist.axvline(0, color='#999', linewidth=0.5)
                 ax_hist.axvline(np.mean(pnls), color='#c62828', linewidth=1.5, linestyle='--', label=f'均值 {np.mean(pnls):+.0f}')
                 ax_hist.set_title('盈亏分布'); ax_hist.legend(fontsize=8); ax_hist.set_xlabel('¥')
-
                 plt.tight_layout()
                 st.pyplot(fig3)
                 plt.close()
 
-            # 统计数字
-            tc1,tc2,tc3,tc4 = st.columns(4)
-            if len(sells) > 0 and 'pnl' in sells.columns:
-                tc1.metric("交易数", f"{len(sells)} 卖 / {len(buys)} 买")
-                tc2.metric("总盈亏", f"¥{sells['pnl'].sum():,.0f}")
-                tc3.metric("盈利占比", f"{(sells['pnl']>0).mean()*100:.0f}%")
-                tc4.metric("平均盈亏", f"¥{sells['pnl'].mean():,.0f}")
-            if 'commission' in td.columns:
-                tc1.metric("总手续费", f"¥{td['commission'].sum():,.0f}")
-
-            # 交易记录表
-            st.markdown('<p class="section-title">📜 最近交易 (卖出)</p>', unsafe_allow_html=True)
-            if len(sells) > 0:
-                show_cols = ['date','symbol','price','qty','pnl']
-                show_cols = [c for c in show_cols if c in sells.columns]
-                st.dataframe(sells[show_cols].tail(20), use_container_width=True, hide_index=True)
+            # 交易记录
+            st.markdown("### 📜 最近交易")
+            show_cols = ['date','symbol','action','price','qty','pnl','commission']
+            show_cols = [c for c in show_cols if c in td.columns]
+            st.dataframe(td[show_cols].tail(30), use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════
 #  Tab 4: 因子分析

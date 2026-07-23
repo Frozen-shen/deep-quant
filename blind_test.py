@@ -202,6 +202,12 @@ for wi, w in enumerate(windows, 7):
                     comm = calc_buy_commission(qty, px)
                     pm.apply_buy(s, qty, px, trade_date=ts, commission=comm)
                     position_entry[s] = {'entry_price': px, 'entry_date': ts, 'qty': qty}
+                    # ★ 记录买入
+                    trade_details.append({
+                        'date': ts, 'symbol': s, 'action': 'BUY',
+                        'price': px, 'qty': qty, 'commission': float(comm),
+                        'pnl': -float(comm),  # 买入成本
+                    })
 
         # ── 按收盘价标记 ──
         pm.snapshot(ts, cpt)
