@@ -247,6 +247,81 @@ with tabs[3]:
         show_cols=[c for c in show_cols if c in td.columns]
         st.dataframe(td[show_cols].tail(30),use_container_width=True,hide_index=True)
 
+    # ── 个股K线+买卖点 (新增) ──
+    st.markdown("---")
+    st.markdown('<p class="section-title">📈 个股K线 + 买卖点</p>', unsafe_allow_html=True)
+    if not trade_data:
+        st.info("运行 `python blind_test.py` 生成数据")
+    else:
+        sw_stock = st.selectbox("窗口",list(trade_data.keys()),key='stock_sel',index=len(trade_data)-1)
+        td_s = trade_data[sw_stock]
+        # 所有交易过的股票列表
+        traded_symbols = sorted(td_s['symbol'].unique())
+        stock_labels = [f"{s} {_name_map.get(s,'')}" for s in traded_symbols]
+        sel_idx = st.selectbox("选择股票", range(len(traded_symbols)),
+                               format_func=lambda i: stock_labels[i], key='stock_pick')
+        if sel_idx is not None:
+            sym = traded_symbols[sel_idx]
+            st_df = td_s[td_s['symbol'] == sym].copy()
+            buys_s = st_df[st_df['action'] == 'BUY']
+            sells_s = st_df[st_df['action'] == 'SELL']
+
+            # 加载该股票的日线数据
+            from data_cache import load
+            ohlcv = load(sym)
+            if ohlcv is not None and len(ohlcv) > 0:
+                ohlcv['date'] = pd.to_datetime(ohlcv['date'])
+                # 截取测试窗口范围
+                w_start = pd.Timestamp(eq_data[sw_stock].index[0])
+                w_end = pd.Timestamp(eq_data[sw_stock].index[-1])
+                mask = (ohlcv['date'] >= w_start) & (ohlcv['date'] <= w_end)
+                ohlcv_w = ohlcv[mask].set_index('date').sort_index()
+
+                if len(ohlcv_w) > 0:
+                    fig, ax = plt.subplots(figsize=(12, 5))
+                    # K线模拟 (用收盘价线+高低阴影替代)
+                    ax.plot(ohlcv_w.index, ohlcv_w['close'], color='#1565c0', linewidth=1.2, label=sym)
+                    ax.fill_between(ohlcv_w.index, ohlcv_w['low'], ohlcv_w['high'],
+                                     color='#1565c0', alpha=0.15)
+
+                    # 买卖点
+                    if len(buys_s) > 0 and 'date' in buys_s.columns:
+                        bd = pd.to_datetime(buys_s['date'])
+                        bp = [ohlcv_w.loc[d,'close'] if d in ohlcv_w.index else buys_s.iloc[i]['price']
+                              for i,d in enumerate(bd) if d in ohlcv_w.index]
+                        bd_f = [d for d in bd if d in ohlcv_w.index]
+                        if bd_f:
+                            ax.scatter(bd_f, bp, color='#2e7d32', s=80, marker='^', zorder=5,
+                                      edgecolors='white', linewidth=1, label=f'买入({len(bd_f)})')
+
+                    if len(sells_s) > 0 and 'date' in sells_s.columns:
+                        sd = pd.to_datetime(sells_s['date'])
+                        sp = [ohlcv_w.loc[d,'close'] if d in ohlcv_w.index else sells_s.iloc[i]['price']
+                              for i,d in enumerate(sd) if d in ohlcv_w.index]
+                        sd_f = [d for d in sd if d in ohlcv_w.index]
+                        if sd_f:
+                            ax.scatter(sd_f, sp, color='#c62828', s=80, marker='v', zorder=5,
+                                      edgecolors='white', linewidth=1, label=f'卖出({len(sd_f)})')
+
+                    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+                    ax.set_title(f'{sym} {_name_map.get(sym,"")} — {sector_data.get(sym,"")}  |  {w_start.date()} ~ {w_end.date()}', fontweight='bold')
+                    ax.set_ylabel('价格 (¥)')
+                    plt.xticks(rotation=30, fontsize=7)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close()
+
+                    # 股票统计
+                    c1,c2,c3 = st.columns(3)
+                    c1.metric("交易次数", f"买{len(buys_s)} 卖{len(sells_s)}")
+                    if len(sells_s) > 0 and 'pnl' in sells_s.columns:
+                        c2.metric("总盈亏", f"¥{sells_s.pnl.sum():,.0f}")
+                        c3.metric("盈利率", f"{(sells_s.pnl>0).mean()*100:.0f}%")
+                else:
+                    st.warning(f"{sym} 在测试窗口内无日线数据")
+            else:
+                st.warning(f"未找到 {sym} 的日线数据，请先运行 data_cache.py --fetch")
+
 # ═══════════ Tab 4: 因子分析 ═══════════
 with tabs[4]:
     st.markdown('<p class="section-title">🧬 因子重要性 & 术语解释</p>', unsafe_allow_html=True)
