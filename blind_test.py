@@ -266,6 +266,29 @@ for wi, w in enumerate(windows, 7):
 
     print(f'  策略: {ret:+.1f}% | 基准: {bench_avg:+.1f}% | 超额: {excess:+.1f}% | {len(trade_details)}笔')
 
+    # ★ 保存窗口数据到本地
+    os.makedirs('test_results', exist_ok=True)
+    
+    # 权益曲线
+    eq_df = pd.DataFrame({
+        'date': [d.strftime('%Y-%m-%d') for d in test_days][-len(equity_curve):],
+        'equity': equity_curve,
+        'benchmark': bench_curve[:len(equity_curve)],
+    })
+    eq_df.to_csv(f'test_results/equity_w{wi}.csv', index=False)
+    
+    # 交易明细
+    if trade_details:
+        pd.DataFrame(trade_details).to_csv(f'test_results/trades_w{wi}.csv', index=False)
+    
+    # 特征重要性
+    if model.feature_importance:
+        imp_df = pd.DataFrame(
+            {'factor': list(model.feature_importance.keys()),
+             'importance': list(model.feature_importance.values())}
+        ).sort_values('importance', ascending=False)
+        imp_df.to_csv(f'test_results/importance_w{wi}.csv', index=False)
+
 # ── 最终报告 ──
 # 开发集 W1-W6 指标 (从 v5 完整运行中提取, 仅作参考)
 dev_metrics = [
