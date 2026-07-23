@@ -52,9 +52,9 @@ else:
     ]
 
 MARKET = "a"
-TOP_K = 4  # 回退: 太多持仓引入噪音
+TOP_K = 5  # 20日标签: 稍分散持仓, 降低单票风险
 INITIAL = 100_000
-TRAIN_MONTHS = 18    # Phase 1.1: 3年→1.5年, 更快适应市场结构变化
+TRAIN_MONTHS = 12    # v5: 1.5→1年, 只学最近市场状态, 跟上风格切换
 TEST_MONTHS = 9     # 缩短测试窗口，增加窗口密度
 DAY_STEP = 2        # 1.5年训练窗口下提高采样密度
 
@@ -63,7 +63,7 @@ N_ESTIMATORS = 200
 MAX_DEPTH = 5      # 6→5, 更浅的树
 LEARNING_RATE = 0.05
 LAMBDA_L1 = 0.8    # 0.5→0.8, 样本量减半后加强L1正则
-MIN_DATA_IN_LEAF = 40  # 30→40, 更稳健的叶节点
+MIN_DATA_IN_LEAF = 60  # v5: 40→60, 12个月训练更防过拟合
 
 # 时间戳 (用于保存结果)
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -109,7 +109,7 @@ def build_cross_sectional_samples(day_data: dict, factor_cache: FactorCache,
         if feats is None:
             continue
 
-        # 前瞻收益率 (无数据泄露)
+        # 前瞻收益率 — 20日 (趋势跟随, 非均值回归. 诊断: 5日标签导致return_7d垄断)
         full_df = all_data[sym]
         try:
             date_mask = full_df["date"] == today
@@ -117,9 +117,9 @@ def build_cross_sectional_samples(day_data: dict, factor_cache: FactorCache,
                 continue
             today_pos = full_df.index[date_mask][0]
             iloc_pos = full_df.index.get_loc(today_pos)
-            if iloc_pos + 5 >= len(full_df):
+            if iloc_pos + 20 >= len(full_df):
                 continue
-            fwd_close = full_df.iloc[iloc_pos + 5]["close"]
+            fwd_close = full_df.iloc[iloc_pos + 20]["close"]
             today_close = full_df.iloc[iloc_pos]["close"]
             fwd = fwd_close / today_close - 1
         except (IndexError, KeyError):
@@ -141,9 +141,10 @@ def build_cross_sectional_samples(day_data: dict, factor_cache: FactorCache,
     std[std == 0] = 1.0
     feats_norm = (feats_raw - mean) / std
 
-    # 截面排名标签 (lambdarank)
+    # 截面排名标签 — 压缩到 [0, 30] (lambdarank 默认max_position=31)
     rets = np.array([day_rets[s] for s in syms])
-    labels = rankdata(rets).astype(int) - 1
+    n_stocks = len(rets)
+    labels = np.floor(rankdata(rets) / n_stocks * 30).astype(int)  # 0~30
 
     return feats_norm, labels, syms
 
@@ -251,7 +252,7 @@ for wi, w in enumerate(windows):
     # Phase 1.2: 时间衰减加权 — 近期样本权重更高 (半衰期~0.7年)
     train_end_dt = pd.Timestamp(w["train_end"])
     decay_weights = np.ones(len(X_list))
-    decay_lambda = np.log(2) / 0.7  # half-life = 0.7 years
+    decay_lambda = np.log(2) / 0.5  # v5: half-life=0.5年, 更快遗忘旧数据
     for ii, g in enumerate(group_list):
         sample_dt = pd.Timestamp(str(g))
         years_ago = max(0, (train_end_dt - sample_dt).days / 365.0)
@@ -281,11 +282,11 @@ for wi, w in enumerate(windows):
     storage.init_db()
 
     pm = PortfolioManager(market=MARKET, initial_capital=INITIAL)
-    ranker = PortfolioRanker(top_k=TOP_K, n_drop=2, hold_thresh=5,
+    ranker = PortfolioRanker(top_k=TOP_K, n_drop=3, hold_thresh=10,    # 20日标签: 持有≥2周
                              sell_rank_buffer=2,      # P1: 排名跌出top_k+2才卖
-                             buy_confirm_days=1,       # 30只池子, 1天确认足够
-                             cost_threshold=0.12,      # Phase 3.1: 0.08→0.12, 降低换手
-                             sector_neutral=False)     # 行业中性化反而降低收益
+                             buy_confirm_days=1,       # 单日确认
+                             cost_threshold=0.08,      # 20日标签: 降低换仓门槛
+                             sector_neutral=False)
 
     # Phase 2.4: 构建A股行业映射
     from sector_analyzer import build_a_share_sector_map

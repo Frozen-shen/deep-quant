@@ -104,6 +104,8 @@ class MLRanker:
             "objective": "lambdarank",
             "metric": "ndcg",
             "ndcg_eval_at": [1, 3, 5],
+            "max_position": 80,
+            "lambdarank_truncation_level": 80,  # 默认30, 需要≥max(label)
             "boosting_type": "gbdt",
             "num_leaves": 2 ** self.max_depth,
             "learning_rate": self.learning_rate,

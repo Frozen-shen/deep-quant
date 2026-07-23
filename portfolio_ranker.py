@@ -57,28 +57,28 @@ class PortfolioRanker:
 
     def set_regime(self, regime: str):
         """
-        根据市场状态动态调整参数 (Phase 3.2: 修正方向)。
+        根据市场状态动态调整参数。
 
         Args:
           regime: "trend_up" | "trend_down" | "range"
         """
         if regime == "trend_up":
-            # 牛市: 积极换仓追涨
-            self.hold_thresh = 5
+            # 牛市: 积极追涨
+            self.hold_thresh = 10
             self.sell_rank_buffer = 2
-            self.cost_threshold = 0.08
-            self.n_drop = 2
+            self.cost_threshold = 0.06
+            self.n_drop = 3
         elif regime == "trend_down":
-            # 熊市: 减仓少动防御
-            self.hold_thresh = 7
+            # 熊市: 防御减仓
+            self.hold_thresh = 14
             self.sell_rank_buffer = 3
             self.cost_threshold = 0.15
             self.n_drop = 1
-        else:  # range (default)
-            self.hold_thresh = 5
+        else:  # range
+            self.hold_thresh = 10
             self.sell_rank_buffer = 2
-            self.cost_threshold = 0.12
-            self.n_drop = 2
+            self.cost_threshold = 0.08
+            self.n_drop = 3
 
     def rank(self, scores: Dict[str, float],
              current_holdings: List[str],
