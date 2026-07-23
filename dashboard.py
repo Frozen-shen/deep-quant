@@ -257,8 +257,9 @@ with tabs[3]:
     else:
         sw_stock = st.selectbox("窗口",list(trade_data.keys()),key='stock_sel',index=len(trade_data)-1)
         td_s = trade_data[sw_stock]
-        # 所有交易过的股票列表
-        traded_symbols = sorted(td_s['symbol'].unique())
+        # 所有交易过的股票列表 (补齐代码)
+        td_s['symbol_padded'] = td_s['symbol'].astype(str).str.zfill(6)
+        traded_symbols = sorted(td_s['symbol_padded'].unique())
         stock_labels = [f"{s} {_name_map.get(s,'')}" for s in traded_symbols]
         sel_idx = st.selectbox("选择股票", range(len(traded_symbols)),
                                format_func=lambda i: stock_labels[i], key='stock_pick')
@@ -270,7 +271,10 @@ with tabs[3]:
 
             # 加载该股票的日线数据
             from data_cache import load
-            ohlcv = load(sym)
+            # 补齐代码到6位 (CSV存为数字会丢失前导零)
+            sym_padded = str(sym).zfill(6)
+            ohlcv = load(sym_padded)
+            if ohlcv is None: ohlcv = load(sym)  # fallback
             if ohlcv is not None and len(ohlcv) > 0:
                 ohlcv['date'] = pd.to_datetime(ohlcv['date'])
                 # 截取测试窗口范围
