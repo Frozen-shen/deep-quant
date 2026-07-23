@@ -372,14 +372,97 @@ class ModelEvaluator:
 
     def grade(self, window_metrics: List[Dict], trades: List[Dict] = None) -> Dict:
         """
-        综合评级 — 基于所有窗口的平均指标打分 (实盘导向)。
+        [DEPRECATED] 综合评级 — 不区分开发集/盲测集, 混在一起打分。
 
-        ★ 近期窗口权重更高 (最近半年 > 去年 > 前年)
-        ★ 最差窗口有单独惩罚项
+        请使用 grade_blind() 获取真实评分。
 
         Returns:
           {"grade": "C+", "score": 55.2, "pass": False, "details": {...}}
         """
+        return self._compute_grade(window_metrics, trades, label="mixed")
+
+    def grade_dev(self, dev_metrics: List[Dict]) -> Dict:
+        """
+        开发集参考评分 — 仅用于了解模型在调参数据上的拟合程度。
+        ⚠️ 此评分不纳入最终成绩, 因为参数是根据这些数据选出来的。
+        """
+        result = self._compute_grade(dev_metrics, None, label="dev")
+        result["_note"] = "仅供参考: 开发集数据参与了参数选择, 不代表真实表现"
+        return result
+
+    def grade_blind(self, test_metrics: List[Dict], trades: List[Dict] = None) -> Dict:
+        """
+        ★ 盲测集最终评分 — 这是真正的成绩单。
+
+        盲测集数据从未在开发过程中被查看。参数完全冻结后才跑一次。
+        结果直接就是最终评估, 不再做任何调整。
+        """
+        result = self._compute_grade(test_metrics, trades, label="blind")
+        result["_note"] = "★ 最终评分: 基于未参与开发的盲测数据"
+        return result
+
+    def report(self, dev_metrics: List[Dict], blind_metrics: List[Dict],
+               blind_trades: List[Dict] = None) -> Dict:
+        """
+        完整评估报告 — 明确分离开发集和盲测集。
+
+        Returns:
+          {
+            "dev": {开发集参考评分, 不计入最终成绩},
+            "blind": {★ 盲测集最终评分},
+            "oos_pct": 盲测数据占比,
+            "reliability": 盲测集可信度评估,
+          }
+        """
+        # 计算 OOS 占比
+        n_dev = len(dev_metrics)
+        n_blind = len(blind_metrics)
+        n_total = n_dev + n_blind
+        oos_pct = n_blind / n_total if n_total > 0 else 0
+
+        # 评估盲测可靠性
+        blind_days = sum(m.get("n_days", 0) for m in blind_metrics)
+        if blind_days >= 500:     reliability = "高"
+        elif blind_days >= 250:   reliability = "中"
+        elif blind_days >= 100:   reliability = "低"
+        else:                     reliability = "极低"
+
+        # 盲测窗口数
+        if n_blind >= 4:          window_conf = "充分"
+        elif n_blind >= 2:        window_conf = "勉强"
+        else:                     window_conf = "不足"
+
+        dev_score = self.grade_dev(dev_metrics)
+        blind_score = self.grade_blind(blind_metrics, blind_trades)
+
+        # 综合可信度
+        trust = "高" if (reliability == "高" and window_conf == "充分") else \
+                "中" if (reliability in ("高","中") and window_conf in ("充分","勉强")) else "低"
+
+        return {
+            "dev": {
+                "grade": dev_score["grade"],
+                "score": dev_score["score"],
+                "windows": n_dev,
+                "_note": "开发集 — 参与参数选择, 仅供参考, 不纳入最终成绩",
+                "details": dev_score.get("details", {}),
+            },
+            "blind": {
+                "grade": blind_score["grade"],
+                "score": blind_score["score"],
+                "windows": n_blind,
+                "_note": "★ 盲测集 — 未参与开发, 这是真实水平",
+                "details": blind_score.get("details", {}),
+            },
+            "oos_pct": round(oos_pct * 100, 1),
+            "reliability": reliability,
+            "blind_windows": window_conf,
+            "trust": f"可信度: {trust} (盲测{blind_days}天/{n_blind}窗)"
+        }
+
+    def _compute_grade(self, window_metrics: List[Dict], trades: List[Dict] = None,
+                       label: str = "mixed") -> Dict:
+        """内部实现: 单组窗口的评分计算。"""
         cross = self.analyze_cross_window(window_metrics)
         agg = cross.get("per_metric", {})
 
@@ -395,20 +478,17 @@ class ModelEvaluator:
         window_returns = [m.get("total_return", 0) for m in window_metrics]
         worst_window = min(window_returns) if window_returns else 0.0
 
-        # ★ 近期加权: 最近窗口权重×3, 次近×2, 其余×1
+        # ★ 近期加权: 最近窗口权重×2, 次近×1.5, 其余×1
         n = len(window_metrics)
         recent_weights = []
         for i in range(n):
-            if i == n - 1:      # 最近窗口
-                recent_weights.append(3.0)
-            elif i == n - 2:    # 次近
-                recent_weights.append(2.0)
-            else:
-                recent_weights.append(1.0)
+            if i == n - 1:      recent_weights.append(2.0)
+            elif i == n - 2:    recent_weights.append(1.5)
+            else:               recent_weights.append(1.0)
         w_sum = sum(recent_weights)
-        recent_weights = [w / w_sum * n for w in recent_weights]  # 归一化, 保持总权重=n
+        recent_weights = [w / w_sum * n for w in recent_weights] if w_sum > 0 else [1.0]*n
 
-        # ★ 近期加权平均: annual_return, sharpe, max_drawdown
+        # ★ 近期加权平均
         recent_weighted = {}
         for key in ["annual_return", "annual_excess", "sharpe_ratio",
                     "max_drawdown", "calmar_ratio", "up_capture", "upi",
@@ -425,7 +505,6 @@ class ModelEvaluator:
             weight = cfg["weight"]
             total_weight += weight
 
-            # ── 特殊指标 ──
             if metric_name == "pos_window_pct":
                 val = cross.get("pos_window_pct", 0)
             elif metric_name == "worst_window":
@@ -451,25 +530,30 @@ class ModelEvaluator:
 
         final_score = round(total_score / total_weight * 100, 1)
 
-        # Phase 1.3: 稳健性惩罚 — 任意窗口超额 < -10% 时乘以折扣因子
+        # 稳健性惩罚 — 只在盲测集上严格, 开发集宽松
         window_excesses = [m.get("excess_vs_benchmark", 0) for m in window_metrics]
         worst_excess = min(window_excesses) if window_excesses else 0.0
         robustness_penalty = 1.0
-        if worst_excess < -0.15:
-            robustness_penalty = 0.75  # 严重惩罚: 单窗亏损 >15%
-        elif worst_excess < -0.10:
-            robustness_penalty = 0.85  # 中度惩罚: 单窗亏损 >10%
 
-        # Phase 1.3: 一致性惩罚 — 超额离散度/均值 (变异系数)
-        if len(window_excesses) >= 2:
-            mean_ex = np.mean(window_excesses)
-            std_ex = np.std(window_excesses)
-            if abs(mean_ex) > 0.001:
-                cv = std_ex / abs(mean_ex)  # coefficient of variation
-                if cv > 3.0:
-                    robustness_penalty *= 0.85  # 高离散度额外惩罚
-                elif cv > 2.0:
-                    robustness_penalty *= 0.92
+        if label == "blind":
+            # 盲测集: 严格的稳健性要求
+            if worst_excess < -0.10:
+                robustness_penalty = 0.80
+            elif worst_excess < -0.05:
+                robustness_penalty = 0.90
+            if len(window_excesses) >= 2:
+                mean_ex = np.mean(window_excesses)
+                std_ex = np.std(window_excesses)
+                if abs(mean_ex) > 0.001:
+                    cv = std_ex / abs(mean_ex)
+                    if cv > 2.5:
+                        robustness_penalty *= 0.85
+                    elif cv > 1.5:
+                        robustness_penalty *= 0.92
+        else:
+            # 开发集: 宽松惩罚 (本来就不会用于最终评分)
+            if worst_excess < -0.15:
+                robustness_penalty = 0.75
 
         final_score *= robustness_penalty
         if robustness_penalty < 0.99:
