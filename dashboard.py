@@ -7,6 +7,8 @@ os.chdir(BASE_DIR); sys.path.insert(0, BASE_DIR)
 
 import streamlit as st, pandas as pd, numpy as np
 import matplotlib.pyplot as plt, matplotlib; matplotlib.use('Agg')
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 st.set_page_config(page_title="Deep Quant", page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
 
