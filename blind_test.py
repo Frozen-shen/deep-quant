@@ -46,6 +46,15 @@ factor_cache.precompute(ALL_DATA)
 sector_map = build_a_share_sector_map(SYMBOLS)
 evaluator = ModelEvaluator()
 
+# ★ 股票名称映射
+import json
+_name_map = {}
+try:
+    with open('data_cache/stock_names.json') as f:
+        _name_map = json.load(f)
+except: pass
+_name_map = {k: str(v) for k, v in _name_map.items()}  # ensure string keys
+
 # ── 窗口定义 ──
 test_start = pd.Timestamp('2025-07-01')
 windows = []
@@ -186,7 +195,8 @@ for wi, w in enumerate(windows, 7):
                 pnl = (px - entry_px) * qty - comm
                 pm.apply_sell(s, qty, px, trade_date=ts, commission=comm)
                 trade_details.append({
-                    'date': ts, 'symbol': s, 'action': 'SELL',
+                    'date': ts, 'symbol': s, 'name': _name_map.get(s, ''), 'sector': sector_map.get(s, ''),
+                    'action': 'SELL',
                     'price': px, 'qty': qty, 'commission': float(comm),
                     'pnl': pnl, 'entry_price': entry_px,
                     'entry_date': entry.get('entry_date', ts),
@@ -204,9 +214,10 @@ for wi, w in enumerate(windows, 7):
                     position_entry[s] = {'entry_price': px, 'entry_date': ts, 'qty': qty}
                     # ★ 记录买入
                     trade_details.append({
-                        'date': ts, 'symbol': s, 'action': 'BUY',
+                        'date': ts, 'symbol': s, 'name': _name_map.get(s, ''), 'sector': sector_map.get(s, ''),
+                        'action': 'BUY',
                         'price': px, 'qty': qty, 'commission': float(comm),
-                        'pnl': -float(comm),  # 买入成本
+                        'pnl': -float(comm),
                     })
 
         # ── 按收盘价标记 ──
