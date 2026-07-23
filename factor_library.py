@@ -53,9 +53,9 @@ MA_FACTORS = {
     "ma10_cross_ma20":    "Cross(Mean($close, 10), Mean($close, 20))",
     "ma5_cross_ma60":     "Cross(Mean($close, 5), Mean($close, 60))",
 
-    # 均线排列
-    "ma_bullish":  "Mean($close, 5) > Mean($close, 10) > Mean($close, 20)",
-    "ma_bearish":  "Mean($close, 5) < Mean($close, 10) < Mean($close, 20)",
+    # 均线排列 (用乘法代替链式比较, 因为 A>B>C 会被解析为 (A>B)>C 产生bug)
+    "ma_bullish":  "(Mean($close, 5) > Mean($close, 10)) * (Mean($close, 10) > Mean($close, 20))",
+    "ma_bearish":  "(Mean($close, 5) < Mean($close, 10)) * (Mean($close, 10) < Mean($close, 20))",
 }
 
 
@@ -233,6 +233,43 @@ PHASE2_FACTORS = {
     "rsqr_60":      "RSqr($close, 60)",
 }
 
+# ================================================================
+#  P2 增强因子: 动量反转 + 流动性 + 波动率regime
+# ================================================================
+
+P2_ENHANCED_FACTORS = {
+    # ── 动量反转复合 ──
+    # 短期反转 (1-3天): 昨日跌的今日可能涨 (A股散户效应)
+    "reversal_1d":    "-(Ref($close, 1) / $close - 1)",
+    "reversal_3d":    "-(Ref($close, 3) / $close - 1)",
+    # 中期动量 (7-20天): 趋势延续
+    "momentum_7d":    "Ref($close, 7) / $close - 1",
+    "momentum_20d":   "Ref($close, 20) / $close - 1",
+    # 反转-动量交叉: 短期反转+中期动量 = 高质量信号
+    "rev_mom_spread": "-(Ref($close, 1) / $close - 1) + Ref($close, 20) / $close - 1",
+
+    # ── 流动性 ──
+    # Amihud illiquidity: |return| / amount — 值越大流动性越差
+    "amihud_5d":   "Mean(Abs(Ref($close, 1) / $close - 1) / ($amount + 1), 5)",
+    "amihud_20d":  "Mean(Abs(Ref($close, 1) / $close - 1) / ($amount + 1), 20)",
+    # 换手率趋势: 近5日换手率 vs 20日均值 — 放量上涨/缩量下跌
+    "turnover_trend": "Mean($turnover, 5) / (Mean($turnover, 20) + 0.01)",
+    # 量价同步性: 价涨量增=健康, 价涨量缩=虚弱
+    "vol_price_sync": "($close / Ref($close, 5) - 1) * ($volume / Mean($volume, 20) - 1)",
+
+    # ── 波动率regime ──
+    # 波动率变化率: 近期波动 vs 长期波动
+    "vol_regime":  "Std(Ref($close, 1) / $close - 1, 10) / (Std(Ref($close, 1) / $close - 1, 60) + 0.001)",
+    # 波动压缩: 布林带宽度变化
+    "vol_compress": "Std($close, 5) / (Std($close, 20) + 0.01)",
+    # 高低价范围: 近期高低差占比
+    "range_20d":   "(Max($high, 20) - Min($low, 20)) / $close",
+
+    # ── 均线排列质量 (已修复链式比较bug) ──
+    "ma_bullish":  "(Mean($close, 5) > Mean($close, 10)) * (Mean($close, 10) > Mean($close, 20))",
+    "ma_bearish":  "(Mean($close, 5) < Mean($close, 10)) * (Mean($close, 10) < Mean($close, 20))",
+}
+
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
 
@@ -246,10 +283,13 @@ def get_candlestick_factors() -> FactorLibrary:
     return FactorLibrary.from_config(CANDLESTICK_FACTORS)
 
 def get_all_factors() -> FactorLibrary:
-    """合并所有预定义因子。"""
+    """合并所有预定义因子 (含 Phase2 + P2增强)。"""
     all_config = {}
     all_config.update(PRICE_FACTORS)
     all_config.update(MA_FACTORS)
     all_config.update(VOLUME_FACTORS)
     all_config.update(CANDLESTICK_FACTORS)
+    all_config.update(EXPANDED_FACTORS)
+    all_config.update(PHASE2_FACTORS)
+    all_config.update(P2_ENHANCED_FACTORS)
     return FactorLibrary.from_config(all_config)

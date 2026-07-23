@@ -2,6 +2,7 @@
 回测引擎 — 逐日模拟交易，支持 A股(T+1) + 港股(T+0)
 
 基于收盘价执行，双边手续费。
+支持真实A股费率 (印花税/过户费/最低5元) 通过 trading_rules 模块。
 """
 
 import pandas as pd
@@ -16,14 +17,17 @@ class BacktestEngine:
     ----
     initial_capital : float
     buy_commission : float
-        买入手续费率
+        买入手续费率 (仅在不使用 commission_fn 时生效)
     sell_commission : float
-        卖出手续费率 (港股含印花税，通常高于买入)
+        卖出手续费率 (仅在不使用 commission_fn 时生效)
     t_plus : int
     lot_size : int
         (保留) 向后兼容
     commission : float
         (保留) 向后兼容 — 若设置则覆盖 buy/sell
+    commission_fn : callable, optional
+        自定义费率函数 (qty, price, side) -> fee_amount
+        若提供则覆盖 buy_commission/sell_commission
     """
 
     def __init__(
@@ -38,6 +42,7 @@ class BacktestEngine:
         max_hold_days: int = 20,
         atr_position_sizing: bool = True,   # ★ ATR动态仓位
         risk_per_trade: float = 0.02,       # ★ 单笔风险2%
+        commission_fn=None,                 # ★ 自定义费率函数
         **kwargs,
     ):
         self.initial_capital = initial_capital
@@ -54,12 +59,35 @@ class BacktestEngine:
         self.max_hold_days = max_hold_days
         self.atr_position_sizing = atr_position_sizing
         self.risk_per_trade = risk_per_trade
+        self.commission_fn = commission_fn
+
+    def _calc_buy_fee(self, qty: float, price: float) -> float:
+        """计算买入手续费。"""
+        if self.commission_fn:
+            return self.commission_fn(qty, price, "buy")
+        return qty * price * self.buy_commission
+
+    def _calc_sell_fee(self, qty: float, price: float) -> float:
+        """计算卖出手续费 (含印花税等)。"""
+        if self.commission_fn:
+            return self.commission_fn(qty, price, "sell")
+        return qty * price * self.sell_commission
 
     @classmethod
     def for_market(cls, market: str = "a", initial_capital: float = 100_000) -> "BacktestEngine":
         """根据市场创建预配置的回测引擎。"""
         from data_fetcher import MARKET_CONFIG
         cfg = MARKET_CONFIG.get(market, MARKET_CONFIG["a"])
+
+        # A股使用真实费率函数 (印花税+过户费+最低5元)
+        commission_fn = None
+        if market == "a":
+            try:
+                from trading_rules import calc_commission
+                commission_fn = calc_commission
+            except ImportError:
+                pass
+
         return cls(
             initial_capital=initial_capital,
             buy_commission=cfg.get("buy_commission", cfg["commission_default"]),
@@ -69,6 +97,7 @@ class BacktestEngine:
             stop_loss_atr=2.0,
             trailing_stop_pct=0.02,
             max_hold_days=20,
+            commission_fn=commission_fn,
         )
 
     def run(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -170,29 +199,28 @@ class BacktestEngine:
 
             # ---- 买入信号 (在当日开盘价执行) ----
             if exec_sig == 1 and holdings == 0 and can_buy:
-                available = cash * (1 - self.buy_commission)
-
                 # ATR 动态仓位: 波动越大仓位越小
                 if self.atr_position_sizing and atr > 0 and open_price > 0:
                     risk_amount = cash * self.risk_per_trade
                     stop_distance = self.stop_loss_atr * atr
                     target_shares = risk_amount / stop_distance
-                    cost = min(target_shares * open_price, available)
+                    cost = min(target_shares * open_price, cash)
                     if self.lot_size > 0:
                         lots = int(cost / (open_price * self.lot_size))
                         holdings = lots * self.lot_size
                     else:
                         holdings = cost / open_price
-                    cash -= holdings * open_price * (1 + self.buy_commission)
+                    buy_fee = self._calc_buy_fee(holdings, open_price)
+                    cash -= holdings * open_price + buy_fee
                 else:
                     # 原逻辑: 全仓
                     if self.lot_size > 0:
-                        lots = int(available / (open_price * self.lot_size))
+                        lots = int(cash / (open_price * self.lot_size))
                         holdings = lots * self.lot_size
-                        cash -= holdings * open_price * (1 + self.buy_commission)
                     else:
-                        holdings = available / open_price
-                        cash = 0.0
+                        holdings = cash / open_price
+                    buy_fee = self._calc_buy_fee(holdings, open_price)
+                    cash -= holdings * open_price + buy_fee
                 entry_price = open_price
                 highest_since_entry = close
                 hold_days = 0
@@ -201,8 +229,8 @@ class BacktestEngine:
 
             # ---- 卖出信号 OR 风控卖出 ----
             elif (exec_sig == -1 or risk_sell) and can_sell:
-                proceeds = holdings * open_price * (1 - self.sell_commission)
-                cash += proceeds
+                sell_fee = self._calc_sell_fee(holdings, open_price)
+                cash += holdings * open_price - sell_fee
                 holdings = 0.0
                 entry_price = 0.0
                 highest_since_entry = 0.0

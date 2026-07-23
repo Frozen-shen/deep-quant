@@ -450,6 +450,33 @@ class ModelEvaluator:
             return {"grade": "N/A", "score": 0, "pass": False, "details": {}}
 
         final_score = round(total_score / total_weight * 100, 1)
+
+        # Phase 1.3: 稳健性惩罚 — 任意窗口超额 < -10% 时乘以折扣因子
+        window_excesses = [m.get("excess_vs_benchmark", 0) for m in window_metrics]
+        worst_excess = min(window_excesses) if window_excesses else 0.0
+        robustness_penalty = 1.0
+        if worst_excess < -0.15:
+            robustness_penalty = 0.75  # 严重惩罚: 单窗亏损 >15%
+        elif worst_excess < -0.10:
+            robustness_penalty = 0.85  # 中度惩罚: 单窗亏损 >10%
+
+        # Phase 1.3: 一致性惩罚 — 超额离散度/均值 (变异系数)
+        if len(window_excesses) >= 2:
+            mean_ex = np.mean(window_excesses)
+            std_ex = np.std(window_excesses)
+            if abs(mean_ex) > 0.001:
+                cv = std_ex / abs(mean_ex)  # coefficient of variation
+                if cv > 3.0:
+                    robustness_penalty *= 0.85  # 高离散度额外惩罚
+                elif cv > 2.0:
+                    robustness_penalty *= 0.92
+
+        final_score *= robustness_penalty
+        if robustness_penalty < 0.99:
+            details["_robustness_penalty"] = {"value": round(robustness_penalty, 3),
+                                               "score": round(robustness_penalty, 2),
+                                               "weight": 0, "grade": ""}
+
         grade = _final_grade(final_score)
 
         return {

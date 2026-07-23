@@ -116,6 +116,51 @@ class DataFetcher:
         return MARKET_CONFIG.get(market, MARKET_CONFIG["a"]).copy()
 
     @staticmethod
+    def fetch_index_components(index_code: str = "000300", min_list_days: int = 500) -> list:
+        """
+        获取指数成分股列表 (Phase 2.1)。
+
+        参数:
+          index_code: 指数代码
+            - "000300": 沪深300
+            - "000905": 中证500
+            - "000852": 中证1000
+          min_list_days: 最少上市天数 (避免新股/次新股偏差)
+
+        返回:
+          成分股代码列表, 如 ["600519", "000858", ...]
+        """
+        import akshare as ak
+        try:
+            df = ak.index_stock_cons(index_code)
+            if df is None or len(df) == 0:
+                print(f"  [DataFetcher] 指数 {index_code} 成分股为空")
+                return []
+
+            # 不同指数返回格式不同，尝试多列提取
+            symbols = []
+            for col in ["品种代码", "stock_code", "成分券代码", "代码"]:
+                if col in df.columns:
+                    symbols = df[col].astype(str).tolist()
+                    break
+            if not symbols:
+                symbols = df.iloc[:, 0].astype(str).tolist()
+
+            # 清洗: 去空格、去市场前缀 (sh/sz/6)
+            clean = []
+            for s in symbols:
+                s = s.strip()
+                if s.startswith(("sh", "sz", "bj")):
+                    s = s[2:]
+                clean.append(s)
+
+            print(f"  [DataFetcher] 指数 {index_code}: {len(clean)} 只成分股")
+            return clean
+        except Exception as e:
+            print(f"  [DataFetcher] 获取指数成分股失败: {e}")
+            return []
+
+    @staticmethod
     def _detect_market(symbol: str) -> str:
         """
         自动检测市场。

@@ -155,13 +155,21 @@ class RiskManager:
         """
         Kelly公式仓位计算 (默认半凯利)。
 
+        标准 Kelly: f* = p - (1-p)/b, 其中 b = avg_win/avg_loss (赔率)
+        半凯利: position = equity * f* * 0.5
+
         Args:
-          fraction: 凯利分数 (0.5 = 半凯利)
+          win_rate: 历史胜率
+          avg_win: 平均盈利金额 (正数)
+          avg_loss: 平均亏损金额 (正数)
+          equity: 当前总权益
+          fraction: 凯利分数 (0.5 = 半凯利, 降低波动)
         """
-        if avg_loss <= 0 or win_rate <= 0:
+        if avg_loss <= 0 or avg_win <= 0 or win_rate <= 0:
             return 0.0
-        kelly_pct = (win_rate * avg_win - (1 - win_rate) * avg_loss) / (avg_win * avg_loss)
-        kelly_pct = max(0.0, kelly_pct)
+        b = avg_win / avg_loss  # 赔率 (win/loss ratio)
+        kelly_pct = win_rate - (1 - win_rate) / b
+        kelly_pct = max(0.0, min(kelly_pct, 1.0))  # 限制在 [0, 1]
         return equity * kelly_pct * fraction
 
     @staticmethod

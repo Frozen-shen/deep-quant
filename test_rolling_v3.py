@@ -30,35 +30,40 @@ from ml_ranker import MLRanker  # 默认: MLRanker (DEnsembleRanker 可选,见 m
 from evaluator import ModelEvaluator
 from trading_rules import TradingRules, calc_buy_commission, calc_sell_commission
 from risk_manager import RiskManager
+from regime_detector import RegimeDetector, Regime
 
 # ════════════════════════════════════════
 #  配置
 # ════════════════════════════════════════
 
-SYMBOLS = [
-    "688981","002371","002049",
-    "002230","300033",
-    "300750","002594",
-    "601012","300274",
-    "600519","000858",
-    "601318","600036",
-    "300760","600276",
-    "600760","601668","300122",
-]
+# Phase 2.2: 动态股票池 — 优先从缓存加载所有可用股票
+# 用 data_cache.py --fetch-index 000300 拉取CSI300成分股
+from data_cache import get_cached_symbols
+_cached = get_cached_symbols()
+if len(_cached) > 20:
+    SYMBOLS = _cached  # 使用完整缓存池 (50-80只)
+else:
+    # 回退: 使用预定义的30只股票池
+    SYMBOLS = [
+        "688981","002371","603986","002049","688012","300782","688396",
+        "300033","002230","688111","300454","688561","300750","002594","601012",
+        "300274","688005","600519","000858","000568","002714","601318","600036",
+        "000001","300760","600276","300122","688180","600760","601668",
+    ]
 
 MARKET = "a"
-TOP_K = 4
+TOP_K = 4  # 回退: 太多持仓引入噪音
 INITIAL = 100_000
-TRAIN_YEARS = 3
-TEST_MONTHS = 12
-DAY_STEP = 3  # 每N天采样(FactorCache下3足够快)
+TRAIN_MONTHS = 18    # Phase 1.1: 3年→1.5年, 更快适应市场结构变化
+TEST_MONTHS = 9     # 缩短测试窗口，增加窗口密度
+DAY_STEP = 2        # 1.5年训练窗口下提高采样密度
 
-# LightGBM 参数
+# LightGBM 参数 (Phase 1.1: 训练窗口缩短后加强正则化防过拟合)
 N_ESTIMATORS = 200
-MAX_DEPTH = 6
+MAX_DEPTH = 5      # 6→5, 更浅的树
 LEARNING_RATE = 0.05
-LAMBDA_L1 = 0.5  # 最佳: 足够正则化防过拟合 (0.3过拟合降为+3.0%均值)
-MIN_DATA_IN_LEAF = 30
+LAMBDA_L1 = 0.8    # 0.5→0.8, 样本量减半后加强L1正则
+MIN_DATA_IN_LEAF = 40  # 30→40, 更稳健的叶节点
 
 # 时间戳 (用于保存结果)
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -174,7 +179,7 @@ windows = []
 current = test_start
 while current < test_end:
     test_period_end = min(current + pd.DateOffset(months=TEST_MONTHS), test_end)
-    train_start = current - pd.DateOffset(years=TRAIN_YEARS)
+    train_start = current - pd.DateOffset(months=TRAIN_MONTHS)
     windows.append({
         "train_start": train_start.strftime("%Y-%m-%d"),
         "train_end": (current - timedelta(days=1)).strftime("%Y-%m-%d"),
@@ -243,6 +248,15 @@ for wi, w in enumerate(windows):
     y = np.array(y_list, dtype=int)
     groups = pd.Series(group_list).astype(str).factorize()[0]
 
+    # Phase 1.2: 时间衰减加权 — 近期样本权重更高 (半衰期~0.7年)
+    train_end_dt = pd.Timestamp(w["train_end"])
+    decay_weights = np.ones(len(X_list))
+    decay_lambda = np.log(2) / 0.7  # half-life = 0.7 years
+    for ii, g in enumerate(group_list):
+        sample_dt = pd.Timestamp(str(g))
+        years_ago = max(0, (train_end_dt - sample_dt).days / 365.0)
+        decay_weights[ii] = np.exp(-decay_lambda * years_ago)
+
     model = MLRanker(
         n_estimators=N_ESTIMATORS,
         max_depth=MAX_DEPTH,
@@ -251,7 +265,7 @@ for wi, w in enumerate(windows):
         min_data_in_leaf=MIN_DATA_IN_LEAF,
     )
     model.feature_names = factor_names
-    model.fit(X, y, groups, val_ratio=0.2)
+    model.fit(X, y, groups, val_ratio=0.15, sample_weight=decay_weights)  # Phase 1.2: 时间衰减权重
     
     # DEnsembleRanker 可用: n_models=2 验证通过 (288笔), 但均值-0.7% vs MLRanker +7.6%
     # 需调参 (n_models/alpha) 后才能优于基线
@@ -267,7 +281,16 @@ for wi, w in enumerate(windows):
     storage.init_db()
 
     pm = PortfolioManager(market=MARKET, initial_capital=INITIAL)
-    ranker = PortfolioRanker(top_k=TOP_K, n_drop=2, hold_thresh=10)
+    ranker = PortfolioRanker(top_k=TOP_K, n_drop=2, hold_thresh=5,
+                             sell_rank_buffer=2,      # P1: 排名跌出top_k+2才卖
+                             buy_confirm_days=1,       # 30只池子, 1天确认足够
+                             cost_threshold=0.12,      # Phase 3.1: 0.08→0.12, 降低换手
+                             sector_neutral=False)     # 行业中性化反而降低收益
+
+    # Phase 2.4: 构建A股行业映射
+    from sector_analyzer import build_a_share_sector_map
+    sector_map = build_a_share_sector_map(SYMBOLS)
+    print(f"  [Sector] 行业映射: {len(set(sector_map.values()))} 个行业")
 
     # Macro — 容错: 如果网络不通, 使用默认中性评分
     try:
@@ -276,6 +299,15 @@ for wi, w in enumerate(windows):
     except Exception:
         print("  [Macro] 网络不可用, 使用中性评分")
         macro = MacroOverlay(market=MARKET)
+
+    # P3: Regime Detection — 加载指数数据检测市场状态
+    regime_detector = RegimeDetector(market=MARKET)
+    regime_loaded = regime_detector.load_index_data()
+    if regime_loaded:
+        print(f"  [Regime] 指数数据加载成功")
+    else:
+        print(f"  [Regime] 指数数据不可用, 使用默认参数")
+    regime_stats = {"trend_up": 0, "trend_down": 0, "range": 0}
 
     test_days = [d for d in all_days
                  if pd.Timestamp(w["test_start"]) <= d <= pd.Timestamp(w["test_end"])]
@@ -356,7 +388,14 @@ for wi, w in enumerate(windows):
 
         state = pm.load()
         holdings = [s for s, p in state.positions.items() if p["qty"] > 0]
-        decision = ranker.rank(scores, holdings)
+
+        # P3: 市场状态自适应 — 每日检测regime并调整ranker参数
+        if regime_loaded:
+            regime = regime_detector.detect(today)
+            regime_stats[regime.value] += 1
+            ranker.set_regime(regime.value)
+
+        decision = ranker.rank(scores, holdings, sectors=sector_map)  # Phase 2.4: 行业中性化
         # 风控检查 (可选: risk_mgr 不为 None 时启用)
         if risk_mgr is not None:
             holdings_val = sum(cp_today.get(s, 0) * p["qty"]
@@ -461,8 +500,9 @@ for wi, w in enumerate(windows):
         json.dump(window_detail, f, default=str)
 
     mark = "✅" if excess > 0 else "❌"
+    regime_report = f"  regime: ↑{regime_stats['trend_up']} ↓{regime_stats['trend_down']} ↔{regime_stats['range']}" if regime_loaded else ""
     print(f"  策略: {ret:+.1f}%  基准: {bench_avg:+.1f}%  "
-          f"超额: {excess:+.1f}%  {trades}笔 {mark}")
+          f"超额: {excess:+.1f}%  {trades}笔 {mark}{regime_report}")
 
 
 # ════════════════════════════════════════
@@ -557,7 +597,7 @@ if all_results:
     imp_csv = os.path.join(RESULTS_DIR, f"feature_importance_{TIMESTAMP}.csv")
     imp_rows = []
     for w, items in feature_importance_log.items():
-        for f, g in items:
+        for f, g in items.items():
             imp_rows.append({"window": w, "factor": f, "gain": g})
     imp_df = pd.DataFrame(imp_rows)
     imp_df.to_csv(imp_csv, index=False)

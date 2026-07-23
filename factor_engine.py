@@ -240,6 +240,9 @@ class _UnaryFunc(Factor):
     def evaluate(self, df: pd.DataFrame) -> pd.Series:
         return self.func(self.child.evaluate(df))
 
+    def __repr__(self):
+        return f"{self.name}({self.child})"
+
 
 class CorrFactor(Factor):
     """滚动相关系数: Corr($field1, $field2, N) — 价量相关性"""
@@ -289,9 +292,6 @@ class RSqrFactor(Factor):
     def __repr__(self):
         return f"RSqr({self.child},{self.window})"
 
-    def __repr__(self):
-        return f"{self.name}({self.child})"
-
 
 # ============================================================================
 #  Parser — 字符串 → Factor 树
@@ -338,12 +338,22 @@ def _tokenize(expr: str) -> List[tuple]:
 
 
 def _parse_expr(tokens: List[tuple], pos: int = 0) -> (Factor, int):
-    """递归下降解析器: expr → term (CMP term)*"""
+    """递归下降解析器: expr → add_sub (CMP add_sub)*"""
 
-    def parse_term(tokens, pos):
-        """term → factor (OP factor)*"""
+    def parse_add_sub(tokens, pos):
+        """add_sub → mul_div (('+', '-') mul_div)*"""
+        left, pos = parse_mul_div(tokens, pos)
+        while pos < len(tokens) and tokens[pos][0] == "OP" and tokens[pos][1] in ("+", "-"):
+            op = tokens[pos][1]
+            pos += 1
+            right, pos = parse_mul_div(tokens, pos)
+            left = ArithFactor(left, right, op)
+        return left, pos
+
+    def parse_mul_div(tokens, pos):
+        """mul_div → factor (('*', '/') factor)*"""
         left, pos = parse_factor(tokens, pos)
-        while pos < len(tokens) and tokens[pos][0] == "OP":
+        while pos < len(tokens) and tokens[pos][0] == "OP" and tokens[pos][1] in ("*", "/"):
             op = tokens[pos][1]
             pos += 1
             right, pos = parse_factor(tokens, pos)
@@ -351,17 +361,23 @@ def _parse_expr(tokens: List[tuple], pos: int = 0) -> (Factor, int):
         return left, pos
 
     def parse_factor(tokens, pos):
-        """factor → NUMBER | FIELD | FUNC(args) | LPAREN expr RPAREN"""
+        """factor → ('+'|'-')? (NUMBER | FIELD | FUNC(args) | LPAREN expr RPAREN)"""
         if pos >= len(tokens):
             raise SyntaxError("表达式不完整")
+
+        # 一元 +/- 处理: -$close, -Mean(...), -(a+b)
+        unary_op = None
+        if tokens[pos][0] == "OP" and tokens[pos][1] in ("+", "-"):
+            unary_op = tokens[pos][1]
+            pos += 1
 
         tok_type, val = tokens[pos]
         pos += 1
 
         if tok_type == "NUMBER":
-            return ConstFactor(float(val)), pos
+            result = ConstFactor(float(val))
         elif tok_type == "FIELD":
-            return FieldFactor(val), pos
+            result = FieldFactor(val)
         elif tok_type == "FUNC":
             # 函数调用: FUNC LPAREN args RPAREN
             func_name = val
@@ -380,23 +396,26 @@ def _parse_expr(tokens: List[tuple], pos: int = 0) -> (Factor, int):
             if pos >= len(tokens) or tokens[pos][0] != "RPAREN":
                 raise SyntaxError(f"函数 {func_name} 缺少右括号")
             pos += 1  # skip RPAREN
-
-            return _make_func(func_name, args), pos
+            result = _make_func(func_name, args)
         elif tok_type == "LPAREN":
-            expr, pos = _parse_expr(tokens, pos)
+            result, pos = _parse_expr(tokens, pos)
             if pos >= len(tokens) or tokens[pos][0] != "RPAREN":
                 raise SyntaxError("缺少右括号")
             pos += 1
-            return expr, pos
         else:
             raise SyntaxError(f"意外的 token: {tok_type}:{val}")
 
-    # expr → term (CMP term)*
-    left, pos = parse_term(tokens, pos)
+        # 应用一元负号: -(expr) → 0 - expr, -expr → 0 - expr
+        if unary_op == "-":
+            result = ArithFactor(ConstFactor(0), result, "-")
+        return result, pos
+
+    # expr → add_sub (CMP add_sub)*
+    left, pos = parse_add_sub(tokens, pos)
     while pos < len(tokens) and tokens[pos][0] == "CMP":
         op = tokens[pos][1]
         pos += 1
-        right, pos = parse_term(tokens, pos)
+        right, pos = parse_add_sub(tokens, pos)
         left = CmpFactor(left, right, op)
     return left, pos
 

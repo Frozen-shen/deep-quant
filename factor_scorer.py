@@ -88,7 +88,7 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
     },
 
-    # IC优化型 — 只保留IC>0的因子 + 新增Alpha158因子
+    # IC优化型 — 只保留IC>0的因子 + 新增Alpha158因子 + P2增强
     "ic_optimized": {
         "name": "IC优化",
         "factors": {
@@ -106,6 +106,13 @@ FACTOR_PRESETS = {
             "channel_high_20": 0.03, "skew_20d": 0.02,
             "turnover_vol": 0.03, "liq_ratio": 0.02,
             "boll_width": 0.03, "macd_hist": 0.03,
+            # ★ P2 增强因子
+            "reversal_1d": 0.03, "reversal_3d": 0.02,
+            "momentum_7d": 0.03, "momentum_20d": 0.02,
+            "rev_mom_spread": 0.04,
+            "vol_price_sync": 0.03, "turnover_trend": 0.02,
+            "vol_regime": 0.03, "vol_compress": 0.02,
+            "range_20d": 0.02, "ma_bullish": 0.03,
         },
         "buy_threshold": 0.15,
         "sell_threshold": -0.10,
@@ -198,10 +205,11 @@ class FactorScorer:
         all_config = {}
         from factor_library import (PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS,
             CANDLESTICK_FACTORS, NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS,
-            NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS, EXPANDED_FACTORS)
+            NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS, EXPANDED_FACTORS,
+            PHASE2_FACTORS, P2_ENHANCED_FACTORS)
         for d in [PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS, CANDLESTICK_FACTORS,
                   NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS, NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS,
-                  EXPANDED_FACTORS]:
+                  EXPANDED_FACTORS, PHASE2_FACTORS, P2_ENHANCED_FACTORS]:
             all_config.update(d)
         return all_config.get(name, f"${name}")
 

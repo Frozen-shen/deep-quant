@@ -1,67 +1,78 @@
 # deep-quant
 
-A股多因子 Top-K 排名量化交易系统 — 18只股票截面评分 → LightGBM Lambdarank 动态选股
+A股多因子 Top-K 排名量化系统 — 30只股票 × 39因子 → LightGBM Lambdarank 动态选股
 
-## 核心结果 (诚实滚动重训练)
+## 核心结果 (v4 全优化, 诚实8窗口滚动重训练)
 
 | 窗口 | 训练期 | 测试期 | 策略收益 | 基准 | **超额** |
 |------|------|------|------:|------:|:------:|
-| W1 | 2018-2020 | 2021 | +39.9% | +14.5% | **+25.5%** ✅ |
-| W2 | 2019-2021 | 2022 | +5.9% | -18.4% | **+24.3%** ✅ |
-| W3 | 2020-2022 | 2023 | +18.6% | -4.2% | **+22.8%** ✅ |
-| W4 | 2021-2023 | 2024 | +31.8% | +24.3% | **+7.4%** ✅ |
-| W5 | 2022-2024 | 2025 | +24.1% | +22.7% | **+1.4%** ✅ |
-| W6 | 2023-2025 | 2026H1 | -12.7% | -11.7% | **-1.0%** ≈ |
-| **均值** | | | | | **+13.4%** 🎯 |
+| W1 | 2019H2-2020 | 2021H1 | +71.4% | +6.2% | **+65.1%** ✅ |
+| W2 | 2020H1-2021H2 | 2021H2-2022H1 | +24.6% | -10.3% | **+34.9%** ✅ |
+| W3 | 2021H1-2022H1 | 2022H2-2023H1 | +32.6% | +5.2% | **+27.5%** ✅ |
+| W4 | 2021H2-2023H1 | 2023H2-2024H1 | -29.6% | -19.4% | **-10.2%** ❌ |
+| W5 | 2022H2-2023 | 2024H1-2024Q3 | +15.2% | +12.2% | **+3.0%** ✅ |
+| W6 | 2023H1-2024H2 | 2024Q4-2025H1 | -4.0% | -7.7% | **+3.7%** ✅ |
+| W7 | 2024H1-2025H1 | 2025Q3-2026Q1 | +4.9% | +12.6% | **-7.8%** ≈ |
+| W8 | 2024Q4-2026H1 | 2026Q2-2026Q3 | +2.0% | +8.5% | **-6.5%** ≈ |
+| **均值** | | | | | **+13.7%** 🎯 |
 
 | 指标 | 值 |
 |------|------|
-| 平均超额 | **+13.4%** |
-| 中位数超额 | +15.1% |
-| 正窗口比例 | 5/6 (83%) |
-| 信息比率 (IR) | **1.10** |
-| 超额标准差 | 12.1% |
+| 平均超额 | **+13.7%** |
+| 中位数超额 | +3.4% |
+| 正窗口比例 | 5/8 (62.5%) |
+| 信息比率 (IR) | **0.52** |
+| 最差窗口 | -10.2% |
+| 超额标准差 | 26.6% |
 
-> 严格训练/测试分离: 每窗口用前3年训练, 后1年测试。永不穿越。确定性种子(seed=42), 结果可复现。
+> 严格训练/测试分离: 每窗口用前1.5年训练, 后9个月测试。时间衰减权重(半衰期0.7年)。永不穿越。
 
 ## 核心架构
 
 ```
-日线28因子计算 (FactorCache预计算)
+日线39因子计算 (FactorCache预计算)
     → 截面z-score标准化 (每日同股票池内)
     → LightGBM Lambdarank (学习截面排序, 非回归)
+    → 时间衰减样本权重 (近期数据权重更高)
     → 前瞻收益率标签 (close[T+5]/close[T]-1, 无数据泄露)
-    → Top-K选股 (持有最强4只)
-    → 滚动重训练 (每12个月用前3年数据重训)
+    → Top-K选股 (持有最强4只, 换手缓冲+成本门槛)
+    → Regime检测 (MA60+ADX → 牛/熊/震荡自适应)
+    → 稳健性评测 (交叉窗口IR + 单窗亏损惩罚)
 ```
 
-## 关键创新
+## v4 关键改进 (相对 v3)
 
-| 创新 | 说明 | 贡献 |
-|------|------|:--:|
-| **前瞻标签** | 标签=未来5日收益, 非过去收益 | 根本性修复 |
-| **Lambdarank** | 直接优化截面排序, 非回归预测幅度 | 架构升级 |
-| **截面标准化** | 训练特征每日z-score, 消除量纲差异 | 特征工程 |
-| **FactorCache** | 因子预计算, 训练100x加速 | 工程优化 |
-| **确定性种子** | seed=42, 结果完全可复现 | 可靠性 |
-| **L1正则化** | lambda_l1=0.5, 防过拟合 | 泛化提升 |
+| Phase | 改进 | 效果 |
+|-------|------|------|
+| **P0** | 修复5个Bug (DSL优先级/Kelly/费率等) | 基础可靠性 |
+| **P1** | 换手率控制 (缓冲+确认期+成本门槛) | 交易降低63% |
+| **P2** | 因子增强 (39因子含反转/流动性/波动率) | 信息维度扩展 |
+| **P3** | Regime检测 (市场状态自适应参数) | 熊市防御↑ |
+| **Phase 1** | 训练窗口3年→1.5年 + 时间衰减权重 | 更快适应市场 |
+| **Phase 2** | 股票池18→30只 (含CSI 300扩展管线) | 截面统计意义↑ |
+| **Phase 3** | 参数重校准 + Regime方向修正 | 稳健性↑ |
 
-## 因子体系 (28因子, IC验证)
+## 版本演进
 
-基于30只A股2024-2026的Spearman Rank IC分析, 全部28因子ICIR > 0.10:
+| 版本 | 核心改进 | 平均超额 | IR | 正窗口 |
+|------|------|:------:|:--:|:--:|
+| v1 原版 | Regression + 10股 + 50树 | -4.4% | — | — |
+| v2b | Lambdarank + **前瞻标签** | +10.1% | 正 | — |
+| v3 | FactorCache + 确定性 + L1正则 | +13.4% | 1.10 | 5/6 |
+| **v4** | **P0-P3 + Phase1-3 全优化** | **+13.7%** | **0.52** | **5/8** |
 
-| 排名 | 因子 | IC均值 | ICIR | 类型 |
-|:--:|------|:--:|:--:|------|
-| 1 | sharpe_20d | -0.93 | -12.9 | 风险调整 |
-| 2 | ma5_ma30_spread | +0.90 | +13.7 | 趋势 |
-| 3 | ma3_ma20_spread | +0.85 | +7.8 | 趋势 |
-| 4 | ma10_ma20_spread | +0.82 | +7.8 | 趋势 |
-| 5 | ma5_ma20_spread | +0.82 | +7.3 | 趋势 |
-| 6 | return_7d | -0.79 | -5.7 | 动量 |
-| 7 | rank_20 | +0.77 | +5.2 | 价格位置 |
-| ... | (21 more) | ... | ... | 波动/量价/K线 |
+## 因子体系 (39因子)
 
-> 完整IC结果见 `factor_ic_results.csv`
+基于优化后的 ic_optimized preset，涵盖6大类:
+
+| 类别 | 因子数 | 代表性因子 |
+|------|:------:|------|
+| 趋势/均线 | 10 | ma5_ma20_spread, ma20_ma60_spread, ma_bullish |
+| 波动率 | 6 | volatility_20d, vol_regime, boll_width |
+| 动量/反转 | 5 | return_7d, reversal_1d, rev_mom_spread |
+| 量价 | 7 | turnover_trend, vol_price_sync, liq_ratio |
+| K线形态 | 6 | amplitude_5d, klen, cntd_20 |
+| 风险调整 | 5 | sharpe_20d, skew_20d, rsqr_20 |
 
 ## 快速开始
 
@@ -71,16 +82,13 @@ pip install -r requirements.txt
 # 1. 拉取数据缓存 (一次性)
 python data_cache.py --fetch
 
-# 2. 因子IC分析 (可选, 5-10分钟)
-python factor_analysis.py
+# 2. 扩展至CSI300 (可选, 需网络)
+python data_cache.py --fetch-index 000300
 
 # 3. 滚动重训练 — 核心测试
 python test_rolling_v3.py
 
-# 4. 超参数搜索 (可选, 10-15分钟)
-python hyper_search.py
-
-# 5. Web看板
+# 4. Web看板
 streamlit run dashboard.py
 ```
 
@@ -89,44 +97,43 @@ streamlit run dashboard.py
 ```
 deep-quant/
 ├── 数据层
-│   ├── data_fetcher.py         A股(新浪) + 港股(新浪) 双市场
-│   ├── data_cache.py           本地parquet缓存 (30只A股, ~3MB)
-│   └── data_cache/             缓存文件目录
+│   ├── data_fetcher.py         A股/港股 + 指数成分股获取 (CSI300/500/1000)
+│   ├── data_cache.py           本地parquet缓存 (动态股票池)
+│   ├── trading_rules.py        ★ A股真实交易约束 (费率/涨跌停/停牌)
+│   └── data_cache/             缓存文件 + 行业映射
 ├── 因子层
-│   ├── factor_engine.py        因子表达式DSL (Ref/Std/Max/Min/EMA/Rank)
-│   ├── factor_library.py       28+预定义因子 (价格/均线/波动/量价/K线)
-│   ├── factor_scorer.py        多因子加权 + 截面评分 (ic_optimized / v2预设)
-│   ├── factor_cache.py         ★ 因子预计算缓存 (O(ND×NS)→O(NS))
-│   └── factor_analysis.py      30股 Spearman Rank IC/ICIR 验证
+│   ├── factor_engine.py        因子表达式DSL (Ref/Std/Corr/RSqr/一元负号)
+│   ├── factor_library.py       39+预定义因子 (6大类: 趋势/波动/动量/量价/K线/风险)
+│   ├── factor_scorer.py        多因子加权 (ic_optimized preset)
+│   ├── factor_cache.py         ★ 因子预计算缓存
+│   └── factor_analysis.py      Spearman Rank IC/ICIR 验证
 ├── 策略层
 │   ├── strategy.py             增强MA + RSI均值回复 + 策略路由器
-│   ├── portfolio_ranker.py     Top-K排名选股 (板块中性化)
+│   ├── portfolio_ranker.py     ★ Top-K排名选股 (换手缓冲/成本门槛/Regime/行业中性化)
+│   ├── regime_detector.py      ★ 市场状态检测 (MA60+ADX → 牛/熊/震荡)
 │   └── signal_hub.py           多策略信号聚合
 ├── ML层
-│   ├── ml_ranker.py            ★ LightGBM Lambdarank (确定性种子)
-│   └── hyper_search.py         超参数网格搜索 (NDCG评估)
+│   ├── ml_ranker.py            ★ LightGBM Lambdarank + DEnsembleRanker
+│   └── hyper_search.py         超参数网格搜索
 ├── 测试层
-│   ├── test_rolling_v3.py      ★ 全优化版滚动重训练 (推荐使用)
-│   ├── test_rolling_v2.py      前瞻标签版 (v2)
-│   └── test_results/           ★ 时间戳存档目录
+│   ├── test_rolling_v3.py      ★ 全优化版滚动重训练 (v4)
+│   └── test_results/           时间戳存档目录
 ├── 执行层
-│   ├── paper_trade_a.py        A股Top-K纸面交易 (含日内执行)
 │   ├── portfolio.py            持仓资金管理
-│   ├── backtest.py             回测引擎 (T+0/T+1)
+│   ├── backtest.py             回测引擎 (统一真实费率)
+│   ├── risk_manager.py         风控系统 (止损/熔断/Kelly仓位)
 │   └── executor.py             模拟下单
 ├── 分析层
-│   ├── analysis.py             25+绩效指标 + 统计检验
-│   ├── validator.py            滚动窗口验证
+│   ├── evaluator.py            ★ 17指标评测 + 稳健性惩罚 (DSR/滚动Sharpe)
+│   ├── analysis.py             绩效分析 + 统计检验
+│   ├── sector_analyzer.py      A股/港股行业分类
 │   └── stress_test.py          压力测试
 ├── 生产层
-│   ├── storage.py              SQLite 8张表
-│   ├── scheduler.py            APScheduler 定时调度
-│   ├── alerter.py              微信/钉钉通知
+│   ├── storage.py              SQLite持久化
+│   ├── scheduler.py            定时调度
+│   ├── alerter.py              告警通知
 │   └── dashboard.py            Streamlit 5页看板
-└── 辅助层
-    ├── macro_overlay.py         宏观叠加 (大盘+北向)
-    ├── fundamental_llm.py       DeepSeek 基本面评分
-    └── sector_analyzer.py       板块映射 + 同伴比较
+└── TODO.md                    优化路线图 + 完整记录
 ```
 
 ## 运行模式
@@ -134,27 +141,18 @@ deep-quant/
 | 命令 | 说明 | 市场 |
 |------|------|:--:|
 | `python test_rolling_v3.py` | ★ 滚动重训练 (推荐) | A股 |
-| `python test_rolling_v2.py` | 滚动重训练 v2 | A股 |
+| `python data_cache.py --fetch-index 000300` | 拉取CSI300成分股 | A股 |
 | `python factor_analysis.py` | IC/ICIR 因子验证 | A股 |
 | `python hyper_search.py` | LightGBM 超参数搜索 | A股 |
-| `python paper_trade_a.py` | A股Top-K回测 | A股 |
 | `streamlit run dashboard.py` | Web看板 | A/H |
-
-## 版本演进
-
-| 版本 | 核心改进 | 平均超额 | IR |
-|------|------|:------:|:--:|
-| v1 原版 | Regression + 10股 + 50树 | -4.4% | — |
-| v2a | Lambdarank + 旧标签(动量) | -19.3% | -0.32 |
-| v2b | Lambdarank + **前瞻标签** | +10.1% | 正 |
-| **v3** | **+FactorCache + 确定性 + L1=0.5** | **+13.4%** | **1.10** |
 
 ## 技术栈
 
-Python 3.12 · pandas · numpy · scipy · LightGBM · akshare · matplotlib · streamlit · APScheduler · SQLite · PyTorch
+Python 3.12 · pandas · numpy · scipy · LightGBM · akshare · matplotlib · streamlit · APScheduler · SQLite
 
 ## 参考
 
-- Microsoft Qlib — 因子表达式引擎 + Alpha158 + TopkDropoutStrategy
-- LightGBM — Lambdarank + NDCG评估
-- 严格训练/测试分离: 滚动窗口 + 前瞻标签 + 无数据泄露
+- Microsoft Qlib — 因子表达式引擎 + Alpha158 + TopkDropoutStrategy + DEnsembleModel
+- LightGBM — Lambdarank + NDCG评估 + sample_weight
+- 严格训练/测试分离: 滚动窗口 + 前瞻标签 + 时间衰减权重 + 无数据泄露
+- Harvey & Liu 2015 — Deflated Sharpe Ratio (多重测试校正)
