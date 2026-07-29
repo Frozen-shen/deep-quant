@@ -32,27 +32,27 @@ universe:
 #  滚动重训练窗口
 # ════════════════════════════════════════
 rolling:
-  train_months: 12          # 训练窗口长度
-  test_months: 9            # 测试窗口长度
-  day_step: 2               # 每N天采样
-  embargo_days: 20          # ★ 训练末尾扣掉的标签前瞻天数（防穿越）
+  train_months: 18          # 12→18, 更多训练数据
+  test_months: 9            
+  day_step: 2               
+  embargo_days: 20          
 
 # ════════════════════════════════════════
 #  标签
 # ════════════════════════════════════════
 label:
-  horizon_days: 20          # 前瞻N日收益
-  type: "rank"              # cross-sectional rank
+  horizon_days: 20          
+  type: "rank"              
 
 # ════════════════════════════════════════
 #  模型 (LightGBM Lambdarank)
 # ════════════════════════════════════════
 model:
-  n_estimators: 300         # 200→300, 更多树
-  max_depth: 6              # 5→6
-  learning_rate: 0.03       # 0.05→0.03, 更慢但更稳定
-  lambda_l1: 0.5            # 0.8→0.5, 有更多数据后降低正则
-  min_data_in_leaf: 50      # 60→50
+  n_estimators: 400         # 300→400, 更多数据需要更强模型
+  max_depth: 6              
+  learning_rate: 0.03       
+  lambda_l1: 0.3            # 降低正则, 更多数据不太会过拟合
+  min_data_in_leaf: 40      # 50→40
   val_ratio: 0.15
 
 # ════════════════════════════════════════

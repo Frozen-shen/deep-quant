@@ -156,16 +156,24 @@ class QuantPipeline:
             print(f"  市场过滤: 加载失败({e}), 禁用")
 
     def _is_market_bullish(self, today):
-        """判断当前是否处于牛市 (指数 > MA)。"""
+        """返回 0~1 的市场参与度 (渐进式, 替代二元开关)。
+        1.0 = 指数明确在MA上方 → 满仓做多
+        0.5 = 指数在MA附近 → 半仓
+        0.0 = 指数明确在MA下方 → 空仓
+        """
         if not self.market_filter or self._index_ma is None:
-            return True  # 无过滤时默认做多
+            return 1.0
         try:
             mask = self._index_ma.index <= today
-            if not mask.any(): return True
+            if not mask.any(): return 1.0
             last_ma = self._index_ma[mask].iloc[-1]
             last_close = self._index_data[mask].iloc[-1]
-            return last_close > last_ma
-        except: return True
+            if last_ma <= 0: return 1.0
+            ratio = last_close / last_ma
+            # 渐进式: ratio 1.0 = 50%参与, 1.05+ = 100%, 0.95- = 0%
+            participation = min(1.0, max(0.0, (ratio - 0.95) / 0.10))
+            return participation
+        except: return 1.0
 
     def _precompute_factors(self):
         from factor_scorer import FactorScorer
@@ -419,10 +427,13 @@ class QuantPipeline:
 
         decision = ranker.rank(scores, holdings)
 
-        # ★ 市场趋势过滤: 指数 < MA60 时禁止买入 (允许自然卖出)
-        if self.market_filter and not self._is_market_bullish(today):
-            decision["buy"] = []
-            # 不强制清仓 — 让自然卖出逻辑处理, 避免恐慌性抛售
+        # ★ 市场趋势过滤: 渐进式控制买入数量
+        if self.market_filter:
+            participation = self._is_market_bullish(today)
+            if participation < 1.0:
+                # 按参与度削减买入 (0.5参与度 → 只买一半的TOP_K)
+                max_buy = max(1, int(len(decision["buy"]) * participation))
+                decision["buy"] = decision["buy"][:max_buy]
 
         # ★ 接线涨跌停约束 (只对仍在sd中的股票)
         decision["buy"] = [s for s in decision["buy"] if s in sd and rules.can_buy(s, sd[s])]
