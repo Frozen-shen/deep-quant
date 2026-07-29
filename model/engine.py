@@ -62,8 +62,9 @@ class SimpleBacktest:
                 if len(dt) == 0:
                     continue
                 px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
-                # ★ 涨跌停检查
-                if not rules.can_buy(s, dt):
+                # ★ 涨停检查: 需2行数据算前收盘价
+                dt2 = all_data[s][all_data[s]["date"] <= today].tail(2)
+                if len(dt2) >= 2 and not rules.can_buy(s, dt2):
                     continue
                 qty = int(cash_per / px / self.lot_size) * self.lot_size
                 if qty < self.lot_size:
