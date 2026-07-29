@@ -71,7 +71,7 @@ execution:
   top_k: 5                  # 持仓数量
   max_single_pct: 0.25      # 单票最大仓位占比
   lot_size: 100             # A股整手
-  market_filter: true       # ★ 市场趋势过滤: 指数<MA60时空仓
+  market_filter: false       # ★ 市场趋势过滤: 指数<MA60时空仓
   market_ma: 60             # ★ MA周期
   max_positions: 5          # 最大同时持仓数
 

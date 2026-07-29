@@ -20,27 +20,30 @@ A股多因子量化系统 — Point-in-Time 成分股 × 无泄露训练 × 诚�
 deep-quant/
 ├── config.yaml              ← 唯一参数源
 ├── data/
-│   └── universe.py          ← Point-in-Time成分股管理
-├── factors/
-│   ├── engine.py            ← 因子DSL解析 (保留)
-│   ├── library.py           ← 因子定义 (保留)
-│   ├── scorer.py            ← 因子筛选 (绑定研究期数据)
-│   └── cache.py             ← 因子预计算 (保留)
+│   └── universe.py          ← 成分股管理 (当前使用快照, PIT待完善)
+├── factor_engine.py         ← 因子DSL解析
+├── factor_library.py        ← 因子定义
+├── factor_scorer.py         ← 因子筛选 (ic_top20预设)
+├── factor_cache.py          ← 因子预计算
+├── ml_ranker.py             ← LightGBM Lambdarank
 ├── model/
-│   ├── ranker.py            ← LightGBM Lambdarank (保留)
-│   └── pipeline.py          ← ★ 无泄露训练管道 (新建)
-├── execution/
-│   ├── rules.py             ← A股真实交易规则 (保留)
-│   ├── portfolio.py         ← 持仓管理 (保留)
-│   └── portfolio_ranker.py  ← Top-K排名选股 (保留)
-├── evaluation/
-│   ├── evaluator.py         ← dev/blind分离评分 (保留)
-│   └── regime_detector.py   ← 市场状态检测 (保留)
+│   └── pipeline.py          ← ★ 无泄露训练管道
+├── trading_rules.py         ← A股真实交易规则
+├── portfolio.py             ← 持仓管理
+├── portfolio_ranker.py      ← Top-K排名选股
+├── evaluator.py             ← dev/blind分离评分
+├── regime_detector.py       ← 市场状态检测
+├── data_cache.py            ← 数据缓存
+├── data_fetcher.py          ← 数据获取
+├── storage.py               ← SQLite持久化
+├── sector_analyzer.py       ← A股行业分类
 ├── scripts/
 │   ├── run_backtest.py      ← 开发期walk-forward验证
-│   └── run_blind_test.py    ← ★ 盲测 (参数冻结, 一次跑)
-└── dashboard/
-    └── app.py               ← Streamlit看板
+│   └── run_blind_test.py    ← ★ 盲测 (参数冻结)
+├── dashboard.py             ← Streamlit看板
+├── tests/
+│   └── test_core.py         ← 单元测试 (12 pass)
+└── data_cache/              ← 股票数据缓存 (parquet)
 ```
 
 ## 快速开始
@@ -48,18 +51,20 @@ deep-quant/
 ```bash
 pip install -r requirements.txt
 
-# 1. 拉取数据
-python scripts/fetch_data.py
+# 1. 拉取数据 (首次)
+python data_cache.py --fetch-index 000300
 
 # 2. 开发期验证 (可反复运行, 可调参)
 python scripts/run_backtest.py
 
 # 3. 盲测 (★ 参数冻结后只跑一次)
-#    跑之前: 在 config.yaml 中确认所有参数不再修改
 python scripts/run_blind_test.py
 
-# 4. 看板
-streamlit run dashboard/app.py
+# 4. 单元测试
+python -m unittest tests.test_core -v
+
+# 5. 看板
+streamlit run dashboard.py --server.headless true
 ```
 
 ## 数据分区
@@ -81,6 +86,13 @@ streamlit run dashboard/app.py
 - **开发集结果**: 仅供参考（参数根据这些数据选出）
 - **盲测集结果**: ★ 最终成绩单（未参与任何开发决策）
 - **trial_count**: 盲测运行次数。DSR 用真实 trial 数校正多重测试偏差
+
+## 已知限制 (诚实声明)
+
+- **PIT成分股**: 当前使用CSI300快照覆盖所有月份（akshare历史API限制），尚未包含退市股
+- **因子冻结**: `ic_top20`为手工精选，尚无自动化IC分析脚本绑定研究期数据
+- **股票数据**: 仅缓存了约72只CSI300成分股（需运行 `data_cache.py --fetch-index 000300` 扩展）
+- **盲测**: 尚未执行（`trial_count: 0`）
 
 ## 技术栈
 
