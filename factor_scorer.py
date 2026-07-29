@@ -88,6 +88,25 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
     },
 
+    # ★ v2: Top-20高IC因子 (仅保留最可靠的, 减少噪音)
+    "ic_top20": {
+        "name": "Top-20 IC因子",
+        "factors": {
+            "volatility_20d": 0.20, "ma5_ma20_spread": 0.15,
+            "ma10_ma20_spread": 0.12, "ma20_ma60_spread": 0.10,
+            "sharpe_20d": 0.08, "return_7d": 0.07,
+            "rsv_9": 0.07, "cntd_20": 0.06,
+            "ma5_ma30_spread": 0.06, "rank_20": 0.05,
+            "channel_high_20": 0.05, "macd_hist": 0.05,
+            "turnover_trend": 0.05, "turnover_vol": 0.04,
+            "liq_ratio": 0.04, "vol_regime": 0.04,
+            "range_20d": 0.03, "amplitude_5d": 0.03,
+            "skew_20d": 0.03, "ma_bullish": 0.02,
+        },
+        "buy_threshold": 0.15,
+        "sell_threshold": -0.10,
+    },
+
     # IC优化型 — 只保留IC>0的因子 + 新增Alpha158因子 + P2增强
     "ic_optimized": {
         "name": "IC优化",

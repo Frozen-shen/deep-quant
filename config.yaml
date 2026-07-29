@@ -12,8 +12,8 @@ data_partition:
     start: "2018-01-01"
     end: "2022-12-31"       # 因子研究、IC分析只能用这个区间
   development:
-    start: "2023-01-01"
-    end: "2024-06-30"       # 模型开发、超参调优用这个区间
+    start: "2021-01-01"
+    end: "2024-06-30"       # 模型开发、超参调优用这个区间 (覆盖牛熊)
   blind_test:
     start: "2024-07-01"
     end: "2026-07-10"       # ★ 盲测期：参数冻结后只能跑一次，结果即为最终答案
@@ -48,12 +48,12 @@ label:
 #  模型 (LightGBM Lambdarank)
 # ════════════════════════════════════════
 model:
-  n_estimators: 200
-  max_depth: 5
-  learning_rate: 0.05
-  lambda_l1: 0.8
-  min_data_in_leaf: 60
-  val_ratio: 0.15           # 验证集占比（按日期组分割）
+  n_estimators: 300         # 200→300, 更多树
+  max_depth: 6              # 5→6
+  learning_rate: 0.03       # 0.05→0.03, 更慢但更稳定
+  lambda_l1: 0.5            # 0.8→0.5, 有更多数据后降低正则
+  min_data_in_leaf: 50      # 60→50
+  val_ratio: 0.15
 
 # ════════════════════════════════════════
 #  时间衰减
@@ -71,6 +71,9 @@ execution:
   top_k: 5                  # 持仓数量
   max_single_pct: 0.25      # 单票最大仓位占比
   lot_size: 100             # A股整手
+  market_filter: true       # ★ 市场趋势过滤: 指数<MA60时空仓
+  market_ma: 60             # ★ MA周期
+  max_positions: 5          # 最大同时持仓数
 
 # ════════════════════════════════════════
 #  组合管理
@@ -79,15 +82,14 @@ portfolio:
   hold_thresh: 10           # 最小持有天数
   sell_rank_buffer: 2       # 排名跌出 top_k+buffer 才卖
   buy_confirm_days: 1       # 连续N天在top_k才买
-  cost_threshold: 0.08      # 新股分数须超旧股(1+threshold)才换
-  n_drop: 3                 # 每天最多替换数
-  sector_neutral: false     # 行业中性化
+  cost_threshold: 0.08      # 换仓门槛
+  n_drop: 2                 # 每天最多替换数
 
 # ════════════════════════════════════════
 #  因子配置
 # ════════════════════════════════════════
 factors:
-  preset: "ic_optimized"    # 因子预设（必须在研究期生成并冻结）
+  preset: "ic_top20"        # ★ 只用Top-20高IC因子, 减少噪音
   freeze_date: "2023-01-01" # ★ 此后不再修改因子列表或权重
 
 # ════════════════════════════════════════

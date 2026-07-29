@@ -64,6 +64,10 @@ class QuantPipeline:
         self.top_k = ex["top_k"]
         self.initial_capital = ex["initial_capital"]
         self.lot_size = ex["lot_size"]
+        self.market_filter = ex.get("market_filter", False)
+        self.market_ma = ex.get("market_ma", 60)
+        self._index_data = None
+        self._index_ma = None
 
         pf = config["portfolio"]
         self.hold_thresh = pf["hold_thresh"]
@@ -133,6 +137,35 @@ class QuantPipeline:
                 df["date"] = pd.to_datetime(df["date"])
                 self._all_data[sym] = df
         print(f"  加载完成: {len(self._all_data)} 只有效数据")
+
+        # ★ 加载指数数据用于市场趋势过滤
+        if self.market_filter:
+            self._load_index_data()
+
+    def _load_index_data(self):
+        """加载指数数据, 计算MA用于牛熊判断。"""
+        from data_fetcher import DataFetcher
+        try:
+            idx = DataFetcher.fetch("000001", start_date="20180101", end_date="20260710")
+            if idx is not None and len(idx) > self.market_ma:
+                idx["date"] = pd.to_datetime(idx["date"])
+                self._index_data = idx.set_index("date")["close"]
+                self._index_ma = self._index_data.rolling(self.market_ma).mean()
+                print(f"  市场过滤: MA{self.market_ma}已计算, 指数<MA时空仓")
+        except Exception as e:
+            print(f"  市场过滤: 加载失败({e}), 禁用")
+
+    def _is_market_bullish(self, today):
+        """判断当前是否处于牛市 (指数 > MA)。"""
+        if not self.market_filter or self._index_ma is None:
+            return True  # 无过滤时默认做多
+        try:
+            mask = self._index_ma.index <= today
+            if not mask.any(): return True
+            last_ma = self._index_ma[mask].iloc[-1]
+            last_close = self._index_data[mask].iloc[-1]
+            return last_close > last_ma
+        except: return True
 
     def _precompute_factors(self):
         from factor_scorer import FactorScorer
@@ -385,6 +418,11 @@ class QuantPipeline:
         holdings = [s for s, p in state.positions.items() if p["qty"] > 0]
 
         decision = ranker.rank(scores, holdings)
+
+        # ★ 市场趋势过滤: 指数 < MA60 时禁止买入 (允许自然卖出)
+        if self.market_filter and not self._is_market_bullish(today):
+            decision["buy"] = []
+            # 不强制清仓 — 让自然卖出逻辑处理, 避免恐慌性抛售
 
         # ★ 接线涨跌停约束 (只对仍在sd中的股票)
         decision["buy"] = [s for s in decision["buy"] if s in sd and rules.can_buy(s, sd[s])]
