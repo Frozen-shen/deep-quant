@@ -1,32 +1,14 @@
 """
-板块分析层 — 手工板块映射 + 同伴比较 + A股行业分类
+A股行业分类 — 基于代码前缀的粗分类
 
-akshare 的港股板块接口不可用 → 用手工板块分类 + 同板块股票比较
+用法:
+  from sector_analyzer import build_a_share_sector_map
+  sector_map = build_a_share_sector_map(["600519", "000858"])
+  # → {"600519": "食品饮料", "000858": "食品饮料"}
 """
 
-import os
-import json
-import pandas as pd
+import os, json
 import numpy as np
-
-
-# ================================================================
-#  港股板块映射 (手工维护)
-# ================================================================
-HK_SECTOR_MAP = {
-    "01810": {"sector": "消费电子", "peers": ["01810", "02018", "01415"]},
-    "00700": {"sector": "互联网平台", "peers": ["00700", "09988", "03690", "09888"]},
-    "09988": {"sector": "互联网平台", "peers": ["09988", "00700", "03690", "09618"]},
-    "09618": {"sector": "互联网平台", "peers": ["09618", "09988", "03690"]},
-    "03690": {"sector": "互联网平台", "peers": ["03690", "00700", "09988"]},
-    "09999": {"sector": "游戏", "peers": ["09999", "00700", "09888"]},
-    "02020": {"sector": "体育用品", "peers": ["02020", "02331", "01368"]},
-    "02318": {"sector": "保险", "peers": ["02318", "02628", "01339"]},
-    "01211": {"sector": "新能源车", "peers": ["01211", "00175", "02015"]},
-    "00981": {"sector": "半导体", "peers": ["00981", "01347", "02166"]},
-    "02269": {"sector": "医药", "peers": ["02269", "01177", "01801"]},
-    "09888": {"sector": "互联网平台", "peers": ["09888", "00700", "09988"]},
-}
 
 # ================================================================
 #  A股板块映射 — 基于代码前缀的粗分类 (Phase 2.3)
@@ -128,28 +110,16 @@ def build_a_share_sector_map(symbols: list) -> dict:
 
 
 class SectorAnalyzer:
-    """
-    板块分析器 — 基于手工映射 + 同伴比较。
+    """A股板块分析器 — 基于前缀映射 + 同伴比较。"""
 
-    同伴比较: 计算同板块股票的平均收益 → 判断个股是否跑赢板块
-    """
+    def __init__(self):
+        self._a_sectors: dict = {}
 
-    def __init__(self, market: str = "hk"):
-        self.market = market
-        self.sector_map = HK_SECTOR_MAP if market == "hk" else {}
-        self._a_sectors: dict = {}  # Phase 2.3: A股行业映射
-
-    def load_a_share_sectors(self, symbols: list):
-        """Phase 2.3: 加载A股行业映射。"""
+    def load_sectors(self, symbols: list):
         self._a_sectors = build_a_share_sector_map(symbols)
-        # 转换为 SectorAnalyzer 兼容格式
-        for sym, sector in self._a_sectors.items():
-            if sym not in self.sector_map:
-                self.sector_map[sym] = {"sector": sector, "peers": [s for s, _s in self._a_sectors.items() if _s == sector]}
 
-    def get_sector(self, symbol: str) -> dict:
-        """获取股票所属板块信息。"""
-        return self.sector_map.get(symbol, {"sector": "未知", "peers": [symbol]})
+    def get_sector(self, symbol: str) -> str:
+        return self._a_sectors.get(str(symbol), "其他")
 
     def score_at(self, symbol: str, stock_prices: dict) -> float:
         """

@@ -111,8 +111,8 @@ METRIC_HELP = {
 }
 
 # ═══════════════ Header ═══════════════
-st.markdown('<p class="main-header">📊 Deep Quant · v6 量化看板</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">LightGBM Lambdarank · 78只 CSI300 · T+20日趋势跟随</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-header">📊 Deep Quant · v2 量化看板</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">LightGBM Lambdarank · Point-in-Time CSI300 · embargo 20d · T+1 open</p>', unsafe_allow_html=True)
 
 if _data_errors:
     with st.expander(f"⚠️ {len(_data_errors)}个数据加载问题", expanded=False):

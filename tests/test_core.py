@@ -1,0 +1,122 @@
+"""
+交易规则 + 因子计算 单元测试
+"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import unittest
+import numpy as np
+
+
+class TestTradingRules(unittest.TestCase):
+    """A股真实交易规则测试。"""
+
+    def test_buy_commission(self):
+        from trading_rules import calc_buy_commission
+        # 1000股 × 10元 = 10000元, 万2.5=2.5, 过户费0.1, 合计2.6 < 最低5元
+        fee = calc_buy_commission(1000, 10.0)
+        self.assertAlmostEqual(fee, 5.0, places=1)  # 最低5元生效
+
+    def test_buy_commission_no_min(self):
+        from trading_rules import calc_buy_commission
+        # 10000股 × 10元 = 100000元, 万2.5=25, 过户费1.0, 合计26 > 最低5元
+        fee = calc_buy_commission(10000, 10.0)
+        self.assertAlmostEqual(fee, 26.0, places=1)
+
+    def test_sell_commission_with_stamp(self):
+        from trading_rules import calc_sell_commission
+        # 1000股 × 10元 = 10000元
+        # 万2.5佣金 + 千0.5印花税 + 过户费 = 2.5 + 5.0 + 0.1 = 7.6
+        fee = calc_sell_commission(1000, 10.0)
+        self.assertAlmostEqual(fee, 7.6, places=1)
+
+    def test_board_type_main(self):
+        from trading_rules import get_board_type
+        self.assertEqual(get_board_type("600519"), "main_sh")
+
+    def test_board_type_gem(self):
+        from trading_rules import get_board_type
+        self.assertEqual(get_board_type("300750"), "gem")
+
+
+class TestFactorEngine(unittest.TestCase):
+    """因子DSL解析测试。"""
+
+    def test_operator_precedence(self):
+        from factor_engine import parse_factor
+        import pandas as pd
+        df = pd.DataFrame({"close": [1.0], "volume": [1.0]})
+        # 2 + 3 * 4 = 14 (不是 20)
+        r = parse_factor("2 + 3 * 4").evaluate(df).iloc[0]
+        self.assertEqual(r, 14.0)
+
+    def test_unary_minus(self):
+        from factor_engine import parse_factor
+        import pandas as pd
+        # -(5) = -5
+        df = pd.DataFrame({"close": [5.0], "volume": [1.0]})
+        r = parse_factor("-$close").evaluate(df).iloc[0]
+        self.assertEqual(r, -5.0)
+
+    def test_ma_spread(self):
+        from factor_engine import parse_factor
+        import pandas as pd
+        import numpy as np
+        close = np.linspace(10, 20, 60)
+        df = pd.DataFrame({"close": close, "volume": np.ones(60) * 1e6})
+        r = parse_factor("Mean($close, 5) / Mean($close, 20) - 1").evaluate(df).iloc[-1]
+        self.assertGreater(r, 0)  # 上升趋势中MA5 > MA20
+
+    def test_ma_bullish_fixed(self):
+        from factor_engine import parse_factor
+        import pandas as pd
+        import numpy as np
+        # 上升趋势中, MA5 > MA10 > MA20 应该成立
+        close = np.linspace(10, 20, 60)
+        df = pd.DataFrame({"close": close, "volume": np.ones(60) * 1e6})
+        r = parse_factor("(Mean($close, 5) > Mean($close, 10)) * (Mean($close, 10) > Mean($close, 20))").evaluate(df).iloc[-1]
+        self.assertEqual(r, 1.0)
+
+
+class TestEvaluator(unittest.TestCase):
+    """评分系统测试。"""
+
+    def test_grade_blind_separation(self):
+        from evaluator import ModelEvaluator
+        e = ModelEvaluator()
+        dev_metrics = [{"total_return": 0.1, "excess_vs_benchmark": 0.05}]
+        blind_metrics = [{"total_return": 0.05, "excess_vs_benchmark": 0.02}]
+        report = e.report(dev_metrics, blind_metrics)
+        self.assertIn("dev", report)
+        self.assertIn("blind", report)
+        self.assertIn("oos_pct", report)
+        self.assertIn("trust", report)
+
+    def test_score_metric(self):
+        from evaluator import _score_metric
+        # 值 >= great → 1.0
+        self.assertEqual(_score_metric(0.25, {"min": 0.05, "good": 0.12, "great": 0.20}), 1.0)
+        # 值 >= good → 0.7~1.0
+        s = _score_metric(0.12, {"min": 0.05, "good": 0.12, "great": 0.20})
+        self.assertAlmostEqual(s, 0.7, places=1)
+
+
+class TestConfig(unittest.TestCase):
+    """配置文件测试。"""
+
+    def test_config_loadable(self):
+        import yaml
+        with open(os.path.join(os.path.dirname(__file__), "..", "config.yaml")) as f:
+            cfg = yaml.safe_load(f)
+        self.assertIn("data_partition", cfg)
+        self.assertIn("universe", cfg)
+        self.assertIn("rolling", cfg)
+        self.assertIn("execution", cfg)
+        self.assertIn("model", cfg)
+        # 关键参数存在
+        self.assertGreater(cfg["rolling"]["embargo_days"], 0)
+        self.assertEqual(cfg["execution"]["signal_delay"], 1)
+        self.assertEqual(cfg["execution"]["execution_price"], "open")
+
+
+if __name__ == "__main__":
+    unittest.main()

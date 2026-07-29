@@ -35,31 +35,17 @@ class RegimeParams:
     n_drop: int            # 每次最大替换数
 
     @classmethod
-    def for_regime(cls, regime: "Regime", base_top_k: int = 4) -> "RegimeParams":
+    def for_regime(cls, regime: "Regime", base_top_k: int = 5) -> "RegimeParams":
+        """获取Regime下的参数 (与PortfolioRanker.set_regime保持一致)"""
         if regime == Regime.TREND_UP:
-            return cls(
-                top_k=base_top_k,
-                hold_thresh=5,           # Phase 3.2: 中性持有期
-                sell_rank_buffer=2,       # 标准缓冲
-                cost_threshold=0.08,      # 低门槛追涨
-                n_drop=2,                 # 可多换
-            )
+            return cls(top_k=base_top_k, hold_thresh=10, sell_rank_buffer=2,
+                       cost_threshold=0.06, n_drop=3)
         elif regime == Regime.TREND_DOWN:
-            return cls(
-                top_k=max(2, base_top_k - 2),  # 少持仓
-                hold_thresh=7,           # Phase 3.2: 多拿少动
-                sell_rank_buffer=3,       # 宽缓冲防止恐慌卖
-                cost_threshold=0.15,      # 高门槛减少交易
-                n_drop=1,                 # 少换
-            )
+            return cls(top_k=base_top_k, hold_thresh=14, sell_rank_buffer=3,
+                       cost_threshold=0.15, n_drop=1)
         else:  # RANGE
-            return cls(
-                top_k=base_top_k,
-                hold_thresh=5,           # 默认
-                sell_rank_buffer=2,       # 默认
-                cost_threshold=0.15,      # 默认
-                n_drop=2,                 # 默认
-            )
+            return cls(top_k=base_top_k, hold_thresh=10, sell_rank_buffer=2,
+                       cost_threshold=0.08, n_drop=3)
 
 
 class RegimeDetector:
