@@ -32,24 +32,24 @@ universe:
 #  滚动重训练窗口
 # ════════════════════════════════════════
 rolling:
-  train_months: 18          # 12→18, 更多训练数据
+  train_months: 4          # 12→18, 更多训练数据
   test_months: 9            
   day_step: 2               
-  embargo_days: 20          
+  embargo_days: 10          
 
 # ════════════════════════════════════════
 #  标签
 # ════════════════════════════════════════
 label:
-  horizon_days: 20          
+  horizon_days: 10          
   type: "rank"              
 
 # ════════════════════════════════════════
 #  模型 (LightGBM Lambdarank)
 # ════════════════════════════════════════
 model:
-  n_estimators: 400         # 300→400, 更多数据需要更强模型
-  max_depth: 6              
+  n_estimators: 600         # 300→400, 更多数据需要更强模型
+  max_depth: 5              
   learning_rate: 0.03       
   lambda_l1: 0.3            # 降低正则, 更多数据不太会过拟合
   min_data_in_leaf: 40      # 50→40
