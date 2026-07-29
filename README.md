@@ -91,8 +91,8 @@ streamlit run dashboard.py --server.headless true
 
 - **PIT成分股**: 当前使用CSI300快照覆盖所有月份（akshare历史API限制），尚未包含退市股
 - **因子冻结**: `ic_top20`为手工精选，尚无自动化IC分析脚本绑定研究期数据
-- **股票数据**: 仅缓存了约72只CSI300成分股（需运行 `data_cache.py --fetch-index 000300` 扩展）
-- **盲测**: 尚未执行（`trial_count: 0`）
+- **盲测**: Trial#1 已完成，结果: **策略+18.9%，超额-19.1%（1/3正窗口）**。此后盲测期因参数修改被污染，Trial#2-3 作废
+- **数据快照**: 176只CSI300 parquet未入库（本地仅30只），需运行 `data_cache.py --fetch-index 000300` 复现
 
 ## 技术栈
 

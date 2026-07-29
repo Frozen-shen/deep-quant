@@ -96,6 +96,6 @@ factors:
 #  盲测追踪
 # ════════════════════════════════════════
 blind_test:
-  trial_count: 0            # ★ 已运行盲测次数（每跑一次 +1，DSR 用此数校正）
-  last_run: null            # 上次盲测时间
-  locked: false             # 参数是否已锁定（true 后禁止修改 config）
+  trial_count: 1            # ★ 已运行盲测次数（每跑一次 +1，DSR 用此数校正）
+  last_run: "2026-07-23"            # 上次盲测时间
+  locked: true # 参数永久锁定             # 参数是否已锁定（true 后禁止修改 config）
