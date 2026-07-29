@@ -313,7 +313,8 @@ class QuantPipeline:
 
             # ★ T+1: 今天的成交基于昨天的信号
             if prev_decision:
-                self._execute_decision(pm, prev_decision, today, rules, self._all_data)
+                b, s = self._execute_decision(pm, prev_decision, today, rules, self._all_data)
+                trades += b + s
 
             # ★ 生成今天的信号（明天执行）
             prev_decision = self._generate_signal(model, today, rules, pm, ranker)
@@ -385,14 +386,15 @@ class QuantPipeline:
 
         decision = ranker.rank(scores, holdings)
 
-        # ★ 接线涨跌停约束
-        decision["buy"] = [s for s in decision["buy"] if rules.can_buy(s, sd[s])]
-        decision["sell"] = [s for s in decision["sell"] if rules.can_sell(s, sd[s])]
+        # ★ 接线涨跌停约束 (只对仍在sd中的股票)
+        decision["buy"] = [s for s in decision["buy"] if s in sd and rules.can_buy(s, sd[s])]
+        decision["sell"] = [s for s in decision["sell"] if s in sd and rules.can_sell(s, sd[s])]
 
         return decision
 
     def _execute_decision(self, pm, decision, today, rules, all_data):
-        """执行买卖决定 (T+1 开盘价成交)。"""
+        """执行买卖决定 (T+1 开盘价成交)。返回 (buy_count, sell_count)"""
+        buys, sells = 0, 0
         from trading_rules import calc_buy_commission, calc_sell_commission
 
         for s in decision.get("sell", []):
@@ -402,25 +404,24 @@ class QuantPipeline:
                 continue
             dt = all_data[s][all_data[s]["date"] <= today].tail(1)
             if len(dt) == 0: continue
-            # ★ T+1 开盘价成交
             px = dt["open"].iloc[-1] if "open" in dt.columns else dt["close"].iloc[-1]
             comm = calc_sell_commission(qty, px)
-            pm.apply_sell(s, qty, px, trade_date=today.strftime("%Y-%m-%d"),
-                          commission=comm)
+            pm.apply_sell(s, qty, px, trade_date=today.strftime("%Y-%m-%d"), commission=comm)
+            sells += 1
 
         for s in decision.get("buy", []):
             if s not in all_data: continue
             dt = all_data[s][all_data[s]["date"] <= today].tail(1)
             if len(dt) == 0: continue
-            # ★ T+1 开盘价成交 + 涨跌停检查
             px = dt["open"].iloc[-1] if "open" in dt.columns else dt["close"].iloc[-1]
-            if not rules.can_buy(s, dt): continue  # 涨停买不进
+            if not rules.can_buy(s, dt): continue
             cash_per = pm.load().cash * 0.9 / max(1, len(decision.get("buy", [])))
             qty = int(cash_per / px / self.lot_size) * self.lot_size
             if qty >= self.lot_size:
                 comm = calc_buy_commission(qty, px)
-                pm.apply_buy(s, qty, px, trade_date=today.strftime("%Y-%m-%d"),
-                             commission=comm)
+                pm.apply_buy(s, qty, px, trade_date=today.strftime("%Y-%m-%d"), commission=comm)
+                buys += 1
+        return buys, sells
 
     def _get_close_prices(self, today):
         """获取某天的收盘价。"""
