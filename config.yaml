@@ -68,7 +68,7 @@ execution:
   signal_delay: 1           # T+1: 今天收盘确认信号 → 明天开盘成交
   execution_price: "open"   # 次日开盘价
   initial_capital: 100000
-  top_k: 5                  # 持仓数量
+  top_k: 6                  # 持仓数量
   max_single_pct: 0.25      # 单票最大仓位占比
   lot_size: 100             # A股整手
   market_filter: false       # ★ 市场趋势过滤: 指数<MA60时空仓
