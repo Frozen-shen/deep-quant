@@ -69,9 +69,10 @@ class StockUniverse:
                 if s.isdigit() and len(s) == 6:
                     clean.append(s)
 
-            # 简化：用当前成分股名单覆盖所有月份
-            # （akshare 历史成分股 API 不稳定，这是折中方案）
-            # ★ 正式使用时应改为逐月查询并包含退市股
+        # ★ 简化：用当前成分股名单覆盖所有月份
+        # akshare 的 index_stock_cons_weight_csindex() 仅返回最新日期数据
+        # 真PIT宇宙需要 tushare index_weight() 或中证官网月度档案
+        # 见: REFACTOR_PLAN.md P0 数据层
             months = pd.date_range(start=pd.Timestamp(start_date),
                                    end=pd.Timestamp(end_date), freq="MS")
             for m in months:

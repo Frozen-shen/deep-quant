@@ -1,0 +1,886 @@
+{
+  "total": 176,
+  "stocks": {
+    "000001": {
+      "hash": "d9a082a0f8939b1b",
+      "size": 97946,
+      "path": "data_cache/000001.parquet"
+    },
+    "000301": {
+      "hash": "d3af76d7d2cb948c",
+      "size": 98572,
+      "path": "data_cache/000301.parquet"
+    },
+    "000408": {
+      "hash": "c83068cffcae46ee",
+      "size": 105701,
+      "path": "data_cache/000408.parquet"
+    },
+    "000568": {
+      "hash": "8aa755cd2a1d3e74",
+      "size": 119287,
+      "path": "data_cache/000568.parquet"
+    },
+    "000596": {
+      "hash": "1a76111a58085c87",
+      "size": 117383,
+      "path": "data_cache/000596.parquet"
+    },
+    "000617": {
+      "hash": "5b1bc2b01de1f994",
+      "size": 91951,
+      "path": "data_cache/000617.parquet"
+    },
+    "000630": {
+      "hash": "e3ad36a1bee54b19",
+      "size": 88967,
+      "path": "data_cache/000630.parquet"
+    },
+    "000657": {
+      "hash": "8be672886598ce61",
+      "size": 98007,
+      "path": "data_cache/000657.parquet"
+    },
+    "000708": {
+      "hash": "ec46380de215cf8a",
+      "size": 99984,
+      "path": "data_cache/000708.parquet"
+    },
+    "000792": {
+      "hash": "15ab26c4cf89fed6",
+      "size": 92660,
+      "path": "data_cache/000792.parquet"
+    },
+    "000807": {
+      "hash": "174874fcd21c4d2c",
+      "size": 102733,
+      "path": "data_cache/000807.parquet"
+    },
+    "000858": {
+      "hash": "66e667d850b2da30",
+      "size": 119273,
+      "path": "data_cache/000858.parquet"
+    },
+    "000975": {
+      "hash": "00280f79cb3ccede",
+      "size": 102554,
+      "path": "data_cache/000975.parquet"
+    },
+    "000977": {
+      "hash": "3e9c295651d8772b",
+      "size": 113710,
+      "path": "data_cache/000977.parquet"
+    },
+    "000988": {
+      "hash": "a99d6e2bc32401f2",
+      "size": 111723,
+      "path": "data_cache/000988.parquet"
+    },
+    "000999": {
+      "hash": "d495b8bee1116165",
+      "size": 104071,
+      "path": "data_cache/000999.parquet"
+    },
+    "001280": {
+      "hash": "7d0086cfc84cb135",
+      "size": 14149,
+      "path": "data_cache/001280.parquet"
+    },
+    "001391": {
+      "hash": "2d94b8198425fb8d",
+      "size": 21957,
+      "path": "data_cache/001391.parquet"
+    },
+    "001965": {
+      "hash": "778adfdb8635c0b2",
+      "size": 92929,
+      "path": "data_cache/001965.parquet"
+    },
+    "002001": {
+      "hash": "f9982ac8d6ffed3e",
+      "size": 105587,
+      "path": "data_cache/002001.parquet"
+    },
+    "002028": {
+      "hash": "f36fca8bf1a3415e",
+      "size": 114637,
+      "path": "data_cache/002028.parquet"
+    },
+    "002049": {
+      "hash": "9f9ad65a047b1256",
+      "size": 115892,
+      "path": "data_cache/002049.parquet"
+    },
+    "002074": {
+      "hash": "eeee8d898b524d7d",
+      "size": 111797,
+      "path": "data_cache/002074.parquet"
+    },
+    "002179": {
+      "hash": "8900fd00807c733d",
+      "size": 109016,
+      "path": "data_cache/002179.parquet"
+    },
+    "002202": {
+      "hash": "c38c139f7489169e",
+      "size": 98953,
+      "path": "data_cache/002202.parquet"
+    },
+    "002230": {
+      "hash": "71d230bc51a7433f",
+      "size": 113000,
+      "path": "data_cache/002230.parquet"
+    },
+    "002311": {
+      "hash": "a87a70c50eeb1b74",
+      "size": 112665,
+      "path": "data_cache/002311.parquet"
+    },
+    "002353": {
+      "hash": "cf18380ddbcdc5d1",
+      "size": 111459,
+      "path": "data_cache/002353.parquet"
+    },
+    "002371": {
+      "hash": "9202a83d18c4b6a8",
+      "size": 120782,
+      "path": "data_cache/002371.parquet"
+    },
+    "002384": {
+      "hash": "7fd479ba54f6d598",
+      "size": 106236,
+      "path": "data_cache/002384.parquet"
+    },
+    "002422": {
+      "hash": "14ac57cd86893801",
+      "size": 106882,
+      "path": "data_cache/002422.parquet"
+    },
+    "002463": {
+      "hash": "19bbe0bef5b557c2",
+      "size": 111572,
+      "path": "data_cache/002463.parquet"
+    },
+    "002466": {
+      "hash": "a599425265f57f0b",
+      "size": 115069,
+      "path": "data_cache/002466.parquet"
+    },
+    "002532": {
+      "hash": "707e5e121931f889",
+      "size": 90417,
+      "path": "data_cache/002532.parquet"
+    },
+    "002558": {
+      "hash": "26c5b1321a2eeda1",
+      "size": 103265,
+      "path": "data_cache/002558.parquet"
+    },
+    "002594": {
+      "hash": "3a46f6d4b2730407",
+      "size": 115157,
+      "path": "data_cache/002594.parquet"
+    },
+    "002600": {
+      "hash": "63f9a716dee06e2c",
+      "size": 99171,
+      "path": "data_cache/002600.parquet"
+    },
+    "002602": {
+      "hash": "00ed1c0bae9c077f",
+      "size": 94367,
+      "path": "data_cache/002602.parquet"
+    },
+    "002625": {
+      "hash": "7b01cb84f3007d14",
+      "size": 107335,
+      "path": "data_cache/002625.parquet"
+    },
+    "002648": {
+      "hash": "74f0ee4ac61a22e1",
+      "size": 102482,
+      "path": "data_cache/002648.parquet"
+    },
+    "002709": {
+      "hash": "12c3ae024f7d9c12",
+      "size": 112513,
+      "path": "data_cache/002709.parquet"
+    },
+    "002714": {
+      "hash": "cadc85474d3b3dc4",
+      "size": 112989,
+      "path": "data_cache/002714.parquet"
+    },
+    "002837": {
+      "hash": "f278caa5a1680a16",
+      "size": 103977,
+      "path": "data_cache/002837.parquet"
+    },
+    "002916": {
+      "hash": "cb1cc3f0cfc1eeee",
+      "size": 116978,
+      "path": "data_cache/002916.parquet"
+    },
+    "002920": {
+      "hash": "b100c4f41cfda461",
+      "size": 117074,
+      "path": "data_cache/002920.parquet"
+    },
+    "002938": {
+      "hash": "c7ae681172a79acb",
+      "size": 103005,
+      "path": "data_cache/002938.parquet"
+    },
+    "003816": {
+      "hash": "2f1f1fc6e87f2248",
+      "size": 69895,
+      "path": "data_cache/003816.parquet"
+    },
+    "300014": {
+      "hash": "99991abbfb86263a",
+      "size": 117670,
+      "path": "data_cache/300014.parquet"
+    },
+    "300033": {
+      "hash": "9e1e4c314f8c3378",
+      "size": 118453,
+      "path": "data_cache/300033.parquet"
+    },
+    "300122": {
+      "hash": "fa7ae3c17e74e8a3",
+      "size": 115489,
+      "path": "data_cache/300122.parquet"
+    },
+    "300251": {
+      "hash": "d106d7712cd45f34",
+      "size": 98161,
+      "path": "data_cache/300251.parquet"
+    },
+    "300274": {
+      "hash": "61c02cf9f42d6652",
+      "size": 115146,
+      "path": "data_cache/300274.parquet"
+    },
+    "300308": {
+      "hash": "f60fcd4df469d7a4",
+      "size": 116049,
+      "path": "data_cache/300308.parquet"
+    },
+    "300316": {
+      "hash": "ad19ca100af912a7",
+      "size": 114522,
+      "path": "data_cache/300316.parquet"
+    },
+    "300394": {
+      "hash": "3b0898e31633691d",
+      "size": 109330,
+      "path": "data_cache/300394.parquet"
+    },
+    "300413": {
+      "hash": "dd10327aef05566a",
+      "size": 109787,
+      "path": "data_cache/300413.parquet"
+    },
+    "300418": {
+      "hash": "d58ef5c2caa0ff9c",
+      "size": 111716,
+      "path": "data_cache/300418.parquet"
+    },
+    "300442": {
+      "hash": "04de9e95a44f1aff",
+      "size": 106261,
+      "path": "data_cache/300442.parquet"
+    },
+    "300450": {
+      "hash": "ac9a46510792a621",
+      "size": 113643,
+      "path": "data_cache/300450.parquet"
+    },
+    "300454": {
+      "hash": "7402822b96d25e40",
+      "size": 112413,
+      "path": "data_cache/300454.parquet"
+    },
+    "300476": {
+      "hash": "1a0c7bde1668e365",
+      "size": 111097,
+      "path": "data_cache/300476.parquet"
+    },
+    "300498": {
+      "hash": "fc6cc4e31171da9a",
+      "size": 101165,
+      "path": "data_cache/300498.parquet"
+    },
+    "300502": {
+      "hash": "3320b1e5257a7f16",
+      "size": 111915,
+      "path": "data_cache/300502.parquet"
+    },
+    "300628": {
+      "hash": "5bb68e2077722a15",
+      "size": 109451,
+      "path": "data_cache/300628.parquet"
+    },
+    "300661": {
+      "hash": "9c5f199e07a56bab",
+      "size": 114790,
+      "path": "data_cache/300661.parquet"
+    },
+    "300750": {
+      "hash": "c7fd9c07182beabf",
+      "size": 113603,
+      "path": "data_cache/300750.parquet"
+    },
+    "300760": {
+      "hash": "4b1562ce683560cd",
+      "size": 107839,
+      "path": "data_cache/300760.parquet"
+    },
+    "300782": {
+      "hash": "35d199d23f7e7183",
+      "size": 99181,
+      "path": "data_cache/300782.parquet"
+    },
+    "300803": {
+      "hash": "be5dedc99d89d903",
+      "size": 90657,
+      "path": "data_cache/300803.parquet"
+    },
+    "300832": {
+      "hash": "4ea09b3efa2e7f32",
+      "size": 83789,
+      "path": "data_cache/300832.parquet"
+    },
+    "300866": {
+      "hash": "40737d86d60621de",
+      "size": 82113,
+      "path": "data_cache/300866.parquet"
+    },
+    "300896": {
+      "hash": "7f4131213fade958",
+      "size": 82260,
+      "path": "data_cache/300896.parquet"
+    },
+    "300999": {
+      "hash": "ba9a9f38437a1722",
+      "size": 77955,
+      "path": "data_cache/300999.parquet"
+    },
+    "301165": {
+      "hash": "04026564663f700d",
+      "size": 52019,
+      "path": "data_cache/301165.parquet"
+    },
+    "301236": {
+      "hash": "0df050641ad293dd",
+      "size": 61823,
+      "path": "data_cache/301236.parquet"
+    },
+    "301269": {
+      "hash": "b5adc2d3a33739e0",
+      "size": 56141,
+      "path": "data_cache/301269.parquet"
+    },
+    "301308": {
+      "hash": "db64b5e25ab3d834",
+      "size": 56938,
+      "path": "data_cache/301308.parquet"
+    },
+    "302132": {
+      "hash": "c2e34babadb50921",
+      "size": 107708,
+      "path": "data_cache/302132.parquet"
+    },
+    "600023": {
+      "hash": "df7f1a67cf8a44a1",
+      "size": 87505,
+      "path": "data_cache/600023.parquet"
+    },
+    "600026": {
+      "hash": "ea37889815c4fe2a",
+      "size": 97870,
+      "path": "data_cache/600026.parquet"
+    },
+    "600027": {
+      "hash": "3cc38815c2a72f88",
+      "size": 87381,
+      "path": "data_cache/600027.parquet"
+    },
+    "600036": {
+      "hash": "37b6cf2a743c15a1",
+      "size": 108062,
+      "path": "data_cache/600036.parquet"
+    },
+    "600039": {
+      "hash": "161e1a53169e895c",
+      "size": 92093,
+      "path": "data_cache/600039.parquet"
+    },
+    "600066": {
+      "hash": "03ee45a24029e6b0",
+      "size": 103061,
+      "path": "data_cache/600066.parquet"
+    },
+    "600089": {
+      "hash": "dcf794fc992e3608",
+      "size": 100492,
+      "path": "data_cache/600089.parquet"
+    },
+    "600118": {
+      "hash": "b6c8b8536f1a05b6",
+      "size": 107538,
+      "path": "data_cache/600118.parquet"
+    },
+    "600150": {
+      "hash": "2fc67b692381853f",
+      "size": 105165,
+      "path": "data_cache/600150.parquet"
+    },
+    "600160": {
+      "hash": "89e17dddd2705125",
+      "size": 103871,
+      "path": "data_cache/600160.parquet"
+    },
+    "600183": {
+      "hash": "e4da9a75f4e40f8d",
+      "size": 108911,
+      "path": "data_cache/600183.parquet"
+    },
+    "600188": {
+      "hash": "7af9415ec93041f0",
+      "size": 98833,
+      "path": "data_cache/600188.parquet"
+    },
+    "600219": {
+      "hash": "70c7b9d52449d9c9",
+      "size": 88502,
+      "path": "data_cache/600219.parquet"
+    },
+    "600221": {
+      "hash": "2be7564202258e00",
+      "size": 78387,
+      "path": "data_cache/600221.parquet"
+    },
+    "600233": {
+      "hash": "80e317efec15e066",
+      "size": 98535,
+      "path": "data_cache/600233.parquet"
+    },
+    "600276": {
+      "hash": "dd259af504a340ed",
+      "size": 114164,
+      "path": "data_cache/600276.parquet"
+    },
+    "600372": {
+      "hash": "7f87121a2b7045c4",
+      "size": 94542,
+      "path": "data_cache/600372.parquet"
+    },
+    "600415": {
+      "hash": "e8682d8741aaac48",
+      "size": 96218,
+      "path": "data_cache/600415.parquet"
+    },
+    "600426": {
+      "hash": "b4e5ddd8ccf28e65",
+      "size": 103731,
+      "path": "data_cache/600426.parquet"
+    },
+    "600460": {
+      "hash": "ad55524330b835d7",
+      "size": 111529,
+      "path": "data_cache/600460.parquet"
+    },
+    "600482": {
+      "hash": "198b8bc9e7e52c3b",
+      "size": 98113,
+      "path": "data_cache/600482.parquet"
+    },
+    "600489": {
+      "hash": "086174d98135be9a",
+      "size": 97662,
+      "path": "data_cache/600489.parquet"
+    },
+    "600515": {
+      "hash": "d024fc3179f4abbe",
+      "size": 82846,
+      "path": "data_cache/600515.parquet"
+    },
+    "600519": {
+      "hash": "c566d9091987023b",
+      "size": 119017,
+      "path": "data_cache/600519.parquet"
+    },
+    "600522": {
+      "hash": "2f2b4dc9ceca53c5",
+      "size": 103242,
+      "path": "data_cache/600522.parquet"
+    },
+    "600549": {
+      "hash": "c78b15d0ac084081",
+      "size": 105327,
+      "path": "data_cache/600549.parquet"
+    },
+    "600584": {
+      "hash": "4b04391f00d0ffd0",
+      "size": 112439,
+      "path": "data_cache/600584.parquet"
+    },
+    "600600": {
+      "hash": "9831fdaca9ad3d74",
+      "size": 113534,
+      "path": "data_cache/600600.parquet"
+    },
+    "600674": {
+      "hash": "0c74f923e374e618",
+      "size": 97364,
+      "path": "data_cache/600674.parquet"
+    },
+    "600760": {
+      "hash": "ddfa0e4ca871c2a3",
+      "size": 110366,
+      "path": "data_cache/600760.parquet"
+    },
+    "600803": {
+      "hash": "51f1cafa6da59a03",
+      "size": 96038,
+      "path": "data_cache/600803.parquet"
+    },
+    "600845": {
+      "hash": "c94634efdbd5fdb0",
+      "size": 108352,
+      "path": "data_cache/600845.parquet"
+    },
+    "600875": {
+      "hash": "6f10b9114213c70f",
+      "size": 103839,
+      "path": "data_cache/600875.parquet"
+    },
+    "600905": {
+      "hash": "9561dd6ff383a954",
+      "size": 55616,
+      "path": "data_cache/600905.parquet"
+    },
+    "600918": {
+      "hash": "800fa113c686e9f8",
+      "size": 69906,
+      "path": "data_cache/600918.parquet"
+    },
+    "600930": {
+      "hash": "23e60abb9912fe7e",
+      "size": 16268,
+      "path": "data_cache/600930.parquet"
+    },
+    "600938": {
+      "hash": "796408a3ddddfdec",
+      "size": 57016,
+      "path": "data_cache/600938.parquet"
+    },
+    "600941": {
+      "hash": "dd10f2cfee56a559",
+      "size": 63484,
+      "path": "data_cache/600941.parquet"
+    },
+    "600989": {
+      "hash": "e83cb8eddd9ff763",
+      "size": 85154,
+      "path": "data_cache/600989.parquet"
+    },
+    "601012": {
+      "hash": "6cd7b492bff754b7",
+      "size": 112925,
+      "path": "data_cache/601012.parquet"
+    },
+    "601018": {
+      "hash": "64224eea98b885ca",
+      "size": 83720,
+      "path": "data_cache/601018.parquet"
+    },
+    "601058": {
+      "hash": "1b3a4b71910c30f6",
+      "size": 98397,
+      "path": "data_cache/601058.parquet"
+    },
+    "601059": {
+      "hash": "616b9101707e4435",
+      "size": 43829,
+      "path": "data_cache/601059.parquet"
+    },
+    "601066": {
+      "hash": "0ead2fb1189a312b",
+      "size": 100309,
+      "path": "data_cache/601066.parquet"
+    },
+    "601077": {
+      "hash": "a9de7afc6bf84e34",
+      "size": 70940,
+      "path": "data_cache/601077.parquet"
+    },
+    "601100": {
+      "hash": "848452a2a2c61265",
+      "size": 115219,
+      "path": "data_cache/601100.parquet"
+    },
+    "601117": {
+      "hash": "774936882a0ca3c1",
+      "size": 92122,
+      "path": "data_cache/601117.parquet"
+    },
+    "601136": {
+      "hash": "1f5ef12a4c48b201",
+      "size": 47660,
+      "path": "data_cache/601136.parquet"
+    },
+    "601138": {
+      "hash": "eb0c095fba4ff437",
+      "size": 100843,
+      "path": "data_cache/601138.parquet"
+    },
+    "601318": {
+      "hash": "b87c5d8acbb3073a",
+      "size": 112266,
+      "path": "data_cache/601318.parquet"
+    },
+    "601319": {
+      "hash": "ca28d8da64024b21",
+      "size": 81228,
+      "path": "data_cache/601319.parquet"
+    },
+    "601456": {
+      "hash": "7d86869a3a08015d",
+      "size": 69027,
+      "path": "data_cache/601456.parquet"
+    },
+    "601658": {
+      "hash": "a148eae49a00fea0",
+      "size": 68022,
+      "path": "data_cache/601658.parquet"
+    },
+    "601668": {
+      "hash": "c09fd6a091b8c53d",
+      "size": 85747,
+      "path": "data_cache/601668.parquet"
+    },
+    "601689": {
+      "hash": "e8befb3acfbd3061",
+      "size": 112669,
+      "path": "data_cache/601689.parquet"
+    },
+    "601698": {
+      "hash": "dd6581acbc5c81b4",
+      "size": 88050,
+      "path": "data_cache/601698.parquet"
+    },
+    "601727": {
+      "hash": "a7d210697bf02e8b",
+      "size": 87795,
+      "path": "data_cache/601727.parquet"
+    },
+    "601728": {
+      "hash": "0c47aa261e6d04a5",
+      "size": 55232,
+      "path": "data_cache/601728.parquet"
+    },
+    "601816": {
+      "hash": "04592b8c2cbf5cad",
+      "size": 66243,
+      "path": "data_cache/601816.parquet"
+    },
+    "601825": {
+      "hash": "31a3c6b9a9bf1eaf",
+      "size": 55133,
+      "path": "data_cache/601825.parquet"
+    },
+    "601868": {
+      "hash": "362eec4672e5ae35",
+      "size": 49737,
+      "path": "data_cache/601868.parquet"
+    },
+    "601872": {
+      "hash": "03996011e540afb0",
+      "size": 94307,
+      "path": "data_cache/601872.parquet"
+    },
+    "601898": {
+      "hash": "c26748416a0d4b68",
+      "size": 96849,
+      "path": "data_cache/601898.parquet"
+    },
+    "601916": {
+      "hash": "71922d50f75ea4d2",
+      "size": 65871,
+      "path": "data_cache/601916.parquet"
+    },
+    "601995": {
+      "hash": "5dbe5c85132254f7",
+      "size": 74363,
+      "path": "data_cache/601995.parquet"
+    },
+    "603019": {
+      "hash": "d8c1f752fe875ecb",
+      "size": 113179,
+      "path": "data_cache/603019.parquet"
+    },
+    "603259": {
+      "hash": "622a15027762c5ca",
+      "size": 114026,
+      "path": "data_cache/603259.parquet"
+    },
+    "603260": {
+      "hash": "e316af154a4f5a2c",
+      "size": 114834,
+      "path": "data_cache/603260.parquet"
+    },
+    "603296": {
+      "hash": "cdb9d51390c116bf",
+      "size": 43639,
+      "path": "data_cache/603296.parquet"
+    },
+    "603369": {
+      "hash": "4b1155bb66878412",
+      "size": 111304,
+      "path": "data_cache/603369.parquet"
+    },
+    "603392": {
+      "hash": "6494e1c8f67a650e",
+      "size": 85260,
+      "path": "data_cache/603392.parquet"
+    },
+    "603501": {
+      "hash": "e3f5172e9789c62c",
+      "size": 113833,
+      "path": "data_cache/603501.parquet"
+    },
+    "603893": {
+      "hash": "996006a111901095",
+      "size": 90348,
+      "path": "data_cache/603893.parquet"
+    },
+    "603986": {
+      "hash": "ef9a023fc34dcd8e",
+      "size": 116646,
+      "path": "data_cache/603986.parquet"
+    },
+    "605117": {
+      "hash": "7a4da29bd280a303",
+      "size": 74029,
+      "path": "data_cache/605117.parquet"
+    },
+    "605499": {
+      "hash": "599909b60aaf57c2",
+      "size": 72186,
+      "path": "data_cache/605499.parquet"
+    },
+    "688005": {
+      "hash": "fe0a0710f199b372",
+      "size": 93879,
+      "path": "data_cache/688005.parquet"
+    },
+    "688008": {
+      "hash": "2821f4ae9d5eca44",
+      "size": 95534,
+      "path": "data_cache/688008.parquet"
+    },
+    "688009": {
+      "hash": "435280166ef83ddd",
+      "size": 72464,
+      "path": "data_cache/688009.parquet"
+    },
+    "688012": {
+      "hash": "a1dc280357439fd7",
+      "size": 96654,
+      "path": "data_cache/688012.parquet"
+    },
+    "688036": {
+      "hash": "dd66336cf8bf076d",
+      "size": 94016,
+      "path": "data_cache/688036.parquet"
+    },
+    "688041": {
+      "hash": "31b05b1778006544",
+      "size": 57115,
+      "path": "data_cache/688041.parquet"
+    },
+    "688047": {
+      "hash": "1f504cc4e83dccff",
+      "size": 57030,
+      "path": "data_cache/688047.parquet"
+    },
+    "688072": {
+      "hash": "f448c29c8ba8b151",
+      "size": 60632,
+      "path": "data_cache/688072.parquet"
+    },
+    "688082": {
+      "hash": "dc8141e3710e9d11",
+      "size": 65416,
+      "path": "data_cache/688082.parquet"
+    },
+    "688111": {
+      "hash": "cbb563547ae18194",
+      "size": 93914,
+      "path": "data_cache/688111.parquet"
+    },
+    "688126": {
+      "hash": "4ac5f937546f5607",
+      "size": 80097,
+      "path": "data_cache/688126.parquet"
+    },
+    "688180": {
+      "hash": "f843443659b2140e",
+      "size": 81762,
+      "path": "data_cache/688180.parquet"
+    },
+    "688183": {
+      "hash": "af6caf548457eea2",
+      "size": 70715,
+      "path": "data_cache/688183.parquet"
+    },
+    "688223": {
+      "hash": "e03249d61b31ecca",
+      "size": 57321,
+      "path": "data_cache/688223.parquet"
+    },
+    "688256": {
+      "hash": "77c09851178b255b",
+      "size": 85264,
+      "path": "data_cache/688256.parquet"
+    },
+    "688271": {
+      "hash": "8d6c705dd156aec1",
+      "size": 55330,
+      "path": "data_cache/688271.parquet"
+    },
+    "688303": {
+      "hash": "7201e6a57b1c9fbe",
+      "size": 68572,
+      "path": "data_cache/688303.parquet"
+    },
+    "688396": {
+      "hash": "0d1aaa5066a65333",
+      "size": 85652,
+      "path": "data_cache/688396.parquet"
+    },
+    "688506": {
+      "hash": "186e016b31036f15",
+      "size": 51038,
+      "path": "data_cache/688506.parquet"
+    },
+    "688521": {
+      "hash": "fa926b0fcbb5fae9",
+      "size": 82445,
+      "path": "data_cache/688521.parquet"
+    },
+    "688561": {
+      "hash": "af872c3b22ffb58b",
+      "size": 82088,
+      "path": "data_cache/688561.parquet"
+    },
+    "688981": {
+      "hash": "055242715de36a5b",
+      "size": 82086,
+      "path": "data_cache/688981.parquet"
+    }
+  },
+  "generated": "2026-07-29"
+}
