@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "deep-quant"
+version = "2.0.0"
+description = "A股多因子量化回测系统 — Point-in-Time × embargo × 诚实盲测"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas", "numpy", "scipy", "lightgbm",
+    "akshare", "matplotlib", "streamlit", "pyyaml"
+]
+
+[project.scripts]
+deepquant-backtest = "scripts.run_backtest:main"
+deepquant-blind    = "scripts.run_blind_test:main"
+deepquant-ic       = "scripts.run_ic_analysis:main"
+deepquant-sens     = "scripts.run_sensitivity:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
