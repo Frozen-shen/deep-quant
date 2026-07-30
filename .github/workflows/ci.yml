@@ -1,0 +1,35 @@
+name: CI Lock Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lock-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check blind test lock integrity
+        run: |
+          LOCKED=$(python -c "
+          import yaml
+          with open('config.yaml') as f:
+              cfg = yaml.safe_load(f)
+          print(cfg.get('blind_test',{}).get('locked',False))
+          ")
+          if [ "$LOCKED" = "True" ]; then
+            # 若已锁定, 检查 config 是否有未提交的修改
+            if git diff --name-only | grep -q config.yaml; then
+              echo "❌ 盲测已锁定, 禁止修改 config.yaml"
+              exit 1
+            fi
+            echo "✅ 盲测锁定状态正常"
+          fi
+
+      - name: Run unit tests
+        run: |
+          pip install -r requirements.txt -q
+          python -m unittest tests.test_core -v

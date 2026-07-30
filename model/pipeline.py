@@ -269,6 +269,10 @@ class QuantPipeline:
         print(f"\n  策略均值:{mr:+.1f}%  超额均值:{me:+.1f}%  正窗口:{pr}/{len(results)}  正超额:{pe}/{len(results)}")
         print(f"{'='*65}")
 
+        # ★ 实验记账
+        from model.experiment import log_experiment
+        log_experiment(self.mode, self.cfg, results)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
