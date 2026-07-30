@@ -88,17 +88,17 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
     },
 
-    # ★ v5: IC自动权重 (研究期2018-2022, 由run_ic_analysis.py自动生成)
+    # ★ v5: IC自动权重(带方向, 由run_ic_analysis.py生成)
     "ic_auto": {
-        "name": "IC自动权重(研究期)",
+        "name": "IC自动权重(研究期,带方向)",
         "factors": {
-            "range_20d": 0.0695, "liq_ratio": 0.0705, "boll_width": 0.0655,
-            "skew_20d": 0.0616, "vol_price_sync": 0.0561, "ma5_ma30_spread": 0.0562,
-            "return_30d": 0.055, "turnover_vol": 0.055, "ma20_ma60_spread": 0.0533,
-            "ma10_ma20_spread": 0.0498, "ma5_ma20_spread": 0.0483, "momentum_20d": 0.0483,
-            "turnover_trend": 0.0465, "ma3_ma20_spread": 0.046, "rev_mom_spread": 0.0447,
-            "channel_high_20": 0.0408, "rank_20": 0.0394, "ma_bullish": 0.037,
-            "ksft2": 0.031, "vol_regime": 0.0255,
+            "skew_20d": -1.0, "vol_price_sync": -0.868, "boll_width": 0.589,
+            "range_20d": 0.579, "liq_ratio": -0.566, "ma5_ma30_spread": -0.56,
+            "return_30d": 0.55, "turnover_vol": -0.544, "ma10_ma20_spread": -0.522,
+            "ma5_ma20_spread": -0.506, "ma20_ma60_spread": -0.505, "momentum_20d": 0.496,
+            "ma_bullish": -0.494, "ma3_ma20_spread": -0.482, "rank_20": -0.453,
+            "rev_mom_spread": 0.45, "channel_high_20": -0.418, "ksft2": -0.405,
+            "turnover_trend": -0.395, "vol_regime": 0.393,
         },
         "buy_threshold": 0.15, "sell_threshold": -0.10,
     },

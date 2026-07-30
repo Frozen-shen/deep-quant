@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import numpy as np, pandas as pd
 from scipy.stats import rankdata
+from data.calendar import get_trading_days
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
@@ -72,6 +73,18 @@ class QuantPipeline:
                 df["date"] = pd.to_datetime(df["date"]); self._all_data[sym] = df
         print(f"  加载完成: {len(self._all_data)} 只有效数据")
 
+        # ★ 加载未复权数据
+        self._unadj_data = {}
+        unadj_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
+        if os.path.isdir(unadj_dir):
+            for sym in self._all_data:
+                path = os.path.join(unadj_dir, f"{sym}.parquet")
+                if os.path.exists(path):
+                    df = pd.read_parquet(path)
+                    df["date"] = pd.to_datetime(df["date"])
+                    self._unadj_data[sym] = df
+            print(f"  未复权数据: {len(self._unadj_data)} 只")
+
         # ★ 加载未复权数据 (用于涨跌停判断)
         self._unadj_data = {}
         unadj_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
@@ -130,7 +143,9 @@ class QuantPipeline:
         train_end_clean = w["train_end"] - timedelta(days=self.embargo_days)
         print(f"\n  W{wi+1}: train {w['train_start'].date()}~{train_end_clean.date()} → test {w['test_start'].date()}~{w['test_end'].date()} (embargo:{self.embargo_days}d)")
 
-        all_days = sorted(set().union(*[set(df["date"].tolist()) for df in self._all_data.values()]))
+        all_days = get_trading_days(self.cfg["data_partition"]["full_start"], self.cfg["data_partition"]["full_end"])
+        if not all_days:
+            all_days = sorted(set().union(*[set(df["date"].tolist()) for df in self._all_data.values()]))
         train_days = [d for d in all_days if w["train_start"] <= d <= train_end_clean][::self.day_step]
         if len(train_days) < 30: return None
 
@@ -198,7 +213,9 @@ class QuantPipeline:
                                  cost_threshold=self.cost_threshold)
         rules = TradingRules()
 
-        all_days = sorted(set().union(*[set(df["date"].tolist()) for df in self._all_data.values()]))
+        all_days = get_trading_days(self.cfg["data_partition"]["full_start"], self.cfg["data_partition"]["full_end"])
+        if not all_days:
+            all_days = sorted(set().union(*[set(df["date"].tolist()) for df in self._all_data.values()]))
         test_days = [d for d in all_days if w["test_start"] <= d <= w["test_end"]]
 
         total_trades = 0; equity_curve = []; prev_decision = None

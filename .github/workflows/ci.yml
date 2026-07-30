@@ -14,6 +14,7 @@ jobs:
 
       - name: Check blind test lock integrity
         run: |
+          pip install pyyaml -q
           LOCKED=$(python -c "
           import yaml
           with open('config.yaml') as f:
@@ -21,8 +22,8 @@ jobs:
           print(cfg.get('blind_test',{}).get('locked',False))
           ")
           if [ "$LOCKED" = "True" ]; then
-            # 若已锁定, 检查 config 是否有未提交的修改
-            if git diff --name-only | grep -q config.yaml; then
+            # ★ 检查本次push是否修改了config.yaml
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q config.yaml; then
               echo "❌ 盲测已锁定, 禁止修改 config.yaml"
               exit 1
             fi
