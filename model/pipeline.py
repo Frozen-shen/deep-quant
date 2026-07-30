@@ -74,6 +74,15 @@ class QuantPipeline:
                 df["date"] = pd.to_datetime(df["date"]); self._all_data[sym] = df
         print(f"  加载完成: {len(self._all_data)} 只有效数据")
 
+        # ★ 基本面因子
+        self._fund_cache = {}
+        if self.cfg["factors"].get("use_fundamental", False):
+            from data.fundamental_cache_builder import precompute_fundamental_factors, FUND_FACTOR_NAMES
+            self._fund_cache = precompute_fundamental_factors(self._all_data)
+            self._fund_factor_names = FUND_FACTOR_NAMES
+        else:
+            self._fund_factor_names = []
+
         # ★ 加载未复权数据
         self._unadj_data = {}
         unadj_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
@@ -125,7 +134,9 @@ class QuantPipeline:
         self._factor_names = sorted(scorer.factor_weights.keys())
         self._factor_cache = FactorCache(scorer, self._factor_names)
         self._factor_cache.precompute(self._all_data)
-        print(f"  因子: {len(self._factor_names)} 个, 预计算完成")
+        # ★ 基本面因子名附加到总因子列表
+        self._all_factor_names = self._factor_names + self._fund_factor_names
+        print(f"  因子: {len(self._factor_names)} 价量 + {len(self._fund_factor_names)} 基本面 = {len(self._all_factor_names)} 个, 预计算完成")
 
     def _generate_windows(self):
         period = self.dev_period if self.mode == "dev" else self.blind_period
@@ -171,6 +182,10 @@ class QuantPipeline:
         for sym in self._all_data:
             feats = self._factor_cache.get_features(sym, today)
             if feats is None: continue
+            # ★ 合并基本面因子
+            if self._fund_cache:
+                from data.fundamental_cache_builder import merge_fundamental_to_features
+                feats = merge_fundamental_to_features(sym, today, self._fund_cache, feats)
             fdf = self._all_data[sym]
             try:
                 dm = fdf["date"] == today
@@ -209,7 +224,7 @@ class QuantPipeline:
                              learning_rate=mc["learning_rate"], lambda_l1=mc["lambda_l1"],
                              min_data_in_leaf=mc["min_data_in_leaf"])
 
-        model.feature_names = self._factor_names
+        model.feature_names = getattr(self, '_all_factor_names', self._factor_names)
         td = self.cfg["time_decay"]
         dl = np.log(2) / td["half_life_years"]
         dw = np.array([np.exp(-dl * max(0, (train_end - pd.Timestamp(str(g))).days / 365.0)) for g in group_list])
@@ -276,7 +291,12 @@ class QuantPipeline:
         sym_feats, swd = [], []
         for sym in sd:
             feats = self._factor_cache.get_features(sym, today)
-            if feats is not None: sym_feats.append(feats); swd.append(sym)
+            if feats is not None:
+                # ★ 合并基本面因子
+                if self._fund_cache:
+                    from data.fundamental_cache_builder import merge_fundamental_to_features
+                    feats = merge_fundamental_to_features(sym, today, self._fund_cache, feats)
+                sym_feats.append(feats); swd.append(sym)
         if len(sym_feats) < self.top_k: return None
 
         fa = np.array(sym_feats); m, s = fa.mean(axis=0), fa.std(axis=0); s[s == 0] = 1.0

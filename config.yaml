@@ -28,6 +28,7 @@ execution:
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
+  use_fundamental: true     # ★ 启用基本面因子 (PE/PB/ROE/增速)
 label:
   horizon_days: 7
   type: rank
@@ -56,6 +57,6 @@ time_decay:
 universe:
   data_version: v20260729
   include_delisted: true
-  index: '000852'            # CSI1000 小盘矿脉 (原000300已确诊无alpha)
+  index: '000300'            # CSI300 (基本面因子测试)
   min_list_days: 250
   snapshot_mode: monthly
