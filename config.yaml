@@ -56,6 +56,6 @@ time_decay:
 universe:
   data_version: v20260729
   include_delisted: true
-  index: '000300'
+  index: '000852'            # CSI1000 小盘矿脉 (原000300已确诊无alpha)
   min_list_days: 250
   snapshot_mode: monthly

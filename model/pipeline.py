@@ -285,8 +285,10 @@ class QuantPipeline:
         holdings = list(bt.positions.keys())
         decision = ranker.rank(scores, holdings)
 
-        # ★ 涨跌停+市场过滤 (用未复权价判断)
-        limit_data = self._unadj_data if self._unadj_data else sd
+        # ★ 涨跌停判断: 优先用未复权价, 无则退回后复权
+        limit_data = dict(sd)  # 复制后复权数据
+        if self._unadj_data:
+            limit_data.update({s: self._unadj_data[s] for s in self._unadj_data if s in sd})
         decision["buy"] = [s for s in decision["buy"] if s in limit_data and rules.can_buy(s, limit_data[s])]
         decision["sell"] = [s for s in decision["sell"] if s in limit_data and rules.can_sell(s, limit_data[s])]
         return decision
