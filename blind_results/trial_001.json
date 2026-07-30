@@ -1,0 +1,58 @@
+{
+  "trial": 1,
+  "timestamp": "2026-07-30 12:08:04",
+  "config_hash": "9899faed0bf0",
+  "git_commit": "37fe57bd48853769345c5b128cc5605c9455a2b0",
+  "params": {
+    "universe": {
+      "index": "000300",
+      "snapshot_mode": "monthly",
+      "min_list_days": 250,
+      "include_delisted": true,
+      "data_version": "v20260729"
+    },
+    "rolling": {
+      "train_months": 4,
+      "test_months": 9,
+      "day_step": 2,
+      "embargo_days": 10
+    },
+    "label": {
+      "horizon_days": 7,
+      "type": "rank"
+    },
+    "model": {
+      "n_estimators": 600,
+      "max_depth": 5,
+      "learning_rate": 0.03,
+      "lambda_l1": 0.3,
+      "min_data_in_leaf": 40,
+      "val_ratio": 0.15
+    },
+    "time_decay": {
+      "half_life_years": 0.5
+    },
+    "execution": {
+      "signal_delay": 1,
+      "execution_price": "open",
+      "initial_capital": 100000,
+      "top_k": 6,
+      "max_single_pct": 0.25,
+      "lot_size": 100,
+      "market_filter": false,
+      "market_ma": 60,
+      "max_positions": 5
+    },
+    "portfolio": {
+      "hold_thresh": 10,
+      "sell_rank_buffer": 2,
+      "buy_confirm_days": 1,
+      "cost_threshold": 0.08,
+      "n_drop": 2
+    },
+    "factors": {
+      "preset": "ic_auto",
+      "freeze_date": "2023-01-01"
+    }
+  }
+}

@@ -1,101 +1,59 @@
-# Deep Quant v2 — 唯一参数源
-# 所有参数从此文件读取，不再散落在各 py 文件的全局变量里。
-# 修改参数后运行: python scripts/run_backtest.py
-
-# ════════════════════════════════════════
-#  数据分区 (严禁修改 — 一旦确定永不回头)
-# ════════════════════════════════════════
-data_partition:
-  full_start: "2018-01-01"
-  full_end: "2026-07-10"
-  research:
-    start: "2018-01-01"
-    end: "2022-12-31"       # 因子研究、IC分析只能用这个区间
-  development:
-    start: "2021-01-01"
-    end: "2024-06-30"       # 模型开发、超参调优用这个区间 (覆盖牛熊)
-  blind_test:
-    start: "2024-07-01"
-    end: "2026-07-10"       # ★ 盲测期：参数冻结后只能跑一次，结果即为最终答案
-
-# ════════════════════════════════════════
-#  股票池 (Point-in-Time 成分股)
-# ════════════════════════════════════════
-universe:
-  index: "000300"           # CSI300
-  snapshot_mode: "monthly"  # 每月取一次当时的成分股快照
-  min_list_days: 250        # 上市满250个交易日的才纳入
-  include_delisted: true    # 包含已退市股（必须有历史数据）
-  data_version: "v20260729" # 数据快照版本
-
-# ════════════════════════════════════════
-#  滚动重训练窗口
-# ════════════════════════════════════════
-rolling:
-  train_months: 4          # 4月窗口, 更多训练数据
-  test_months: 9            
-  day_step: 2               
-  embargo_days: 15  # horizon×1.5日历日          
-
-# ════════════════════════════════════════
-#  标签
-# ════════════════════════════════════════
-label:
-  horizon_days: 10          
-  type: "rank"              
-
-# ════════════════════════════════════════
-#  模型 (LightGBM Lambdarank)
-# ════════════════════════════════════════
-model:
-  n_estimators: 600         # 600棵, 更多数据需要更强模型
-  max_depth: 5              
-  learning_rate: 0.03       
-  lambda_l1: 0.3            # 低正则, 更多数据不太会过拟合
-  min_data_in_leaf: 40      # 50→40
-  val_ratio: 0.15
-
-# ════════════════════════════════════════
-#  时间衰减
-# ════════════════════════════════════════
-time_decay:
-  half_life_years: 0.5      # 半衰期（0.5年前的数据权重折半）
-
-# ════════════════════════════════════════
-#  执行规则 (A股真实约束)
-# ════════════════════════════════════════
-execution:
-  signal_delay: 1           # T+1: 今天收盘确认信号 → 明天开盘成交
-  execution_price: "open"   # 次日开盘价
-  initial_capital: 100000
-  top_k: 6                  # 持仓数量
-  max_single_pct: 0.25      # 单票最大仓位占比
-  lot_size: 100             # A股整手
-  market_filter: false       # ★ 市场趋势过滤: 指数<MA60时空仓
-  market_ma: 60             # ★ MA周期
-  max_positions: 5          # 最大同时持仓数
-
-# ════════════════════════════════════════
-#  组合管理
-# ════════════════════════════════════════
-portfolio:
-  hold_thresh: 10           # 最小持有天数
-  sell_rank_buffer: 2       # 排名跌出 top_k+buffer 才卖
-  buy_confirm_days: 1       # 连续N天在top_k才买
-  cost_threshold: 0.08      # 换仓门槛
-  n_drop: 2                 # 每天最多替换数
-
-# ════════════════════════════════════════
-#  因子配置
-# ════════════════════════════════════════
-factors:
-  preset: "ic_auto"  # IC自动权重(研究期)        # ★ 只用Top-20高IC因子, 减少噪音
-  freeze_date: "2023-01-01" # ★ 此后不再修改因子列表或权重
-
-# ════════════════════════════════════════
-#  盲测追踪
-# ════════════════════════════════════════
 blind_test:
-  trial_count: 1            # Trial#1 2026-07-23 唯一合法盲测: 策略+18.9% 超额-19.1%
-  last_run: "2026-07-23"
-  locked: true              # ★ 参数永久锁定, 禁止再修改
+  config_hash: 9899faed0bf0
+  last_run: '2026-07-30'
+  locked: true
+  trial_count: 1
+data_partition:
+  blind_test:
+    end: '2026-07-10'
+    start: '2024-07-01'
+  development:
+    end: '2024-06-30'
+    start: '2021-01-01'
+  full_end: '2026-07-10'
+  full_start: '2018-01-01'
+  research:
+    end: '2022-12-31'
+    start: '2018-01-01'
+execution:
+  execution_price: open
+  initial_capital: 100000
+  lot_size: 100
+  market_filter: false
+  market_ma: 60
+  max_positions: 5
+  max_single_pct: 0.25
+  signal_delay: 1
+  top_k: 6
+factors:
+  freeze_date: '2023-01-01'
+  preset: ic_auto
+label:
+  horizon_days: 7
+  type: rank
+model:
+  lambda_l1: 0.3
+  learning_rate: 0.03
+  max_depth: 5
+  min_data_in_leaf: 40
+  n_estimators: 600
+  val_ratio: 0.15
+portfolio:
+  buy_confirm_days: 1
+  cost_threshold: 0.08
+  hold_thresh: 10
+  n_drop: 2
+  sell_rank_buffer: 2
+rolling:
+  day_step: 2
+  embargo_days: 10
+  test_months: 9
+  train_months: 4
+time_decay:
+  half_life_years: 0.5
+universe:
+  data_version: v20260729
+  include_delisted: true
+  index: '000300'
+  min_list_days: 250
+  snapshot_mode: monthly
