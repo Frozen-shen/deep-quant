@@ -190,17 +190,31 @@ class QuantPipeline:
         return fn, labels, syms
 
     def _train_model(self, X, y, group_list, train_end):
-        from ml_ranker import MLRanker
-        mc = self.cfg["model"]
-        model = MLRanker(n_estimators=mc["n_estimators"], max_depth=mc["max_depth"],
-                         learning_rate=mc["learning_rate"], lambda_l1=mc["lambda_l1"],
-                         min_data_in_leaf=mc["min_data_in_leaf"])
+        model_type = self.cfg["model"].get("type", "lgb")
+
+        if model_type == "l0":
+            from model.baselines import L0EqualWeight
+            model = L0EqualWeight()
+        elif model_type == "l1":
+            from model.baselines import L1SingleFactor
+            model = L1SingleFactor()
+        elif model_type == "l2":
+            from model.baselines import L2LinearRanker
+            alpha = self.cfg["model"].get("ridge_alpha", 1.0)
+            model = L2LinearRanker(alpha=alpha)
+        else:
+            from ml_ranker import MLRanker
+            mc = self.cfg["model"]
+            model = MLRanker(n_estimators=mc["n_estimators"], max_depth=mc["max_depth"],
+                             learning_rate=mc["learning_rate"], lambda_l1=mc["lambda_l1"],
+                             min_data_in_leaf=mc["min_data_in_leaf"])
+
         model.feature_names = self._factor_names
         td = self.cfg["time_decay"]
         dl = np.log(2) / td["half_life_years"]
         dw = np.array([np.exp(-dl * max(0, (train_end - pd.Timestamp(str(g))).days / 365.0)) for g in group_list])
         groups = pd.Series(group_list).astype(str).factorize()[0]
-        model.fit(X, y, groups, val_ratio=mc["val_ratio"], sample_weight=dw)
+        model.fit(X, y, groups, val_ratio=self.cfg["model"].get("val_ratio", 0.15), sample_weight=dw)
         return model
 
     def _backtest(self, w, model):

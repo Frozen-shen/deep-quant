@@ -1,0 +1,527 @@
+{
+  "timestamp": "2026-07-30 14:47:13",
+  "horizons_tested": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    12,
+    15
+  ],
+  "best": {
+    "horizon": 8,
+    "mean_excess": 6.7
+  },
+  "plateau_detected": false,
+  "plateau_horizons": [
+    7,
+    8
+  ],
+  "plateau_count": 2,
+  "results": [
+    {
+      "horizon": 3,
+      "embargo": 10,
+      "mean_return": 7.63,
+      "mean_excess": 1.19,
+      "n_windows": 5,
+      "pos_excess": 2,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": -24.200549999999986,
+          "excess": -46.03552106155225,
+          "trades": 217
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -3.0760199999999793,
+          "excess": -0.2424382564616958,
+          "trades": 273
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": 31.90554000000003,
+          "excess": 16.211710636249393,
+          "trades": 269
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": 44.06510999999993,
+          "excess": 52.79127560123941,
+          "trades": 274
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": -10.561579999999992,
+          "excess": -16.758059203102633,
+          "trades": 197
+        }
+      ]
+    },
+    {
+      "horizon": 4,
+      "embargo": 10,
+      "mean_return": -2.99,
+      "mean_excess": -9.42,
+      "n_windows": 5,
+      "pos_excess": 1,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": 11.78720000000002,
+          "excess": -10.047771061552247,
+          "trades": 252
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -22.406409999999987,
+          "excess": -19.572828256461705,
+          "trades": 260
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": -6.003179999999975,
+          "excess": -21.69700936375061,
+          "trades": 251
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -11.737279999999972,
+          "excess": -3.0111143987604923,
+          "trades": 257
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 13.413249999999977,
+          "excess": 7.216770796897336,
+          "trades": 164
+        }
+      ]
+    },
+    {
+      "horizon": 5,
+      "embargo": 10,
+      "mean_return": -6.59,
+      "mean_excess": -13.02,
+      "n_windows": 5,
+      "pos_excess": 1,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": 4.720610000000014,
+          "excess": -17.114361061552252,
+          "trades": 260
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -24.162430000000022,
+          "excess": -21.32884825646174,
+          "trades": 268
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": -15.175610000000027,
+          "excess": -30.869439363750665,
+          "trades": 265
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -12.917850000000008,
+          "excess": -4.191684398760529,
+          "trades": 271
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 14.606420000000032,
+          "excess": 8.409940796897391,
+          "trades": 179
+        }
+      ]
+    },
+    {
+      "horizon": 6,
+      "embargo": 12,
+      "mean_return": -13.68,
+      "mean_excess": -20.11,
+      "n_windows": 5,
+      "pos_excess": 0,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": -12.384360000000004,
+          "excess": -34.21933106155227,
+          "trades": 232
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -20.021089999999997,
+          "excess": -17.187508256461715,
+          "trades": 287
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": 3.448640000000025,
+          "excess": -12.245189363750612,
+          "trades": 258
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -20.388029999999958,
+          "excess": -11.661864398760478,
+          "trades": 251
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": -19.055619999999962,
+          "excess": -25.252099203102603,
+          "trades": 165
+        }
+      ]
+    },
+    {
+      "horizon": 7,
+      "embargo": 14,
+      "mean_return": 12.3,
+      "mean_excess": 5.87,
+      "n_windows": 5,
+      "pos_excess": 4,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": 40.06071,
+          "excess": 18.225738938447734,
+          "trades": 286
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": 2.29436999999999,
+          "excess": 5.127951743538274,
+          "trades": 249
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": 6.845609999999991,
+          "excess": -8.848219363750644,
+          "trades": 253
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": 5.677569999999976,
+          "excess": 14.403735601239456,
+          "trades": 236
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 6.625040000000015,
+          "excess": 0.4285607968973748,
+          "trades": 165
+        }
+      ]
+    },
+    {
+      "horizon": 8,
+      "embargo": 16,
+      "mean_return": 13.13,
+      "mean_excess": 6.7,
+      "n_windows": 5,
+      "pos_excess": 4,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": -0.8154399999999784,
+          "excess": -22.650411061552244,
+          "trades": 199
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": 3.7024899999999805,
+          "excess": 6.536071743538264,
+          "trades": 280
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": 22.77172999999999,
+          "excess": 7.077900636249355,
+          "trades": 263
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": 12.27121,
+          "excess": 20.99737560123948,
+          "trades": 270
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 27.72174000000007,
+          "excess": 21.52526079689743,
+          "trades": 153
+        }
+      ]
+    },
+    {
+      "horizon": 9,
+      "embargo": 18,
+      "mean_return": 8.63,
+      "mean_excess": 2.2,
+      "n_windows": 5,
+      "pos_excess": 3,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": 29.962249999999948,
+          "excess": 8.127278938447681,
+          "trades": 272
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -1.3268100000000005,
+          "excess": 1.506771743538283,
+          "trades": 239
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": -10.955049999999977,
+          "excess": -26.648879363750613,
+          "trades": 247
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": 21.024669999999944,
+          "excess": 29.750835601239423,
+          "trades": 277
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 4.456579999999999,
+          "excess": -1.7398992031026417,
+          "trades": 154
+        }
+      ]
+    },
+    {
+      "horizon": 10,
+      "embargo": 20,
+      "mean_return": -4.87,
+      "mean_excess": -11.3,
+      "n_windows": 5,
+      "pos_excess": 2,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": -19.52208999999999,
+          "excess": -41.35706106155226,
+          "trades": 244
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -6.436380000000009,
+          "excess": -3.602798256461725,
+          "trades": 226
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": -7.107169999999985,
+          "excess": -22.80099936375062,
+          "trades": 254
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -2.2042499999999743,
+          "excess": 6.521915601239505,
+          "trades": 278
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 10.939619999999994,
+          "excess": 4.743140796897354,
+          "trades": 177
+        }
+      ]
+    },
+    {
+      "horizon": 12,
+      "embargo": 24,
+      "mean_return": 3.92,
+      "mean_excess": -2.51,
+      "n_windows": 5,
+      "pos_excess": 2,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": 14.69250000000002,
+          "excess": -7.142471061552246,
+          "trades": 289
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -1.200089999999998,
+          "excess": 1.6334917435382854,
+          "trades": 287
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": 9.04524999999996,
+          "excess": -6.648579363750676,
+          "trades": 246
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -3.86857000000006,
+          "excess": 4.857595601239419,
+          "trades": 281
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 0.9357500000000352,
+          "excess": -5.260729203102605,
+          "trades": 174
+        }
+      ]
+    },
+    {
+      "horizon": 15,
+      "embargo": 30,
+      "mean_return": -10.09,
+      "mean_excess": -16.52,
+      "n_windows": 5,
+      "pos_excess": 1,
+      "per_window": [
+        {
+          "window": 1,
+          "test_start": "2021-01-01",
+          "test_end": "2021-10-01",
+          "total_return": -11.119420000000012,
+          "excess": -32.95439106155228,
+          "trades": 240
+        },
+        {
+          "window": 2,
+          "test_start": "2021-10-01",
+          "test_end": "2022-07-01",
+          "total_return": -6.692250000000044,
+          "excess": -3.8586682564617605,
+          "trades": 293
+        },
+        {
+          "window": 3,
+          "test_start": "2022-07-01",
+          "test_end": "2023-04-01",
+          "total_return": -26.451760000000014,
+          "excess": -42.14558936375065,
+          "trades": 258
+        },
+        {
+          "window": 4,
+          "test_start": "2023-04-01",
+          "test_end": "2024-01-01",
+          "total_return": -14.517859999999983,
+          "excess": -5.791694398760503,
+          "trades": 300
+        },
+        {
+          "window": 5,
+          "test_start": "2024-01-01",
+          "test_end": "2024-06-30",
+          "total_return": 8.34550999999999,
+          "excess": 2.1490307968973497,
+          "trades": 148
+        }
+      ]
+    }
+  ]
+}

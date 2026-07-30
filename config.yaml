@@ -32,11 +32,13 @@ label:
   horizon_days: 7
   type: rank
 model:
+  type: lgb                 # l0=等权 l1=单因子 l2=线性 lgb=LightGBM
   lambda_l1: 0.3
   learning_rate: 0.03
   max_depth: 5
   min_data_in_leaf: 40
   n_estimators: 600
+  ridge_alpha: 1.0          # 仅 l2 模式使用
   val_ratio: 0.15
 portfolio:
   buy_confirm_days: 1

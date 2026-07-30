@@ -112,10 +112,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--fetch-index", type=str, default=None, help="指数代码, 如 000300")
+    parser.add_argument("--max-stocks", type=int, default=None, help="最大下载股票数")
     parser.add_argument("--status", action="store_true")
     args = parser.parse_args()
     if args.fetch_index:
-        fetch_index_components(args.fetch_index)
+        max_s = args.max_stocks or 1000
+        fetch_index_components(args.fetch_index, max_stocks=max_s)
     elif args.fetch:
         fetch_all()
     else:
