@@ -51,7 +51,8 @@ class QuantPipeline:
         for wi, w in enumerate(windows):
             r = self._run_window(wi, w)
             if r: results.append(r)
-        self._summarize(results)
+        summary = self._summarize(results)
+        return {"results": results, "summary": summary}
 
     def _load_universe(self):
         from data.universe import StockUniverse
@@ -284,15 +285,15 @@ class QuantPipeline:
         return cp
 
     def _summarize(self, results):
-        if not results: return
+        if not results: return {}
         print(f"\n{'='*65}\n  最终结果 ({self.mode})\n{'='*65}")
         for r in results:
             m = "✅" if r.get("excess", 0) > 0 else "❌"
             print(f"  W{r['window']}: {r['test_start'][:7]}~{r['test_end'][:7]}  "
                   f"策略:{r['total_return']:+.1f}%  基准:{r.get('benchmark_return',0):+.1f}%  "
                   f"超额:{r.get('excess',0):+.1f}%  trades:{r['trades']}  {m}")
-        mr = np.mean([r["total_return"] for r in results])
-        me = np.mean([r.get("excess", 0) for r in results])
+        mr = float(np.mean([r["total_return"] for r in results]))
+        me = float(np.mean([r.get("excess", 0) for r in results]))
         pr = sum(1 for r in results if r.get("total_return", 0) > 0)
         pe = sum(1 for r in results if r.get("excess", 0) > 0)
         print(f"\n  策略均值:{mr:+.1f}%  超额均值:{me:+.1f}%  正窗口:{pr}/{len(results)}  正超额:{pe}/{len(results)}")
@@ -301,6 +302,9 @@ class QuantPipeline:
         # ★ 实验记账
         from model.experiment import log_experiment
         log_experiment(self.mode, self.cfg, results)
+
+        return {"mean_return": mr, "mean_excess": me, "n_windows": len(results),
+                "pos_windows": pr, "pos_excess": pe, "per_window": results}
 
 
 if __name__ == "__main__":

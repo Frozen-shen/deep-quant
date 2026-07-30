@@ -2,7 +2,7 @@ blind_test:
   config_hash: 9899faed0bf0
   last_run: '2026-07-30'
   locked: true
-  trial_count: 1
+  trial_count: 3             # Trial#1(合法-19.1%) + Trial#2(v4作废) + Trial#3(本次污染)
 data_partition:
   blind_test:
     end: '2026-07-10'

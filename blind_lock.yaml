@@ -1,0 +1,12 @@
+# blind_lock.yaml — 盲测锁 (独立于config.yaml)
+# 此文件一旦存在且locked=true，任何修改都会触发CI红灯。
+# trial_count 由脚本自动递增，不可手动重置。
+
+locked: true
+trial_count: 3
+last_trial: 3
+last_run: "2026-07-30T12:08:04"
+message: >
+  Trial#1 (2026-07-23): 策略+18.9% 超额-19.1% — 唯一合法盲测
+  Trial#2 (2026-07-29): 策略+24.7% 超额-1.7%  — 盲测期已污染, 作废
+  Trial#3 (2026-07-30): 策略+60.9% 超额+34.4% — 破锁重跑, 参数来自dev扫描, 无效

@@ -1,0 +1,20 @@
+{
+  "trial": 2,
+  "timestamp": "2026-07-29",
+  "config_hash": "22bb8e4",
+  "git_commit": "22bb8e42d876d1c56cb6aae295773855f2d80a15",
+  "status": "INVALID — 盲测期已查看过(Trial#1后), 参数修改后重跑",
+  "summary": {
+    "strategy_mean_pct": 24.7,
+    "excess_mean_pct": -1.7,
+    "n_windows": 3,
+    "pos_windows": null,
+    "pos_excess": null
+  },
+  "note": "v4: 176只股票 + 多轮优化后重跑盲测。因Trial#1后盲测期已被查看, 此结果不可作为独立样本外证据。见README b58b78a声明: 'Trial#2-3作废'。",
+  "params": {
+    "label_horizon_days": 10,
+    "train_months": 4,
+    "universe_size": 176
+  }
+}
