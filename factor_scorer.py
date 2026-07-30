@@ -88,7 +88,22 @@ FACTOR_PRESETS = {
         "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
     },
 
-    # ★ v2: Top-20高IC因子 (仅保留最可靠的, 减少噪音)
+    # ★ v5: IC自动权重 (研究期2018-2022, 由run_ic_analysis.py自动生成)
+    "ic_auto": {
+        "name": "IC自动权重(研究期)",
+        "factors": {
+            "range_20d": 0.0695, "liq_ratio": 0.0705, "boll_width": 0.0655,
+            "skew_20d": 0.0616, "vol_price_sync": 0.0561, "ma5_ma30_spread": 0.0562,
+            "return_30d": 0.055, "turnover_vol": 0.055, "ma20_ma60_spread": 0.0533,
+            "ma10_ma20_spread": 0.0498, "ma5_ma20_spread": 0.0483, "momentum_20d": 0.0483,
+            "turnover_trend": 0.0465, "ma3_ma20_spread": 0.046, "rev_mom_spread": 0.0447,
+            "channel_high_20": 0.0408, "rank_20": 0.0394, "ma_bullish": 0.037,
+            "ksft2": 0.031, "vol_regime": 0.0255,
+        },
+        "buy_threshold": 0.15, "sell_threshold": -0.10,
+    },
+
+    # ★ v2: Top-20高IC因子 (仅保留最可靠的, 减少噪音) [已废弃, 保留向后兼容]
     "ic_top20": {
         "name": "Top-20 IC因子",
         "factors": {
