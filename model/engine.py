@@ -34,6 +34,7 @@ class SimpleBacktest:
           unadjusted_data: 未复权数据 (用于涨跌停判断, 可选)
         """
         limit_data = unadjusted_data if unadjusted_data else all_data
+        buys, sells = 0, 0
         trades = []
 
         # ── 卖 ──
