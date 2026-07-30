@@ -72,6 +72,18 @@ class QuantPipeline:
                 df["date"] = pd.to_datetime(df["date"]); self._all_data[sym] = df
         print(f"  加载完成: {len(self._all_data)} 只有效数据")
 
+        # ★ 加载未复权数据 (用于涨跌停判断)
+        self._unadj_data = {}
+        unadj_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
+        if os.path.isdir(unadj_dir):
+            for sym in self._all_data:
+                path = os.path.join(unadj_dir, f"{sym}.parquet")
+                if os.path.exists(path):
+                    df = pd.read_parquet(path)
+                    df["date"] = pd.to_datetime(df["date"])
+                    self._unadj_data[sym] = df
+            print(f"  未复权数据: {len(self._unadj_data)} 只 (用于涨跌停判断)")
+
     def _load_index_data(self):
         from data_fetcher import DataFetcher
         try:
@@ -193,7 +205,8 @@ class QuantPipeline:
 
         for today in test_days:
             if prev_decision:
-                b, s, _ = bt.execute(prev_decision, today, self._all_data, rules)
+                b, s, _ = bt.execute(prev_decision, today, self._all_data, rules,
+                                    unadjusted_data=self._unadj_data)
                 total_trades += b + s
             prev_decision = self._generate_signal(model, today, rules, bt, ranker)
             cp = self._get_close_prices(today)
@@ -240,11 +253,10 @@ class QuantPipeline:
         holdings = list(bt.positions.keys())
         decision = ranker.rank(scores, holdings)
 
-        # 涨跌停+市场过滤
-        if self.market_filter and not self._is_market_bullish(today):
-            decision["buy"] = []
-        decision["buy"] = [s for s in decision["buy"] if s in sd and rules.can_buy(s, sd[s])]
-        decision["sell"] = [s for s in decision["sell"] if s in sd and rules.can_sell(s, sd[s])]
+        # ★ 涨跌停+市场过滤 (用未复权价判断)
+        limit_data = self._unadj_data if self._unadj_data else sd
+        decision["buy"] = [s for s in decision["buy"] if s in limit_data and rules.can_buy(s, limit_data[s])]
+        decision["sell"] = [s for s in decision["sell"] if s in limit_data and rules.can_sell(s, limit_data[s])]
         return decision
 
     def _get_close_prices(self, today):

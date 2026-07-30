@@ -24,12 +24,16 @@ class SimpleBacktest:
         """用给定的收盘价计算权益（需要外部传入cp_today）。"""
         return self.cash  # 实际权益由外部按收盘价计算
 
-    def execute(self, decision: dict, today, all_data, rules):
+    def execute(self, decision: dict, today, all_data, rules,
+                unadjusted_data: dict = None):
         """
         执行买卖决定。T+1开盘价成交。
-        返回: (buy_count, sell_count, trades_log)
+        
+        Args:
+          all_data: 后复权数据 (用于成交价计算)
+          unadjusted_data: 未复权数据 (用于涨跌停判断, 可选)
         """
-        buys, sells = 0, 0
+        limit_data = unadjusted_data if unadjusted_data else all_data
         trades = []
 
         # ── 卖 ──
@@ -62,9 +66,9 @@ class SimpleBacktest:
                 if len(dt) == 0:
                     continue
                 px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
-                # ★ 涨停检查: 需2行数据算前收盘价
-                dt2 = all_data[s][all_data[s]["date"] <= today].tail(2)
-                if len(dt2) >= 2 and not rules.can_buy(s, dt2):
+                # ★ 涨停检查: 用未复权价判断 (limit_data)
+                dt2_limit = limit_data[s][limit_data[s]["date"] <= today].tail(2) if s in (unadjusted_data or all_data) else dt2
+                if len(dt2_limit) >= 2 and not rules.can_buy(s, dt2_limit):
                     continue
                 qty = int(cash_per / px / self.lot_size) * self.lot_size
                 if qty < self.lot_size:
