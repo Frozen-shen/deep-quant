@@ -59,7 +59,7 @@ class SimpleBacktest:
         # ── 买 ──
         buy_list = decision.get("buy", [])
         if buy_list:
-            cash_per = self.cash * 0.9 / max(1, len(buy_list))
+            cash_per = self.cash * 0.99 / max(1, len(buy_list))  # 1%缓冲覆盖手续费
             for s in buy_list:
                 if s not in all_data:
                     continue
@@ -78,8 +78,8 @@ class SimpleBacktest:
                 if qty < self.lot_size:
                     continue
                 cost = qty * px
-                if cost > self.cash * 0.95:  # 留5%余地
-                    qty = int(self.cash * 0.95 / px / self.lot_size) * self.lot_size
+                if cost > self.cash * 0.99:  # 留1%余地
+                    qty = int(self.cash * 0.99 / px / self.lot_size) * self.lot_size
                     cost = qty * px
                 if qty < self.lot_size:
                     continue

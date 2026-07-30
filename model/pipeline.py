@@ -223,7 +223,9 @@ class QuantPipeline:
         from trading_rules import TradingRules
 
         bt = SimpleBacktest(initial_capital=self.initial_capital, top_k=self.top_k, lot_size=self.lot_size)
-        ranker = PortfolioRanker(top_k=self.top_k, n_drop=self.n_drop, hold_thresh=self.hold_thresh,
+        # L0等权: 一次性建仓, n_drop=top_k避免多日分批买入
+        nd = self.top_k if self.cfg["model"].get("type") == "l0" else self.n_drop
+        ranker = PortfolioRanker(top_k=self.top_k, n_drop=nd, hold_thresh=self.hold_thresh,
                                  sell_rank_buffer=self.sell_rank_buffer, buy_confirm_days=self.buy_confirm_days,
                                  cost_threshold=self.cost_threshold)
         rules = TradingRules()

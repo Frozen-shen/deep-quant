@@ -9,18 +9,16 @@ import numpy as np
 
 
 class L0EqualWeight:
-    """L0: 等权持有 — 最蠢的基线。不训练，返回随机扰动确保排名分散。"""
-    def __init__(self, seed=42):
-        self.rng = np.random.RandomState(seed)
+    """L0: 等权持有 — 最蠢的基线。买入后永不调仓。"""
+    def __init__(self):
         self.feature_names = []
 
     def fit(self, X, y, groups=None, val_ratio=None, sample_weight=None):
         return self
 
     def predict(self, X):
-        # 微弱随机扰动 → 截面排名会有微弱差异 → PortfolioRanker 选 top-k
-        # 等价于"随机选股"，用作绝对零基线
-        return self.rng.randn(len(X)) * 0.01
+        # 全零分数 → 排名由dict稳定顺序决定 → 同批股票永远在前 → 永不调仓
+        return np.zeros(len(X))
 
 
 class L1SingleFactor:
