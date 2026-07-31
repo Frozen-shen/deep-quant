@@ -237,7 +237,9 @@ class QuantPipeline:
         from portfolio_ranker import PortfolioRanker
         from trading_rules import TradingRules
 
-        bt = SimpleBacktest(initial_capital=self.initial_capital, top_k=self.top_k, lot_size=self.lot_size)
+        bt = SimpleBacktest(initial_capital=self.initial_capital, top_k=self.top_k, lot_size=self.lot_size,
+                           slippage_bps=self.cfg["execution"].get("slippage_bps", 0),
+                           turnover_limit_pct=self.cfg["execution"].get("turnover_limit_pct", 1.0))
         # L0等权: 一次性建仓, n_drop=top_k避免多日分批买入
         nd = self.top_k if self.cfg["model"].get("type") == "l0" else self.n_drop
         ranker = PortfolioRanker(top_k=self.top_k, n_drop=nd, hold_thresh=self.hold_thresh,

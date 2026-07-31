@@ -25,6 +25,8 @@ execution:
   max_single_pct: 0.25
   signal_delay: 1
   top_k: 8                  # CSI1000多分散
+  slippage_bps: 30           # ★ 小盘滑点30bp
+  turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
