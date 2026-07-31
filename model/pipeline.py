@@ -325,6 +325,14 @@ class QuantPipeline:
             limit_data.update({s: self._unadj_data[s] for s in self._unadj_data if s in sd})
         decision["buy"] = [s for s in decision["buy"] if s in limit_data and rules.can_buy(s, limit_data[s])]
         decision["sell"] = [s for s in decision["sell"] if s in limit_data and rules.can_sell(s, limit_data[s])]
+
+        # ★ PEAD防守: 持仓股有负面预告→强制卖出
+        if holdings and self.cfg["execution"].get("pead_defense", False):
+            from data.pead_filter import load_pead_alerts
+            alerts = load_pead_alerts()
+            for s in holdings:
+                if alerts.has_bad_news(s, today) and s not in decision["sell"]:
+                    decision["sell"].append(s)
         return decision
 
     def _get_close_prices(self, today):

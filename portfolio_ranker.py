@@ -39,21 +39,25 @@ class PortfolioRanker:
       sector_neutral: 是否板块中性化 (先板块内排名,再跨板块选)
     """
 
-    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 5,
-                 sell_rank_buffer: int = 2,
-                 buy_confirm_days: int = 2,
-                 cost_threshold: float = 0.1,
-                 sector_neutral: bool = False):
-        self.top_k = top_k
-        self.n_drop = n_drop
-        self.hold_thresh = hold_thresh
-        self.sell_rank_buffer = sell_rank_buffer
-        self.buy_confirm_days = buy_confirm_days
-        self.cost_threshold = cost_threshold
-        self.sector_neutral = sector_neutral
-        self._hold_since: Dict[str, int] = {}
-        self._topk_streak: Dict[str, int] = {}  # symbol → 连续出现在top_k的天数
-        self._first_day = True
+	    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 5,
+	                 sell_rank_buffer: int = 2,
+	                 buy_confirm_days: int = 2,
+	                 cost_threshold: float = 0.1,
+	                 sector_neutral: bool = False,
+	                 min_daily_amount: float = 0.0,
+	                 max_sector_pct: float = 0.30):
+	        self.top_k = top_k
+	        self.n_drop = n_drop
+	        self.hold_thresh = hold_thresh
+	        self.sell_rank_buffer = sell_rank_buffer
+	        self.buy_confirm_days = buy_confirm_days
+	        self.cost_threshold = cost_threshold
+	        self.sector_neutral = sector_neutral
+	        self.min_daily_amount = min_daily_amount    # 最小日均成交额 (0=不过滤)
+	        self.max_sector_pct = max_sector_pct        # 单行业最大仓位占比
+	        self._hold_since: Dict[str, int] = {}
+	        self._topk_streak: Dict[str, int] = {}  # symbol → 连续出现在top_k的天数
+	        self._first_day = True
 
     def set_regime(self, regime: str):
         """
@@ -177,6 +181,46 @@ class PortfolioRanker:
         if len(to_buy) > self.n_drop:
             buy_scores = {s: scores.get(s, -999) for s in to_buy}
             to_buy = sorted(buy_scores, key=buy_scores.get, reverse=True)[:self.n_drop]
+
+        # 7.5 流动性过滤 (Phase 3.3): 日均成交额不足的标的剔除
+        if self.min_daily_amount > 0:
+            # 从 scores 的 metadata 中获取流动性数据 (如果有)
+            # scores 可以扩展为 {symbol: (score, amount)} 元组
+            # 简化版: 直接检查 scores 是否包含 amount 信息
+            to_buy_filtered = []
+            for sym in to_buy:
+                score_val = scores.get(sym, -999)
+                # 如果 scores 值是元组, 解析 amount
+                if isinstance(score_val, (tuple, list)) and len(score_val) >= 2:
+                    score, amount = score_val[0], score_val[1]
+                    if amount >= self.min_daily_amount:
+                        to_buy_filtered.append(sym)
+                else:
+                    # 无流动性数据时不过滤
+                    to_buy_filtered.append(sym)
+            to_buy = to_buy_filtered
+
+        # 7.6 行业集中度限制 (Phase 3.4): 同行业买入不超过 max_sector_pct
+        if sectors and self.max_sector_pct < 1.0 and to_buy:
+            # 计算当前各行业持仓数
+            sector_count = {}
+            for sym in current_holdings:
+                if sym not in to_sell:  # 不算即将卖出的
+                    sec = sectors.get(sym, "其他")
+                    sector_count[sec] = sector_count.get(sec, 0) + 1
+
+            total_slots = self.top_k
+            to_buy_sector_limited = []
+            for sym in to_buy:
+                sec = sectors.get(sym, "其他")
+                current_in_sector = sector_count.get(sec, 0)
+                max_in_sector = int(total_slots * self.max_sector_pct)
+                if current_in_sector < max_in_sector:
+                    to_buy_sector_limited.append(sym)
+                    sector_count[sec] = current_in_sector + 1
+                # else: skip this buy due to sector concentration
+
+            to_buy = to_buy_sector_limited
 
         # 8. 清理已卖出股票的持有记录
         for sym in to_sell:

@@ -28,6 +28,7 @@ execution:
   max_positions: 40
   slippage_bps: 30           # ★ 小盘滑点30bp
   turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
+  pead_defense: true         # ★ PEAD负面预告强制卖出
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
