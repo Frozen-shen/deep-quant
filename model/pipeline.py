@@ -226,6 +226,11 @@ class QuantPipeline:
             from model.baselines import L2LinearRanker
             alpha = self.cfg["model"].get("ridge_alpha", 1.0)
             model = L2LinearRanker(alpha=alpha)
+        elif model_type == "ensemble":
+            from model.ensemble import EnsembleRanker
+            members = self.cfg["model"].get("ensemble_members", ["lgb", "lgb", "lgb"])
+            blend = self.cfg["model"].get("blend_method", "equal")
+            model = EnsembleRanker(members=members, blend_method=blend)
         else:
             from ml_ranker import MLRanker
             mc = self.cfg["model"]
@@ -315,6 +320,17 @@ class QuantPipeline:
         fn = (fa - m) / s; preds = model.predict(fn)
         scores = {swd[i]: float(preds[i]) for i in range(len(swd))}
         if len(scores) < self.top_k: return None
+
+        # ★ 回购事件增强
+        bb_w = self.cfg["factors"].get("buyback_weight", 0.0)
+        if bb_w > 0:
+            if not hasattr(self, '_buyback_factor'):
+                from factors.event_factors import BuybackFactor
+                decay = self.cfg["factors"].get("buyback_decay_days", 20)
+                self._buyback_factor = BuybackFactor(decay_days=decay)
+            bb_scores = self._buyback_factor.compute_scores(today)
+            if bb_scores:
+                scores = self._buyback_factor.enhance_scores(scores, bb_scores, weight=bb_w)
 
         holdings = list(bt.positions.keys())
         decision = ranker.rank(scores, holdings)

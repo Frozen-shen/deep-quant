@@ -1,0 +1,37 @@
+# Aggressive strategy configuration
+# Philosophy: Higher turnover, ML model, monthly rebalance.
+# Prioritizes alpha capture over cost efficiency.
+# Suitable for: smaller capital bases, higher risk tolerance.
+
+model:
+  type: lightgbm
+  ml_n_estimators: 100
+  ml_max_depth: 3
+  ml_min_data_in_leaf: 300      # slightly less conservative
+  ml_learning_rate: 0.02
+  ml_lambda_l1: 0.5
+  ml_lambda_l2: 0.5
+  train_window_days: 378        # 1.5 years (more adaptive)
+  step_days: 21                 # monthly retrain
+  val_ratio: 0.15
+
+factors:
+  ic_threshold: 0.015           # include more factors
+  max_factors: 80
+  decay_halflife: 40            # faster decay (favor recent signal)
+
+portfolio:
+  rebalance_freq: monthly
+  top_k: 20
+  max_positions: 25
+  max_turnover_annual: 5.0      # allow higher turnover
+  max_single_weight: 0.08       # allow larger positions
+  max_sector_weight: 0.35
+  min_holding_days: 10          # shorter minimum hold
+  sell_rank_buffer: 3           # tighter sell trigger
+  buy_confirm_days: 2           # faster entry
+
+backtest:
+  commission_rate: 0.00025
+  slippage_rate: 0.0008         # higher slippage for smaller caps
+  impact_rate: 0.0005           # higher market impact

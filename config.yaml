@@ -38,12 +38,17 @@ factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
   use_fundamental: false    # 校准阶段关闭, 纯价量基线
-  pead_weight: 0.0          # PEAD 事件因子权重 (0=关闭, 建议0.10~0.20; alpha跑出后再调)
+  pead_weight: 0.0          # PEAD 事件因子权重 (0=关闭)
+  buyback_weight: 0.15      # ★ 回购事件增强权重
+  buyback_decay_days: 20    # 回购事件有效窗口
 label:
   horizon_days: 20          # CSI1000低频信号
   type: rank
 model:
-  type: lgb                 # CSI1000换挡 + LightGBM
+  type: ensemble              # ★ 集成模型 (3×LGB不同seed)
+  ensemble_members: ['lgb', 'lgb', 'lgb']
+  blend_method: equal
+  # type: lgb                 # 原始单模型(备选)
   lambda_l1: 0.3
   learning_rate: 0.03
   max_depth: 5

@@ -39,25 +39,25 @@ class PortfolioRanker:
       sector_neutral: 是否板块中性化 (先板块内排名,再跨板块选)
     """
 
-	    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 5,
-	                 sell_rank_buffer: int = 2,
-	                 buy_confirm_days: int = 2,
-	                 cost_threshold: float = 0.1,
-	                 sector_neutral: bool = False,
-	                 min_daily_amount: float = 0.0,
-	                 max_sector_pct: float = 0.30):
-	        self.top_k = top_k
-	        self.n_drop = n_drop
-	        self.hold_thresh = hold_thresh
-	        self.sell_rank_buffer = sell_rank_buffer
-	        self.buy_confirm_days = buy_confirm_days
-	        self.cost_threshold = cost_threshold
-	        self.sector_neutral = sector_neutral
-	        self.min_daily_amount = min_daily_amount    # 最小日均成交额 (0=不过滤)
-	        self.max_sector_pct = max_sector_pct        # 单行业最大仓位占比
-	        self._hold_since: Dict[str, int] = {}
-	        self._topk_streak: Dict[str, int] = {}  # symbol → 连续出现在top_k的天数
-	        self._first_day = True
+    def __init__(self, top_k: int = 3, n_drop: int = 1, hold_thresh: int = 5,
+                 sell_rank_buffer: int = 2,
+                 buy_confirm_days: int = 2,
+                 cost_threshold: float = 0.1,
+                 sector_neutral: bool = False,
+                 min_daily_amount: float = 0.0,
+                 max_sector_pct: float = 0.30):
+        self.top_k = top_k
+        self.n_drop = n_drop
+        self.hold_thresh = hold_thresh
+        self.sell_rank_buffer = sell_rank_buffer
+        self.buy_confirm_days = buy_confirm_days
+        self.cost_threshold = cost_threshold
+        self.sector_neutral = sector_neutral
+        self.min_daily_amount = min_daily_amount    # 最小日均成交额 (0=不过滤)
+        self.max_sector_pct = max_sector_pct        # 单行业最大仓位占比
+        self._hold_since: Dict[str, int] = {}
+        self._topk_streak: Dict[str, int] = {}  # symbol → 连续出现在top_k的天数
+        self._first_day = True
 
     def set_regime(self, regime: str):
         """

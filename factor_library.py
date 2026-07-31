@@ -270,6 +270,24 @@ P2_ENHANCED_FACTORS = {
     "ma_bearish":  "(Mean($close, 5) < Mean($close, 10)) * (Mean($close, 10) < Mean($close, 20))",
 }
 
+# ================================================================
+#  微观结构因子 (Microstructure Factors)
+# ================================================================
+
+MICROSTRUCTURE_FACTORS = {
+    "amihud_illiq":          "Mean(Abs($close/Ref($close,1)-1) / ($amount+1), 20)",
+    "intraday_range_20d":    "Mean(($high-$low)/($close+0.001), 20)",
+    "volume_price_corr_20d": "Corr($volume, $close, 20)",
+    "turnover_spike":        "$volume / Mean($volume, 20)",
+    "high_low_ratio_5d":     "Max($high, 5) / (Min($low, 5) + 0.001)",
+    "close_position_20d":    "($close - Min($low, 20)) / (Max($high, 20) - Min($low, 20) + 0.001)",
+    "volume_cv_20d":         "Std($volume, 20) / (Mean($volume, 20) + 1)",
+    "return_skew_20d":       "Skew($close/Ref($close,1)-1, 20)",
+    "overnight_return_20d":  "Mean($open/Ref($close,1)-1, 20)",
+    "realized_vol_ratio":    "Std($close/Ref($close,1)-1, 5) / (Std($close/Ref($close,1)-1, 20) + 0.0001)",
+}
+
+
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
 
@@ -283,7 +301,7 @@ def get_candlestick_factors() -> FactorLibrary:
     return FactorLibrary.from_config(CANDLESTICK_FACTORS)
 
 def get_all_factors() -> FactorLibrary:
-    """合并所有预定义因子 (含 Phase2 + P2增强)。"""
+    """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构)。"""
     all_config = {}
     all_config.update(PRICE_FACTORS)
     all_config.update(MA_FACTORS)
@@ -292,4 +310,5 @@ def get_all_factors() -> FactorLibrary:
     all_config.update(EXPANDED_FACTORS)
     all_config.update(PHASE2_FACTORS)
     all_config.update(P2_ENHANCED_FACTORS)
+    all_config.update(MICROSTRUCTURE_FACTORS)
     return FactorLibrary.from_config(all_config)

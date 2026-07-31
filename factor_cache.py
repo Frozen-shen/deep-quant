@@ -32,32 +32,31 @@ class FactorCache:
           dates: 需要计算的日期列表，默认全部
         """
         for sym, df in all_data.items():
-            print(f"  Precomputing factors for {sym}...", end=" ")
             try:
                 full_factors = self.scorer.compute_factors(df)
                 if "date" not in full_factors.columns:
                     full_factors["date"] = df["date"].values
+                # ★ 性能优化: 用date做索引, O(1)查找
+                full_factors["date"] = pd.to_datetime(full_factors["date"])
+                full_factors = full_factors.set_index("date", drop=False)
                 self._cache[sym] = full_factors
-                print(f"{len(full_factors)} rows")
             except Exception as e:
-                print(f"ERROR: {e}")
                 self._cache[sym] = None
 
     def get(self, symbol: str, date) -> dict:
         """
-        获取某只股票在某一天的因子值。
-
-        Returns:
-          {factor_name: float} 或 None (如果数据不足)
+        获取某只股票在某一天的因子值。O(1) via index lookup.
         """
         if symbol not in self._cache or self._cache[symbol] is None:
             return None
         df = self._cache[symbol]
-        # date 列的日期匹配
-        mask = df["date"] == pd.Timestamp(date)
-        if not mask.any():
+        ts = pd.Timestamp(date)
+        try:
+            row = df.loc[ts]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[-1]
+        except KeyError:
             return None
-        row = df[mask].iloc[-1]
         result = {}
         for fn in self.factor_names:
             if fn in df.columns:

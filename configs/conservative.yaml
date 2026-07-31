@@ -1,0 +1,26 @@
+# Conservative strategy configuration
+# Philosophy: Low turnover, linear model, quarterly rebalance.
+# Prioritizes stability and low transaction costs over alpha capture.
+# Suitable for: risk-averse investors, larger capital bases.
+
+model:
+  type: ic_weighted_linear
+  train_window_days: 756        # 3 years for more stable IC estimates
+  step_days: 126                # semi-annual retrain (less frequent)
+  val_ratio: 0.20               # larger validation set for robustness
+
+portfolio:
+  rebalance_freq: quarterly
+  top_k: 30
+  max_positions: 30
+  max_turnover_annual: 2.0      # stricter turnover cap
+  max_single_weight: 0.04       # tighter single-stock limit
+  max_sector_weight: 0.25       # tighter sector concentration
+  min_holding_days: 40          # hold longer to reduce churn
+  sell_rank_buffer: 8           # wider buffer before selling
+  buy_confirm_days: 5           # require stronger confirmation
+
+backtest:
+  commission_rate: 0.00025
+  slippage_rate: 0.0005
+  impact_rate: 0.0003

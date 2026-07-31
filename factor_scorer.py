@@ -195,6 +195,30 @@ FACTOR_PRESETS = {
     },
 }
 
+# ── 动态构建 full_auto 预设: 包含全部因子, 权重=1.0 (由LightGBM学习) ──
+def _build_full_auto_preset():
+    from factor_library import get_all_factors
+    lib = get_all_factors()
+    names = list(lib.factors.keys()) if hasattr(lib, 'factors') else []
+    if not names:
+        # fallback: import dicts directly
+        from factor_library import (PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS,
+            CANDLESTICK_FACTORS, EXPANDED_FACTORS, PHASE2_FACTORS,
+            P2_ENHANCED_FACTORS, MICROSTRUCTURE_FACTORS)
+        merged = {}
+        for d in [PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS, CANDLESTICK_FACTORS,
+                  EXPANDED_FACTORS, PHASE2_FACTORS, P2_ENHANCED_FACTORS, MICROSTRUCTURE_FACTORS]:
+            merged.update(d)
+        names = list(merged.keys())
+    return {
+        "name": "全因子(LightGBM自动学习权重)",
+        "factors": {name: 1.0 for name in names},
+        "buy_threshold": 0.15,
+        "sell_threshold": -0.10,
+    }
+
+FACTOR_PRESETS["full_auto"] = _build_full_auto_preset()
+
 
 # ================================================================
 #  因子打分引擎

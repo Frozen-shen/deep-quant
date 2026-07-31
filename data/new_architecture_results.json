@@ -1,0 +1,16 @@
+{
+  "strategy": "ic_weighted_linear_quarterly",
+  "period": "2019-04-09 to 2024-12-23",
+  "n_stocks": 200,
+  "n_rebalances": 22,
+  "total_return": 0.9147,
+  "benchmark_return": 1.9856,
+  "excess_return": -1.071,
+  "ann_excess": -0.0937,
+  "sharpe": 0.473,
+  "max_drawdown": -0.4986,
+  "active_factors": {
+    "ret_20d": 0.0274
+  },
+  "avg_turnover": 0.7758
+}

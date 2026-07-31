@@ -1,0 +1,49 @@
+{
+  "n_total": 905,
+  "by_group": {
+    "concentrated": {
+      "n": 905,
+      "car_mean": 0.002681,
+      "car_std": 0.104278,
+      "t": 0.7734,
+      "p": 0.439458,
+      "ci95_low": -0.004113,
+      "ci95_high": 0.009475,
+      "significant": false
+    }
+  },
+  "by_subtype": {
+    "concentrated": {
+      "n": 905,
+      "car_mean": 0.002681,
+      "t": 0.7734,
+      "p": 0.439458,
+      "significant": false
+    }
+  },
+  "by_year_group": {
+    "concentrated": {
+      "2023": {
+        "n": 330,
+        "car_mean": -0.001068,
+        "t": -0.2156,
+        "p": 0.82946,
+        "significant": false
+      },
+      "2024": {
+        "n": 365,
+        "car_mean": 0.000828,
+        "t": 0.1361,
+        "p": 0.891815,
+        "significant": false
+      },
+      "2025": {
+        "n": 210,
+        "car_mean": 0.011793,
+        "t": 1.6552,
+        "p": 0.099377,
+        "significant": false
+      }
+    }
+  }
+}

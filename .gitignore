@@ -43,3 +43,20 @@ test_results/
 # Data Cache (large binary files + sector cache)
 data_cache/*.parquet
 data_cache/a_sectors.json
+
+# Data caches (large parquet files)
+data_cache/
+data_store/
+data/event_cache/
+data/fundamental_cache/
+data/pead_cache/
+data/cache/
+
+# Experiment artifacts
+blind_results/
+blind_lock.yaml
+trained_weights.json
+*.jsonl
+
+# ZCode plans
+.zcode/

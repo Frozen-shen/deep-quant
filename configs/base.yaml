@@ -1,0 +1,63 @@
+# quant-starter base configuration
+# This file contains all defaults. Strategy-specific configs
+# (conservative.yaml, aggressive.yaml) override specific fields.
+
+data:
+  cache_dir: data_store
+  universe: csi1000
+  start_date: "2018-01-01"
+  end_date: "2025-12-31"
+  frequency: daily
+  adjust_type: qfq
+  data_source: akshare
+
+factors:
+  preset: auto
+  ic_threshold: 0.02
+  use_fundamental: true
+  use_technical: true
+  use_events: true
+  max_factors: 50
+  decay_halflife: 60
+  neutralize: true
+  winsorize_sigma: 3.0
+
+model:
+  type: ic_weighted_linear
+  ml_type: lightgbm
+  ml_n_estimators: 50
+  ml_max_depth: 2
+  ml_min_data_in_leaf: 500
+  ml_learning_rate: 0.01
+  ml_lambda_l1: 1.0
+  ml_lambda_l2: 1.0
+  ml_feature_fraction: 0.8
+  ml_bagging_fraction: 0.8
+  ml_bagging_freq: 5
+  train_window_days: 504
+  step_days: 63
+  val_ratio: 0.15
+  ensemble_method: ic_weighted
+
+portfolio:
+  top_k: 30
+  max_positions: 30
+  rebalance_freq: quarterly
+  max_turnover_annual: 3.0
+  max_single_weight: 0.05
+  max_sector_weight: 0.30
+  min_holding_days: 20
+  sell_rank_buffer: 5
+  buy_confirm_days: 3
+  weight_method: equal
+  allow_short: false
+
+backtest:
+  commission_rate: 0.00025
+  slippage_rate: 0.0005
+  impact_rate: 0.0003
+  initial_capital: 1000000
+  benchmark: "000852"
+  price_field: close
+  use_limit_check: true
+  suspend_handling: hold

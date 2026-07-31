@@ -1,0 +1,156 @@
+{
+  "n_total": 4024,
+  "by_group": {
+    "insider_buy": {
+      "n": 4024,
+      "car_mean": 0.000911,
+      "car_std": 0.115081,
+      "t": 0.5019,
+      "p": 0.61577,
+      "ci95_low": -0.002645,
+      "ci95_high": 0.004466,
+      "significant": false
+    }
+  },
+  "by_subtype": {
+    "insider_buy": {
+      "n": 4024,
+      "car_mean": 0.000911,
+      "t": 0.5019,
+      "p": 0.61577,
+      "significant": false
+    }
+  },
+  "by_year_group": {
+    "insider_buy": {
+      "2018": {
+        "n": 764,
+        "car_mean": 0.026285,
+        "t": 6.1728,
+        "p": 0.0,
+        "significant": true
+      },
+      "2019": {
+        "n": 477,
+        "car_mean": -0.003568,
+        "t": -0.5621,
+        "p": 0.574307,
+        "significant": false
+      },
+      "2020": {
+        "n": 413,
+        "car_mean": 0.004384,
+        "t": 0.6261,
+        "p": 0.53162,
+        "significant": false
+      },
+      "2021": {
+        "n": 401,
+        "car_mean": -0.020845,
+        "t": -3.2627,
+        "p": 0.001198,
+        "significant": true
+      },
+      "2022": {
+        "n": 446,
+        "car_mean": 0.00036,
+        "t": 0.0779,
+        "p": 0.937969,
+        "significant": false
+      },
+      "2023": {
+        "n": 359,
+        "car_mean": -0.014142,
+        "t": -3.4032,
+        "p": 0.000741,
+        "significant": true
+      },
+      "2024": {
+        "n": 442,
+        "car_mean": 0.002229,
+        "t": 0.4669,
+        "p": 0.640836,
+        "significant": false
+      },
+      "2025": {
+        "n": 589,
+        "car_mean": -0.007631,
+        "t": -2.0091,
+        "p": 0.044985,
+        "significant": true
+      },
+      "2026": {
+        "n": 133,
+        "car_mean": 0.00194,
+        "t": 0.1844,
+        "p": 0.854014,
+        "significant": false
+      }
+    }
+  },
+  "by_year": {
+    "2018": {
+      "n": 764,
+      "car_mean": 0.026285,
+      "t": 6.1728,
+      "p": 0.0,
+      "significant": true
+    },
+    "2019": {
+      "n": 477,
+      "car_mean": -0.003568,
+      "t": -0.5621,
+      "p": 0.574307,
+      "significant": false
+    },
+    "2020": {
+      "n": 413,
+      "car_mean": 0.004384,
+      "t": 0.6261,
+      "p": 0.53162,
+      "significant": false
+    },
+    "2021": {
+      "n": 401,
+      "car_mean": -0.020845,
+      "t": -3.2627,
+      "p": 0.001198,
+      "significant": true
+    },
+    "2022": {
+      "n": 446,
+      "car_mean": 0.00036,
+      "t": 0.0779,
+      "p": 0.937969,
+      "significant": false
+    },
+    "2023": {
+      "n": 359,
+      "car_mean": -0.014142,
+      "t": -3.4032,
+      "p": 0.000741,
+      "significant": true
+    },
+    "2024": {
+      "n": 442,
+      "car_mean": 0.002229,
+      "t": 0.4669,
+      "p": 0.640836,
+      "significant": false
+    },
+    "2025": {
+      "n": 589,
+      "car_mean": -0.007631,
+      "t": -2.0091,
+      "p": 0.044985,
+      "significant": true
+    },
+    "2026": {
+      "n": 133,
+      "car_mean": 0.00194,
+      "t": 0.1844,
+      "p": 0.854014,
+      "significant": false
+    }
+  }
+}

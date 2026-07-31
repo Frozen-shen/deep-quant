@@ -1,0 +1,102 @@
+{
+  "n_total": 443,
+  "by_group": {
+    "first_buy": {
+      "n": 39,
+      "car_mean": 0.016191,
+      "car_std": 0.134165,
+      "t": 0.7536,
+      "p": 0.455718,
+      "ci95_low": -0.025917,
+      "ci95_high": 0.058299,
+      "significant": false
+    },
+    "upgrade": {
+      "n": 404,
+      "car_mean": -0.003339,
+      "car_std": 0.098662,
+      "t": -0.6802,
+      "p": 0.496755,
+      "ci95_low": -0.01296,
+      "ci95_high": 0.006282,
+      "significant": false
+    }
+  },
+  "by_subtype": {
+    "first_buy": {
+      "n": 39,
+      "car_mean": 0.016191,
+      "t": 0.7536,
+      "p": 0.455718,
+      "significant": false
+    },
+    "upgrade": {
+      "n": 404,
+      "car_mean": -0.003339,
+      "t": -0.6802,
+      "p": 0.496755,
+      "significant": false
+    }
+  },
+  "by_year_group": {
+    "first_buy": {},
+    "upgrade": {
+      "2018": {
+        "n": 47,
+        "car_mean": 0.01048,
+        "t": 0.7109,
+        "p": 0.480743,
+        "significant": false
+      },
+      "2019": {
+        "n": 37,
+        "car_mean": 0.00148,
+        "t": 0.1549,
+        "p": 0.877743,
+        "significant": false
+      },
+      "2020": {
+        "n": 40,
+        "car_mean": -0.00434,
+        "t": -0.2363,
+        "p": 0.814413,
+        "significant": false
+      },
+      "2021": {
+        "n": 34,
+        "car_mean": 0.014037,
+        "t": 0.5375,
+        "p": 0.594534,
+        "significant": false
+      },
+      "2022": {
+        "n": 43,
+        "car_mean": -0.003281,
+        "t": -0.1825,
+        "p": 0.856072,
+        "significant": false
+      },
+      "2023": {
+        "n": 52,
+        "car_mean": -0.019182,
+        "t": -1.6873,
+        "p": 0.097659,
+        "significant": false
+      },
+      "2024": {
+        "n": 77,
+        "car_mean": -0.006492,
+        "t": -0.728,
+        "p": 0.468831,
+        "significant": false
+      },
+      "2025": {
+        "n": 66,
+        "car_mean": -0.008409,
+        "t": -0.7505,
+        "p": 0.455676,
+        "significant": false
+      }
+    }
+  }
+}

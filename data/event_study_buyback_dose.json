@@ -1,0 +1,227 @@
+{
+  "n_total": 1389,
+  "by_group": {
+    "large": {
+      "n": 772,
+      "car_mean": 0.003497,
+      "car_std": 0.09897,
+      "t": 0.9819,
+      "p": 0.326472,
+      "ci95_low": -0.003484,
+      "ci95_high": 0.010479,
+      "significant": false
+    },
+    "medium": {
+      "n": 433,
+      "car_mean": 0.014406,
+      "car_std": 0.116996,
+      "t": 2.5622,
+      "p": 0.010738,
+      "ci95_low": 0.003386,
+      "ci95_high": 0.025426,
+      "significant": true
+    },
+    "small": {
+      "n": 184,
+      "car_mean": 0.029313,
+      "car_std": 0.146345,
+      "t": 2.7171,
+      "p": 0.007219,
+      "ci95_low": 0.008168,
+      "ci95_high": 0.050459,
+      "significant": true
+    }
+  },
+  "by_subtype": {
+    "large": {
+      "n": 772,
+      "car_mean": 0.003497,
+      "t": 0.9819,
+      "p": 0.326472,
+      "significant": false
+    },
+    "medium": {
+      "n": 433,
+      "car_mean": 0.014406,
+      "t": 2.5622,
+      "p": 0.010738,
+      "significant": true
+    },
+    "small": {
+      "n": 184,
+      "car_mean": 0.029313,
+      "t": 2.7171,
+      "p": 0.007219,
+      "significant": true
+    }
+  },
+  "by_year_group": {
+    "large": {
+      "2018": {
+        "n": 87,
+        "car_mean": 0.008321,
+        "t": 0.9865,
+        "p": 0.326663,
+        "significant": false
+      },
+      "2019": {
+        "n": 45,
+        "car_mean": -0.010103,
+        "t": -0.8022,
+        "p": 0.426755,
+        "significant": false
+      },
+      "2020": {
+        "n": 50,
+        "car_mean": 0.003611,
+        "t": 0.2624,
+        "p": 0.794107,
+        "significant": false
+      },
+      "2021": {
+        "n": 83,
+        "car_mean": -0.038006,
+        "t": -3.7147,
+        "p": 0.00037,
+        "significant": true
+      },
+      "2022": {
+        "n": 102,
+        "car_mean": 0.010074,
+        "t": 0.8461,
+        "p": 0.399513,
+        "significant": false
+      },
+      "2023": {
+        "n": 120,
+        "car_mean": 0.007667,
+        "t": 1.0889,
+        "p": 0.27838,
+        "significant": false
+      },
+      "2024": {
+        "n": 161,
+        "car_mean": 0.004048,
+        "t": 0.4768,
+        "p": 0.634134,
+        "significant": false
+      },
+      "2025": {
+        "n": 100,
+        "car_mean": 0.015983,
+        "t": 1.8995,
+        "p": 0.060412,
+        "significant": false
+      },
+      "2026": {
+        "n": 24,
+        "car_mean": 0.050295,
+        "t": 1.5576,
+        "p": 0.13298,
+        "significant": false
+      }
+    },
+    "medium": {
+      "2018": {
+        "n": 52,
+        "car_mean": 0.022173,
+        "t": 1.5344,
+        "p": 0.131117,
+        "significant": false
+      },
+      "2019": {
+        "n": 17,
+        "car_mean": 0.057948,
+        "t": 1.8653,
+        "p": 0.08059,
+        "significant": false
+      },
+      "2020": {
+        "n": 11,
+        "car_mean": -0.020909,
+        "t": -0.489,
+        "p": 0.635381,
+        "significant": false
+      },
+      "2021": {
+        "n": 36,
+        "car_mean": -0.005341,
+        "t": -0.2728,
+        "p": 0.786635,
+        "significant": false
+      },
+      "2022": {
+        "n": 55,
+        "car_mean": -0.019266,
+        "t": -1.3297,
+        "p": 0.18922,
+        "significant": false
+      },
+      "2023": {
+        "n": 76,
+        "car_mean": -0.00427,
+        "t": -0.3594,
+        "p": 0.720341,
+        "significant": false
+      },
+      "2024": {
+        "n": 123,
+        "car_mean": 0.031546,
+        "t": 2.7852,
+        "p": 0.006204,
+        "significant": true
+      },
+      "2025": {
+        "n": 52,
+        "car_mean": 0.034554,
+        "t": 2.2808,
+        "p": 0.026771,
+        "significant": true
+      },
+      "2026": {
+        "n": 11,
+        "car_mean": 0.020839,
+        "t": 0.4452,
+        "p": 0.665657,
+        "significant": false
+      }
+    },
+    "small": {
+      "2018": {
+        "n": 17,
+        "car_mean": -0.018812,
+        "t": -0.669,
+        "p": 0.513036,
+        "significant": false
+      },
+      "2022": {
+        "n": 18,
+        "car_mean": 0.00141,
+        "t": 0.0399,
+        "p": 0.968672,
+        "significant": false
+      },
+      "2023": {
+        "n": 38,
+        "car_mean": 0.005999,
+        "t": 0.4512,
+        "p": 0.65446,
+        "significant": false
+      },
+      "2024": {
+        "n": 70,
+        "car_mean": 0.045477,
+        "t": 2.3534,
+        "p": 0.021459,
+        "significant": true
+      },
+      "2025": {
+        "n": 22,
+        "car_mean": 0.086179,
+        "t": 1.8653,
+        "p": 0.076176,
+        "significant": false
+      }
+    }
+  }
+}

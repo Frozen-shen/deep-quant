@@ -1,0 +1,91 @@
+{
+  "n_total": 1390,
+  "by_group": {
+    "buyback": {
+      "n": 1390,
+      "car_mean": 0.010506,
+      "car_std": 0.112445,
+      "t": 3.4834,
+      "p": 0.00051,
+      "ci95_low": 0.004595,
+      "ci95_high": 0.016417,
+      "significant": true
+    }
+  },
+  "by_subtype": {
+    "buyback": {
+      "n": 1390,
+      "car_mean": 0.010506,
+      "t": 3.4834,
+      "p": 0.00051,
+      "significant": true
+    }
+  },
+  "by_year_group": {
+    "buyback": {
+      "2018": {
+        "n": 157,
+        "car_mean": 0.011649,
+        "t": 1.5455,
+        "p": 0.124248,
+        "significant": false
+      },
+      "2019": {
+        "n": 67,
+        "car_mean": 0.012572,
+        "t": 1.0042,
+        "p": 0.318972,
+        "significant": false
+      },
+      "2020": {
+        "n": 69,
+        "car_mean": 0.000269,
+        "t": 0.0221,
+        "p": 0.982426,
+        "significant": false
+      },
+      "2021": {
+        "n": 124,
+        "car_mean": -0.026099,
+        "t": -2.8741,
+        "p": 0.004775,
+        "significant": true
+      },
+      "2022": {
+        "n": 175,
+        "car_mean": -3.8e-05,
+        "t": -0.0042,
+        "p": 0.996643,
+        "significant": false
+      },
+      "2023": {
+        "n": 234,
+        "car_mean": 0.003519,
+        "t": 0.618,
+        "p": 0.537179,
+        "significant": false
+      },
+      "2024": {
+        "n": 354,
+        "car_mean": 0.021794,
+        "t": 3.2307,
+        "p": 0.001351,
+        "significant": true
+      },
+      "2025": {
+        "n": 174,
+        "car_mean": 0.030408,
+        "t": 3.4155,
+        "p": 0.000793,
+        "significant": true
+      },
+      "2026": {
+        "n": 36,
+        "car_mean": 0.036855,
+        "t": 1.4231,
+        "p": 0.163572,
+        "significant": false
+      }
+    }
+  }
+}
