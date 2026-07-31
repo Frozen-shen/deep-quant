@@ -24,16 +24,16 @@ execution:
   max_positions: 5
   max_single_pct: 0.25
   signal_delay: 1
-  top_k: 6
+  top_k: 8                  # CSI1000多分散
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
   use_fundamental: false    # 校准阶段关闭, 纯价量基线
 label:
-  horizon_days: 7
+  horizon_days: 20          # CSI1000低频信号
   type: rank
 model:
-  type: lgb                 # l0=等权 l1=单因子 l2=线性 lgb=LightGBM
+  type: lgb                 # CSI1000换挡 + LightGBM
   lambda_l1: 0.3
   learning_rate: 0.03
   max_depth: 5
@@ -44,12 +44,12 @@ model:
 portfolio:
   buy_confirm_days: 1
   cost_threshold: 0.08
-  hold_thresh: 10
+  hold_thresh: 20           # CSI1000低频持有
   n_drop: 2
   sell_rank_buffer: 2
 rolling:
   day_step: 2
-  embargo_days: 10
+  embargo_days: 30          # T+20标签, 30天embargo
   test_months: 9
   train_months: 4
 time_decay:
@@ -57,6 +57,6 @@ time_decay:
 universe:
   data_version: v20260729
   include_delisted: true
-  index: '000300'            # CSI300 (基本面因子测试)
+  index: '000852'            # CSI1000 小盘换挡实验
   min_list_days: 250
   snapshot_mode: monthly
