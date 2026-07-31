@@ -27,15 +27,8 @@ def fetch_financials(symbol: str) -> pd.DataFrame:
     if os.path.exists(cache_path):
         return pd.read_parquet(cache_path)
 
-    try:
-        df = ak.stock_financial_analysis_indicator(symbol=symbol, start_year='2017')
-        if df is None or len(df) == 0:
-            return None
-        df.to_parquet(cache_path, index=False)
-        return df
-    except Exception as e:
-        print(f"  [fundamental] {symbol} fetch error: {e}")
-        return None
+    # 缓存未命中 → 返回None (后台单独构建缓存, 避免回测时阻塞)
+    return None
 
 
 def get_fundamental_factors(symbol: str, today: pd.Timestamp) -> dict:

@@ -28,7 +28,7 @@ execution:
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
-  use_fundamental: true     # ★ 启用基本面因子 (PE/PB/ROE/增速)
+  use_fundamental: true     # ★ 基本面因子
 label:
   horizon_days: 7
   type: rank
