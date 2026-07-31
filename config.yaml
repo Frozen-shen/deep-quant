@@ -49,6 +49,7 @@ portfolio:
   cost_threshold: 0.08
   hold_thresh: 30           # ★ 宽度改造: 月度调仓
   n_drop: 2
+  sector_neutral: true       # ★ 行业中性化
   sell_rank_buffer: 2
 rolling:
   day_step: 2
