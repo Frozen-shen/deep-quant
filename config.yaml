@@ -24,7 +24,8 @@ execution:
   max_positions: 5
   max_single_pct: 0.25
   signal_delay: 1
-  top_k: 8                  # CSI1000多分散
+  top_k: 30                 # ★ 宽度改造: 30只持仓
+  max_positions: 40
   slippage_bps: 30           # ★ 小盘滑点30bp
   turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
 factors:
@@ -46,7 +47,7 @@ model:
 portfolio:
   buy_confirm_days: 1
   cost_threshold: 0.08
-  hold_thresh: 20           # CSI1000低频持有
+  hold_thresh: 30           # ★ 宽度改造: 月度调仓
   n_drop: 2
   sell_rank_buffer: 2
 rolling:
@@ -59,6 +60,6 @@ time_decay:
 universe:
   data_version: v20260729
   include_delisted: true
-  index: '000852'            # CSI1000 小盘换挡实验
+  index: 'all_cached'         # ★ 全部缓存股票(≈950只) 宽度改造
   min_list_days: 250
   snapshot_mode: monthly

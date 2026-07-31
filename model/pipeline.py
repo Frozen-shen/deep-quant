@@ -55,6 +55,15 @@ class QuantPipeline:
         return {"results": results, "summary": summary}
 
     def _load_universe(self):
+        # ★ 宽度改造: all_cached 直接使用所有缓存股票
+        if self.cfg["universe"].get("index") == "all_cached":
+            from data_cache import get_cached_symbols
+            class AllCachedUniverse:
+                all_symbols = set(get_cached_symbols())
+                def load(self): return True
+            self._universe = AllCachedUniverse()
+            return
+
         from data.universe import StockUniverse
         self._universe = StockUniverse(self.cfg["universe"])
         if not self._universe.load():
