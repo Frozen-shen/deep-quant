@@ -1,0 +1,11 @@
+{
+  "n_events": 1885,
+  "n_positive": 1211,
+  "n_negative": 674,
+  "positive_car_mean": -0.005854056333984528,
+  "negative_car_mean": -0.012032141426866746,
+  "positive_t": -1.5993501584512806,
+  "positive_p": 0.11000388077962465,
+  "negative_t": -2.8710147234050845,
+  "negative_p": 0.004220144494516468
+}
