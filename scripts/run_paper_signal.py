@@ -102,11 +102,10 @@ def generate_signal(date_str: str = None):
     model = pipeline._train_model(np.array(xt), np.array(yt, dtype=int),
                                   gt, train_end)
 
-    # ── 3. 生成今日信号 ──
+    # ── 3. 生成原始模型预测分数 ──
     from execution.paper_executor import PaperExecutor
     from portfolio_ranker import PortfolioRanker
     from trading_rules import TradingRules
-    from model.engine import SimpleBacktest
 
     executor = PaperExecutor(
         initial_capital=config["execution"]["initial_capital"],
@@ -115,9 +114,11 @@ def generate_signal(date_str: str = None):
         slippage_bps=config["execution"].get("slippage_bps", 30),
         turnover_limit_pct=config["execution"].get("turnover_limit_pct", 0.5),
         max_single_pct=config["execution"].get("max_single_pct", 0.25),
+        minute_mode=config["execution"].get("minute_mode", False),
+        execution_algo=config["execution"].get("execution_algo", "vwap"),
+        twap_slices=config["execution"].get("twap_slices", 8),
     )
 
-    # 加载昨日持仓状态
     state = executor.load_state()
     print(f"  当前持仓: {len(state.positions)} 只, 现金: {state.cash:,.0f}")
 
@@ -130,24 +131,100 @@ def generate_signal(date_str: str = None):
     )
     rules = TradingRules()
 
-    # 用 SimpleBacktest 仅生成信号 (不做执行)
-    bt = SimpleBacktest(
-        initial_capital=state.cash,
-        top_k=pipeline.top_k,
-        lot_size=pipeline.lot_size,
-    )
-    # 将当前持仓注入到 bt 中用于 ranker 排名
-    bt.positions = {
-        sym: {"qty": info["qty"], "entry_price": info["avg_cost"],
-              "entry_date": state.last_date}
-        for sym, info in state.positions.items()
-    }
     # 同步 ranker 的持有天数状态
-    if state.last_date:
-        for sym in state.positions:
-            ranker._hold_since[sym] = (today - pd.Timestamp(state.last_date)).days
+    for sym in state.positions:
+        ranker._hold_since[sym] = (today - pd.Timestamp(state.last_date)).days if state.last_date else 1
 
-    signal = pipeline._generate_signal(model, today, rules, bt, ranker)
+    # ── 3a. 获取原始模型分数 ──
+    sd, cpt = {}, {}
+    for sym in pipeline._all_data:
+        dt = pipeline._all_data[sym][pipeline._all_data[sym]["date"] <= today].tail(120)
+        if len(dt) >= 60:
+            sd[sym] = dt
+            cpt[sym] = dt["close"].iloc[-1]
+
+    if len(sd) < pipeline.top_k:
+        print("  ❌ 可交易股票不足")
+        return None
+
+    sd, cpt = rules.filter_tradeable(sd, cpt)
+    if len(sd) < pipeline.top_k:
+        print("  ❌ 过滤后可交易股票不足")
+        return None
+
+    sym_feats, swd = [], []
+    for sym in sd:
+        feats = pipeline._factor_cache.get_features(sym, today)
+        if feats is not None:
+            if pipeline._fund_cache:
+                from data.fundamental_cache_builder import merge_fundamental_to_features
+                feats = merge_fundamental_to_features(sym, today, pipeline._fund_cache, feats)
+            sym_feats.append(feats)
+            swd.append(sym)
+
+    if len(sym_feats) < pipeline.top_k:
+        print("  ❌ 有效特征不足")
+        return None
+
+    fa = np.array(sym_feats)
+    m, s = fa.mean(axis=0), fa.std(axis=0)
+    s[s == 0] = 1.0
+    fn = (fa - m) / s
+    preds = model.predict(fn)
+    scores = {swd[i]: float(preds[i]) for i in range(len(swd))}
+
+    # ── 3b. PEAD 事件因子叠加 (统一接口) ──
+    pead_weight = config["factors"].get("pead_weight", 0.0)
+    if pead_weight > 0:
+        try:
+            from factors.pead_factor import PEADFactor
+            pead = PEADFactor()
+            surprise_scores = pead.compute_surprise_scores(str(today.date()))
+            if surprise_scores:
+                scores = pead.enhance_scores(scores, surprise_scores, weight=pead_weight)
+                print(f"  📡 PEAD增强: {len(surprise_scores)}只有效事件, weight={pead_weight}")
+        except Exception as e:
+            print(f"  ⚠️ PEAD增强跳过: {e}")
+
+    # ── 3c. PEAD 防御: 负面预告强制卖出 ──
+    if config["execution"].get("pead_defense", False):
+        try:
+            from factors.pead_factor import PEADFactor
+            pead_def = PEADFactor()
+            negative_events = pead_def.compute_surprise_scores(str(today.date()))
+            force_sell = [sym for sym, s in negative_events.items()
+                         if s < -0.5 and sym in state.positions]
+            if force_sell:
+                print(f"  🛡️ PEAD防御: 强制卖出 {force_sell}")
+                # 直接加入卖出列表 (不走 ranker)
+        except Exception:
+            pass
+
+    # ── 3d. 排名决策 ──
+    holdings = list(state.positions.keys())
+    decision = ranker.rank(scores, holdings)
+
+    # 涨跌停过滤
+    limit_data = dict(sd)
+    unadj_data = getattr(pipeline, '_unadj_data', {})
+    if unadj_data:
+        limit_data.update({s: unadj_data[s] for s in unadj_data if s in sd})
+    decision["buy"] = [s for s in decision["buy"] if s in limit_data and rules.can_buy(s, limit_data[s])]
+    decision["sell"] = [s for s in decision["sell"] if s in limit_data and rules.can_sell(s, limit_data[s])]
+
+    # PEAD defense: 强制卖出负面事件持仓
+    if config["execution"].get("pead_defense", False):
+        try:
+            for sym in force_sell:
+                if sym not in decision["sell"] and sym in state.positions:
+                    decision["sell"].append(sym)
+        except NameError:
+            pass
+
+    decision["top_k_scores"] = dict(
+        sorted(scores.items(), key=lambda x: -x[1])[:pipeline.top_k * 2]
+    )
+    signal = decision
 
     if signal is None or (not signal.get("buy") and not signal.get("sell")):
         print("  ⚠️ 今日无交易信号")
@@ -163,12 +240,28 @@ def generate_signal(date_str: str = None):
         return {"signal_date": str(today.date()), "buy": [], "sell": [], "hold": []}
 
     # ── 4. 执行订单 ──
-    print(f"  买入信号: {signal.get('buy', [])}")
-    print(f"  卖出信号: {signal.get('sell', [])}")
+    print(f"  买入信号: {decision.get('buy', [])}")
+    print(f"  卖出信号: {decision.get('sell', [])}")
 
     all_data = pipeline._all_data
     unadj_data = getattr(pipeline, '_unadj_data', {})
     today_dt = pd.Timestamp(today)
+
+    # ── 4a. 分钟数据预拉取 (如果启用分钟模式) ──
+    if config["execution"].get("minute_mode", False):
+        try:
+            from data.minute_fetcher import MinuteFetcher
+            mf = MinuteFetcher()
+            trade_symbols = list(set(
+                decision.get('buy', []) +
+                decision.get('sell', []) +
+                list(state.positions.keys())
+            ))
+            print(f"  ⏱️  预拉取分钟数据: {len(trade_symbols)}只...")
+            mf.fetch_batch(trade_symbols, days=5)
+            print(f"  ✅ 分钟数据就绪")
+        except Exception as e:
+            print(f"  ⚠️ 分钟数据预拉取失败: {e} (将回退日线)")
 
     # 构建 close_prices
     close_prices = {}

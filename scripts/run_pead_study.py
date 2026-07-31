@@ -82,35 +82,14 @@ def run_pead_v2():
         all_data[s]['date'] = pd.to_datetime(all_data[s]['date'])
     print(f"  股价数据: {len(all_data)}只")
 
-    # 3. 计算 CAR(+1,+20)
-    results = []
-    for _, event in forecasts.iterrows():
-        sym = str(event.get('股票代码', '')).zfill(6)
-        if sym not in all_data:
-            continue
+    # 3. 计算 CAR(+1,+20) — 优化版: 预计算基准
+    # 对所有公告日期去重, 预计算每个日期的基准收益
+    all_ann_dates = sorted(forecasts['公告日期'].dropna().unique())
+    print(f"  唯一公告日: {len(all_ann_dates)}个")
 
-        ann_date = event['公告日期']
-        group = event['group']
-        if group == 'neutral':
-            continue
-
-        pdf = all_data[sym].sort_values('date')
-
-        # ★ (+1,+20): 公告日后第一个交易日起算
-        post = pdf[pdf['date'] > ann_date]  # > 不是 >=
-        if len(post) < 21:
-            continue
-
-        ann_close = pdf[pdf['date'] <= ann_date]
-        if len(ann_close) == 0:
-            continue
-        base_px = ann_close['close'].iloc[-1]
-
-        # CAR: 公告后20个交易日
-        car_idx = min(20, len(post) - 1)
-        stock_ret = post.iloc[car_idx]['close'] / base_px - 1
-
-        # 同期基准
+    # 预计算每个公告日的基准收益
+    bench_by_date = {}
+    for ann_date in all_ann_dates:
         bench_rets = []
         for bs, bdf in all_data.items():
             bdf = bdf.sort_values('date')
@@ -118,10 +97,28 @@ def run_pead_v2():
             if len(bpost) >= 21:
                 bbase = bdf[bdf['date'] <= ann_date]
                 if len(bbase) == 0: continue
-                bench_rets.append(bpost.iloc[min(20,len(bpost)-1)]['close'] / bbase['close'].iloc[-1] - 1)
+                bench_rets.append(bpost.iloc[20]['close'] / bbase['close'].iloc[-1] - 1)
+        bench_by_date[ann_date] = np.mean(bench_rets) if bench_rets else 0
 
-        bench_ret = np.mean(bench_rets) if bench_rets else 0
-        car = stock_ret - bench_ret
+    print(f"  基准预计算完成")
+
+    # 计算每个事件的CAR
+    results = []
+    for _, event in forecasts.iterrows():
+        sym = str(event.get('股票代码', '')).zfill(6)
+        if sym not in all_data: continue
+        ann_date = event['公告日期']
+        group = event['group']
+        if group == 'neutral': continue
+
+        pdf = all_data[sym].sort_values('date')
+        post = pdf[pdf['date'] > ann_date]
+        if len(post) < 21: continue
+        ann_close = pdf[pdf['date'] <= ann_date]
+        if len(ann_close) == 0: continue
+
+        stock_ret = post.iloc[20]['close'] / ann_close['close'].iloc[-1] - 1
+        car = stock_ret - bench_by_date.get(ann_date, 0)
 
         results.append({
             'symbol': sym, 'ann_date': str(ann_date.date()),

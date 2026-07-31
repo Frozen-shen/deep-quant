@@ -29,10 +29,16 @@ execution:
   slippage_bps: 30           # ★ 小盘滑点30bp
   turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
   pead_defense: true         # ★ PEAD负面预告强制卖出
+  # -- 分钟级执行 (模拟盘建议开启) --
+  minute_mode: true          # true=分钟线VWAP/TWAP成交, false=日线开盘价
+  minute_period: "5"         # 5分钟K线
+  execution_algo: vwap       # vwap / twap / open / close
+  twap_slices: 8             # TWAP拆单段数
 factors:
   freeze_date: '2023-01-01'
   preset: ic_auto
   use_fundamental: false    # 校准阶段关闭, 纯价量基线
+  pead_weight: 0.0          # PEAD 事件因子权重 (0=关闭, 建议0.10~0.20; alpha跑出后再调)
 label:
   horizon_days: 20          # CSI1000低频信号
   type: rank

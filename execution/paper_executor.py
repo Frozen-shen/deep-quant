@@ -186,7 +186,10 @@ class PaperExecutor:
     def __init__(self, market: str = "a", initial_capital: float = None,
                  top_k: int = 30, lot_size: int = 100,
                  slippage_bps: int = 30, turnover_limit_pct: float = 0.5,
-                 max_single_pct: float = 0.25):
+                 max_single_pct: float = 0.25,
+                 minute_mode: bool = False,
+                 execution_algo: str = "vwap",
+                 twap_slices: int = 8):
         """
         Args:
           market: 'a' or 'hk'
@@ -196,6 +199,9 @@ class PaperExecutor:
           slippage_bps: 滑点 (bp)
           turnover_limit_pct: 月单边换手上限
           max_single_pct: 单票最大仓位比例
+          minute_mode: True=用分钟线VWAP/TWAP成交, False=日线开盘价成交
+          execution_algo: 分钟执行算法 "vwap"/"twap"/"open"/"close"
+          twap_slices: TWAP 拆单段数
         """
         self.market = market
         self.top_k = top_k
@@ -203,6 +209,9 @@ class PaperExecutor:
         self.slippage_bps = slippage_bps
         self.turnover_limit_pct = turnover_limit_pct
         self.max_single_pct = max_single_pct
+        self.minute_mode = minute_mode
+        self.execution_algo = execution_algo
+        self.twap_slices = twap_slices
 
         storage.init_db()
 
@@ -357,14 +366,10 @@ class PaperExecutor:
                 report.sell_rejected.append(OrderResult(
                     sym, "SELL", "rejected", RejectReason.NO_DATA.value))
                 continue
-            if sym not in all_data:
-                report.sell_rejected.append(OrderResult(
-                    sym, "SELL", "rejected", RejectReason.NO_DATA.value))
-                continue
 
-            # 跌停/停牌检查
-            dt_limit = limit_data.get(sym, all_data.get(sym))
-            if dt_limit is not None:
+            # 跌停/停牌检查 (使用日线未复权数据)
+            dt_limit = limit_data.get(sym, all_data.get(sym, {}))
+            if isinstance(dt_limit, pd.DataFrame) and len(dt_limit) > 0:
                 dt_check = dt_limit[dt_limit["date"] <= today].tail(2)
                 if len(dt_check) >= 2 and not self.rules.can_sell(sym, dt_check):
                     reason = RejectReason.LIMIT_DOWN.value
@@ -374,13 +379,12 @@ class PaperExecutor:
                         sym, "SELL", "rejected", reason))
                     continue
 
-            dt = all_data[sym][all_data[sym]["date"] <= today].tail(1)
-            if len(dt) == 0:
+            # ★ 统一执行价格 (分钟VWAP/TWAP 或 日线开盘价)
+            px = self._get_execution_price(sym, date_str, all_data)
+            if px is None:
                 report.sell_rejected.append(OrderResult(
                     sym, "SELL", "rejected", RejectReason.NO_DATA.value))
                 continue
-
-            px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
             px = self._apply_slippage(px, "SELL")
             comm = calc_sell_commission(qty, px)
             proceeds = qty * px - comm
@@ -402,23 +406,9 @@ class PaperExecutor:
             cash_per = state.cash * 0.99 / max(1, len(buy_list))
 
             for sym in buy_list:
-                if sym not in all_data:
-                    report.buy_rejected.append(OrderResult(
-                        sym, "BUY", "rejected", RejectReason.NO_DATA.value))
-                    continue
-
-                dt = all_data[sym][all_data[sym]["date"] <= today].tail(1)
-                if len(dt) == 0:
-                    report.buy_rejected.append(OrderResult(
-                        sym, "BUY", "rejected", RejectReason.NO_DATA.value))
-                    continue
-
-                px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
-                px = self._apply_slippage(px, "BUY")
-
-                # 涨停/停牌检查
-                dt_limit_sym = limit_data.get(sym, all_data[sym])
-                if dt_limit_sym is not None:
+                # 涨停/停牌检查 (使用日线未复权数据)
+                dt_limit_sym = limit_data.get(sym, all_data.get(sym, {}))
+                if isinstance(dt_limit_sym, pd.DataFrame) and len(dt_limit_sym) > 0:
                     dt_check = dt_limit_sym[dt_limit_sym["date"] <= today].tail(2)
                     if len(dt_check) >= 2 and not self.rules.can_buy(sym, dt_check):
                         is_up, is_down, is_word = self.rules.is_limit_hit(sym, dt_check)
@@ -428,6 +418,14 @@ class PaperExecutor:
                         report.buy_rejected.append(OrderResult(
                             sym, "BUY", "rejected", reason))
                         continue
+
+                # ★ 统一执行价格 (分钟VWAP/TWAP 或 日线开盘价)
+                px = self._get_execution_price(sym, date_str, all_data)
+                if px is None:
+                    report.buy_rejected.append(OrderResult(
+                        sym, "BUY", "rejected", RejectReason.NO_DATA.value))
+                    continue
+                px = self._apply_slippage(px, "BUY")
 
                 # 计算买入数量 (手数对齐)
                 qty = int(cash_per / px / self.lot_size) * self.lot_size
@@ -594,6 +592,35 @@ class PaperExecutor:
             return price
         slip = price * self.slippage_bps / 10000.0
         return price + slip if side == "BUY" else price - slip
+
+    def _get_execution_price(self, symbol: str, date_str: str,
+                             all_data: dict = None) -> Optional[float]:
+        """
+        获取执行价格 — 根据模式选择日线开盘价或分钟线VWAP/TWAP。
+
+        Args:
+          symbol: 股票代码
+          date_str: 执行日期
+          all_data: 日线数据 (分钟模式不需要, 但保留兼容)
+
+        Returns:
+          执行价格或 None
+        """
+        if self.minute_mode:
+            try:
+                from data.minute_fetcher import MinuteFetcher
+                mf = MinuteFetcher()
+                return mf.get_execution_price(symbol, date_str, self.execution_algo)
+            except Exception as e:
+                print(f"  ⚠️ 分钟数据获取失败 {symbol}: {e}, 回退到日线")
+                # fall through to daily mode
+
+        # 日线模式: 用当日开盘价
+        if all_data and symbol in all_data:
+            dt = all_data[symbol][all_data[symbol]["date"] <= pd.Timestamp(date_str)].tail(1)
+            if len(dt) > 0:
+                return float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
+        return None
 
     def _save_report(self, report: ExecutionReport):
         """追加执行报告到 JSONL。"""
