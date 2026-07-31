@@ -1,0 +1,41 @@
+{
+  "source": "run_2026-07-31 \u626d\u4e8f\u5206\u5e74CAR (day+1\u5f00\u76d8, \u6da8\u505c\u5254\u9664)",
+  "overall": {
+    "n": 979,
+    "car_mean": 0.0254,
+    "t": 3.74,
+    "p": 0.0001,
+    "significant": true
+  },
+  "by_year": {
+    "2020": {
+      "n": 73,
+      "car_mean": 0.0823,
+      "t": 1.21,
+      "p": 0.2317,
+      "significant": false
+    },
+    "2021": {
+      "n": 357,
+      "car_mean": 0.0378,
+      "t": 3.97,
+      "p": 0.0001,
+      "significant": true
+    },
+    "2022": {
+      "n": 175,
+      "car_mean": 0.0375,
+      "t": 3.48,
+      "p": 0.0006,
+      "significant": true
+    },
+    "2023": {
+      "n": 223,
+      "car_mean": 0.0089,
+      "t": 1.12,
+      "p": 0.2634,
+      "significant": false
+    }
+  },
+  "conclusion": "2021-2022\u9a71\u52a8\u6574\u4f53+2.54%, 2023\u5df2\u8870\u51cf\u81f3\u4e0d\u663e\u8457(p=0.26) \u2014 regime\u6548\u5e94\u975e\u7ed3\u6784\u89c4\u5f8b"
+}
