@@ -1,58 +1,66 @@
 [
   {
+    "factor": "fund_eps_ttm",
+    "ic_mean": 0.0028,
+    "abs_ic": 0.1508,
+    "icir": 0.0153,
+    "pos": 0.55,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
+  },
+  {
     "factor": "fund_roe",
     "ic_mean": 0.0227,
     "abs_ic": 0.1458,
     "icir": 0.1274,
-    "pos": 0.52
+    "pos": 0.52,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
   },
   {
     "factor": "fund_roe_ttm",
     "ic_mean": 0.0079,
     "abs_ic": 0.1428,
     "icir": 0.0464,
-    "pos": 0.52
+    "pos": 0.52,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
   },
   {
     "factor": "fund_profit_growth",
     "ic_mean": 0.0093,
     "abs_ic": 0.131,
     "icir": 0.0559,
-    "pos": 0.57
-  },
-  {
-    "factor": "fund_profit_growth_ttm",
-    "ic_mean": 0.0054,
-    "abs_ic": 0.1096,
-    "icir": 0.0408,
-    "pos": 0.48
-  },
-  {
-    "factor": "fund_revenue_growth",
-    "ic_mean": -0.01,
-    "abs_ic": 0.1135,
-    "icir": -0.0711,
-    "pos": 0.45
-  },
-  {
-    "factor": "fund_debt_ratio",
-    "ic_mean": -0.0091,
-    "abs_ic": 0.1083,
-    "icir": -0.0675,
-    "pos": 0.45
+    "pos": 0.57,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
   },
   {
     "factor": "fund_bvps",
     "ic_mean": 0.0038,
     "abs_ic": 0.1194,
     "icir": 0.026,
-    "pos": 0.54
+    "pos": 0.54,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
   },
   {
-    "factor": "fund_eps_ttm",
-    "ic_mean": 0.0028,
-    "abs_ic": 0.1508,
-    "icir": 0.0153,
-    "pos": 0.55
+    "factor": "fund_revenue_growth",
+    "ic_mean": -0.01,
+    "abs_ic": 0.1135,
+    "icir": -0.0711,
+    "pos": 0.45,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
+  },
+  {
+    "factor": "fund_profit_growth_ttm",
+    "ic_mean": 0.0054,
+    "abs_ic": 0.1096,
+    "icir": 0.0408,
+    "pos": 0.48,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
+  },
+  {
+    "factor": "fund_debt_ratio",
+    "ic_mean": -0.0091,
+    "abs_ic": 0.1083,
+    "icir": -0.0675,
+    "pos": 0.45,
+    "label": "mean_ic=方向信号 abs_ic=信号强度(不论方向)"
   }
 ]

@@ -21,7 +21,19 @@ def generate_signal(date_str: str = None):
     """生成当天交易信号。date_str='2026-07-31' 或 None=今天"""
 
     if date_str is None:
-        today = pd.Timestamp.now().normalize()
+        # ★ 取数据缓存中最新的交易日 (而非系统时钟)
+        from data_cache import get_cached_symbols, load as load_single
+        syms = get_cached_symbols()
+        latest_date = None
+        for sym in syms[:5]:  # 抽样检查
+            df = load_single(sym)
+            if df is not None and len(df) > 0:
+                df["date"] = pd.to_datetime(df["date"])
+                last = df["date"].max()
+                if latest_date is None or last > latest_date:
+                    latest_date = last
+        today = latest_date or pd.Timestamp.now().normalize()
+        print(f"[PaperTrading] 最新数据日期: {today.date()}")
     else:
         today = pd.Timestamp(date_str)
 
