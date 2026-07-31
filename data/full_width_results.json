@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-07-31 16:06:12",
+  "config": "width_all_cached L2 top_k=30 sector_neutral",
+  "n_stocks": 947,
+  "mean_return": -11.88,
+  "mean_excess": -14.02,
+  "excess_std": 20.87,
+  "pos_excess": 2,
+  "n_windows": 5
+}
