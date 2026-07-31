@@ -87,23 +87,24 @@ def run_pead_v2():
     all_ann_dates = sorted(forecasts['公告日期'].dropna().unique())
     print(f"  唯一公告日: {len(all_ann_dates)}个")
 
-    # 预计算每个公告日的基准收益
+    # 预计算每个公告日的基准收益 (★ day+1开盘价起算)
     bench_by_date = {}
     for ann_date in all_ann_dates:
         bench_rets = []
         for bs, bdf in all_data.items():
             bdf = bdf.sort_values('date')
-            bpost = bdf[bdf['date'] > ann_date]
-            if len(bpost) >= 21:
-                bbase = bdf[bdf['date'] <= ann_date]
-                if len(bbase) == 0: continue
-                bench_rets.append(bpost.iloc[20]['close'] / bbase['close'].iloc[-1] - 1)
+            post = bdf[bdf['date'] > ann_date]
+            if len(post) < 21: continue
+            # ★ day+1开盘价作为买入价
+            day1_open = post.iloc[0]['open'] if 'open' in post.columns else post.iloc[0]['close']
+            bench_rets.append(post.iloc[20]['close'] / day1_open - 1)
         bench_by_date[ann_date] = np.mean(bench_rets) if bench_rets else 0
 
     print(f"  基准预计算完成")
 
-    # 计算每个事件的CAR
+    # 计算每个事件的CAR (★ day+1开盘价 + 涨停剔除)
     results = []
+    limit_up_excluded = 0
     for _, event in forecasts.iterrows():
         sym = str(event.get('股票代码', '')).zfill(6)
         if sym not in all_data: continue
@@ -114,10 +115,21 @@ def run_pead_v2():
         pdf = all_data[sym].sort_values('date')
         post = pdf[pdf['date'] > ann_date]
         if len(post) < 21: continue
-        ann_close = pdf[pdf['date'] <= ann_date]
-        if len(ann_close) == 0: continue
 
-        stock_ret = post.iloc[20]['close'] / ann_close['close'].iloc[-1] - 1
+        ann_close_row = pdf[pdf['date'] <= ann_date]
+        if len(ann_close_row) == 0: continue
+        ann_close = ann_close_row['close'].iloc[-1]
+
+        # ★ day+1开盘价 (实际可成交价)
+        day1_open = post.iloc[0]['open'] if 'open' in post.columns else post.iloc[0]['close']
+
+        # ★ 涨停剔除: day+1开盘涨幅≥9.8% → 买不进, 排除
+        if day1_open >= ann_close * 1.098:
+            limit_up_excluded += 1
+            continue
+
+        # CAR: day+1开盘 → day+20收盘
+        stock_ret = post.iloc[20]['close'] / day1_open - 1
         car = stock_ret - bench_by_date.get(ann_date, 0)
 
         results.append({
@@ -127,23 +139,36 @@ def run_pead_v2():
         })
 
     rdf = pd.DataFrame(results)
-    print(f"  有效CAR事件: {len(rdf)}条")
+    print(f"  有效CAR事件: {len(rdf)}条 (涨停剔除: {limit_up_excluded})")
     print(f"  好消息: {len(rdf[rdf['group']=='good'])}条")
     print(f"  坏消息: {len(rdf[rdf['group']=='bad'])}条")
 
-    # 4. 统计检验
-    print(f"\n  === CAR(+1,+20) 分组检验 ===")
+    # 4. 统计检验 + ★ p值落盘
+    output = {"n_total": len(rdf), "limit_up_excluded": limit_up_excluded}
+    print(f"\n  === CAR(day+1开盘→+20收盘) 分组检验 ===")
     for g, label in [('good', '好消息(预增/扭亏/略增)'), ('bad', '坏消息(预减/首亏/增亏)')]:
         cars = rdf[rdf['group'] == g]['car']
         n = len(cars)
+        tag = 'good' if g == 'good' else 'bad'
+        output[f'{tag}_n'] = n
         if n < 30:
             print(f"  {label}: n={n} 不足30, 跳过")
             continue
         mean_car = cars.mean()
+        std_car = cars.std(ddof=1)
         t, p = ttest_1samp(cars, 0)
+        ci95 = 1.96 * std_car / np.sqrt(n)
         print(f"  {label}:")
         print(f"    n={n}  CAR均值={mean_car:+.4f} ({mean_car*100:+.2f}%)")
-        print(f"    t={t:.3f}  p={p:.4f}  {'✅显著' if p<0.05 else '❌不显著'}")
+        print(f"    std={std_car:.4f}  95%CI=[{mean_car-ci95:+.4f},{mean_car+ci95:+.4f}]")
+        print(f"    t={t:.3f}  p={p:.6f}  {'✅显著' if p<0.05 else '❌不显著'}")
+        output[f'{tag}_car_mean'] = float(mean_car)
+        output[f'{tag}_car_std'] = float(std_car)
+        output[f'{tag}_t'] = float(t)
+        output[f'{tag}_p'] = float(p)
+        output[f'{tag}_ci95_low'] = float(mean_car - ci95)
+        output[f'{tag}_ci95_high'] = float(mean_car + ci95)
+        output[f'{tag}_significant'] = bool(p < 0.05)
 
     # 5. 按具体类型细分
     print(f"\n  === 按预告类型细分 ===")
@@ -154,18 +179,19 @@ def run_pead_v2():
         t, p = ttest_1samp(sub['car'], 0)
         print(f"  {ftype:6s}: n={len(sub):4d}  CAR={m*100:+.2f}%  t={t:+.2f}  p={p:.3f}")
 
-    # 6. 保存
-    output = {
-        "n_total": len(rdf),
-        "n_good": int(len(rdf[rdf['group']=='good'])),
-        "n_bad": int(len(rdf[rdf['group']=='bad'])),
-        "good_car_mean": float(rdf[rdf['group']=='good']['car'].mean()) if len(rdf[rdf['group']=='good'])>0 else None,
-        "bad_car_mean": float(rdf[rdf['group']=='bad']['car'].mean()) if len(rdf[rdf['group']=='bad'])>0 else None,
-    }
+    # 6. 保存 ★ p值 + 子类型
+    output["by_type"] = {}
+    for ftype in sorted(rdf['type'].unique()):
+        sub = rdf[rdf['type'] == ftype]
+        if len(sub) < 20: continue
+        m = sub['car'].mean()
+        t, p = ttest_1samp(sub['car'], 0)
+        output["by_type"][ftype] = {"n": len(sub), "car_mean": float(m), "t": float(t), "p": float(p)}
+
     out_path = os.path.join(BASE_DIR, "data", "pead_results_v2.json")
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2)
-    print(f"\n  已保存: {out_path}")
+    print(f"\n  已保存: {out_path} (含p值+逐类型+95%CI)")
 
     return output
 
