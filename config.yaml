@@ -28,7 +28,7 @@ execution:
   max_positions: 40
   slippage_bps: 30           # ★ 小盘滑点30bp
   turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
-  pead_defense: true         # ★ PEAD负面预告强制卖出
+  pead_defense: false  # 坏消息CAR不显著(v2 p=0.82)         # ★ PEAD负面预告强制卖出
   # -- 分钟级执行 (模拟盘建议开启) --
   minute_mode: true          # true=分钟线VWAP/TWAP成交, false=日线开盘价
   minute_period: "5"         # 5分钟K线
