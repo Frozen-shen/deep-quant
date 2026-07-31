@@ -1,211 +1,211 @@
 {
-  "timestamp": "2026-07-30 14:14:18",
+  "timestamp": "2026-07-31 11:29:17",
   "results": [
     {
       "model": "l0",
       "name": "L0 等权",
-      "mean_return": -10.85,
-      "mean_excess": -17.29,
-      "excess_std": 10.48,
-      "ir": -1.649,
+      "mean_return": 13.41,
+      "mean_excess": 6.98,
+      "excess_std": 26.0,
+      "ir": 0.268,
       "n_windows": 5,
-      "pos_excess": 0,
+      "pos_excess": 1,
       "per_window": [
         {
           "window": 1,
           "test_start": "2021-01-01",
           "test_end": "2021-10-01",
-          "total_return": -13.51454999999997,
-          "excess": -35.34952106155224,
-          "trades": 267
+          "total_return": 74.976,
+          "excess": 53.14102893844773,
+          "trades": 6
         },
         {
           "window": 2,
           "test_start": "2021-10-01",
           "test_end": "2022-07-01",
-          "total_return": -18.045829999999974,
-          "excess": -15.21224825646169,
-          "trades": 277
+          "total_return": -2.876080000000003,
+          "excess": -0.042498256461719564,
+          "trades": 6
         },
         {
           "window": 3,
           "test_start": "2022-07-01",
           "test_end": "2023-04-01",
-          "total_return": 5.3687899999999456,
-          "excess": -10.32503936375069,
-          "trades": 336
+          "total_return": 9.837000000000007,
+          "excess": -5.856829363750629,
+          "trades": 6
         },
         {
           "window": 4,
           "test_start": "2023-04-01",
           "test_end": "2024-01-01",
-          "total_return": -24.66330999999998,
-          "excess": -15.937144398760502,
-          "trades": 276
+          "total_return": -12.358999999999998,
+          "excess": -3.6328343987605187,
+          "trades": 5
         },
         {
           "window": 5,
           "test_start": "2024-01-01",
           "test_end": "2024-06-30",
-          "total_return": -3.419440000000018,
-          "excess": -9.615919203102658,
-          "trades": 196
+          "total_return": -2.5210400000000077,
+          "excess": -8.717519203102649,
+          "trades": 6
         }
       ]
     },
     {
       "model": "l1",
       "name": "L1 单因子",
-      "mean_return": 18.84,
-      "mean_excess": 12.41,
-      "excess_std": 38.11,
-      "ir": 0.326,
+      "mean_return": 12.22,
+      "mean_excess": 5.79,
+      "excess_std": 35.91,
+      "ir": 0.161,
       "n_windows": 5,
-      "pos_excess": 2,
+      "pos_excess": 1,
       "per_window": [
         {
           "window": 1,
           "test_start": "2021-01-01",
           "test_end": "2021-10-01",
-          "total_return": 101.38020999999995,
-          "excess": 79.54523893844768,
-          "trades": 218
+          "total_return": 10.930150000000015,
+          "excess": -10.904821061552251,
+          "trades": 180
         },
         {
           "window": 2,
           "test_start": "2021-10-01",
           "test_end": "2022-07-01",
-          "total_return": -7.472639999999997,
-          "excess": -4.639058256461713,
-          "trades": 209
+          "total_return": -26.30446999999999,
+          "excess": -23.47088825646171,
+          "trades": 210
         },
         {
           "window": 3,
           "test_start": "2022-07-01",
           "test_end": "2023-04-01",
-          "total_return": 1.0634699999999997,
-          "excess": -14.630359363750635,
-          "trades": 178
+          "total_return": 12.431649999999973,
+          "excess": -3.262179363750663,
+          "trades": 182
         },
         {
           "window": 4,
           "test_start": "2023-04-01",
           "test_end": "2024-01-01",
-          "total_return": -5.15140999999999,
-          "excess": 3.57475560123949,
-          "trades": 214
+          "total_return": -10.285480000000025,
+          "excess": -1.5593143987605451,
+          "trades": 198
         },
         {
           "window": 5,
           "test_start": "2024-01-01",
           "test_end": "2024-06-30",
-          "total_return": 4.395609999999994,
-          "excess": -1.8008692031026463,
-          "trades": 133
+          "total_return": 74.34214999999998,
+          "excess": 68.14567079689733,
+          "trades": 92
         }
       ]
     },
     {
       "model": "l2",
       "name": "L2 Ridge线性",
-      "mean_return": 10.34,
-      "mean_excess": 3.91,
-      "excess_std": 13.73,
-      "ir": 0.284,
+      "mean_return": 10.79,
+      "mean_excess": 4.36,
+      "excess_std": 22.74,
+      "ir": 0.192,
       "n_windows": 5,
-      "pos_excess": 4,
+      "pos_excess": 3,
       "per_window": [
         {
           "window": 1,
           "test_start": "2021-01-01",
           "test_end": "2021-10-01",
-          "total_return": 25.352180000000057,
-          "excess": 3.5172089384477907,
-          "trades": 212
+          "total_return": 11.940210000000029,
+          "excess": -9.894761061552238,
+          "trades": 166
         },
         {
           "window": 2,
           "test_start": "2021-10-01",
           "test_end": "2022-07-01",
-          "total_return": 13.896069999999972,
-          "excess": 16.729651743538255,
-          "trades": 235
+          "total_return": 1.591240000000016,
+          "excess": 4.424821743538299,
+          "trades": 201
         },
         {
           "window": 3,
           "test_start": "2022-07-01",
           "test_end": "2023-04-01",
-          "total_return": -3.4772299999999867,
-          "excess": -19.171059363750622,
-          "trades": 218
+          "total_return": 24.05942000000001,
+          "excess": 8.365590636249374,
+          "trades": 167
         },
         {
           "window": 4,
           "test_start": "2023-04-01",
           "test_end": "2024-01-01",
-          "total_return": 0.6910299999999703,
-          "excess": 9.417195601239449,
-          "trades": 276
+          "total_return": 30.69986999999994,
+          "excess": 39.42603560123942,
+          "trades": 224
         },
         {
           "window": 5,
           "test_start": "2024-01-01",
           "test_end": "2024-06-30",
-          "total_return": 15.231440000000006,
-          "excess": 9.034960796897366,
-          "trades": 158
+          "total_return": -14.316280000000003,
+          "excess": -20.512759203102643,
+          "trades": 105
         }
       ]
     },
     {
       "model": "lgb",
       "name": "L3 LightGBM",
-      "mean_return": 24.1,
-      "mean_excess": 17.66,
-      "excess_std": 20.17,
-      "ir": 0.876,
+      "mean_return": -2.26,
+      "mean_excess": -8.69,
+      "excess_std": 15.04,
+      "ir": -0.578,
       "n_windows": 5,
-      "pos_excess": 4,
+      "pos_excess": 1,
       "per_window": [
         {
           "window": 1,
           "test_start": "2021-01-01",
           "test_end": "2021-10-01",
-          "total_return": 52.13352000000007,
-          "excess": 30.2985489384478,
-          "trades": 271
+          "total_return": 3.0440400000000034,
+          "excess": -18.790931061552264,
+          "trades": 250
         },
         {
           "window": 2,
           "test_start": "2021-10-01",
           "test_end": "2022-07-01",
-          "total_return": 2.29436999999999,
-          "excess": 5.127951743538274,
-          "trades": 249
+          "total_return": -19.03100999999997,
+          "excess": -16.197428256461688,
+          "trades": 237
         },
         {
           "window": 3,
           "test_start": "2022-07-01",
           "test_end": "2023-04-01",
-          "total_return": 7.554910000000037,
-          "excess": -8.138919363750599,
-          "trades": 270
+          "total_return": 13.36284000000003,
+          "excess": -2.3309893637506054,
+          "trades": 222
         },
         {
           "window": 4,
           "test_start": "2023-04-01",
           "test_end": "2024-01-01",
-          "total_return": 34.330180000000034,
-          "excess": 43.056345601239514,
-          "trades": 250
+          "total_return": 6.138049999999939,
+          "excess": 14.864215601239419,
+          "trades": 156
         },
         {
           "window": 5,
           "test_start": "2024-01-01",
           "test_end": "2024-06-30",
-          "total_return": 24.17263999999999,
-          "excess": 17.97616079689735,
-          "trades": 152
+          "total_return": -14.792580000000022,
+          "excess": -20.989059203102663,
+          "trades": 104
         }
       ]
     }
