@@ -1,164 +1,161 @@
-# 量化开发纪律手册
+# 量化开发纪律手册 v2
 
-> 本文件是最高优先级约束。任何回测、实验、报告必须遵守以下规则。
+> 本文件是最高优先级约束。
+> **执行方式: 代码强制 (`gate.py`)，不依赖人工自觉。**
 > 违反任何一条的结果自动作废，不需要讨论。
 
 ---
 
-## 第一条：数据分区（不可违反）
+## 第一条：数据分区（代码强制）
 
-```
-全量数据: 2018-01-01 → 2026-07-10
+分区定义在 `config.yaml` 的 `data_partition` 字段中（唯一源）。
 
-训练集 (Train):  2018-01-01 → 2023-12-31  (参数学习、IC计算)
-验证集 (Val):    2024-01-01 → 2025-06-30  (策略选择、超参调优)
-测试集 (Test):   2025-07-01 → 2025-12-31  (最终评估，只跑一次)
-盲测集 (Blind):  2026-01-01 → 2026-07-10  (部署后跟踪，永远不用于决策)
-```
+| 分区 | 日期范围 | 用途 | 限制 |
+|------|----------|------|------|
+| research | 2018-01-01 → 2022-12-31 | 因子开发、IC计算 | 可反复使用 |
+| development | 2023-01-01 → 2024-06-30 | 组合验证、参数调优 | 可反复使用 |
+| test | 2024-07-01 → 2025-06-30 | 最终评估 | **只跑一次** |
+| blind | 2025-07-01 → 2026-07-31 | 模拟盘跟踪 | **永不回测** |
 
-**规则:**
-- 测试集只允许跑一次。跑完后锁定，不得修改参数后重跑。
-- 盲测集在任何情况下不得用于回测、参数选择、策略设计。
-- 每个脚本必须在开头声明使用哪个分区，并assert日期范围。
+**代码强制**: `gate.py` 会阻止使用 "blind" 分区的脚本运行。
 
 ```python
-# 每个回测脚本必须包含:
-PARTITION = "val"  # train / val / test / blind
-DATE_RANGES = {
-    "train": ("2018-01-01", "2023-12-31"),
-    "val":   ("2024-01-01", "2025-06-30"),
-    "test":  ("2025-07-01", "2025-12-31"),
-    "blind": ("2026-01-01", "2026-07-10"),
-}
-start, end = DATE_RANGES[PARTITION]
-assert PARTITION != "blind", "盲测集禁止用于回测"
+# 每个回测脚本开头必须包含:
+from gate import check, load_config
+config = load_config()
+check(partition="research", script_name=__file__, config=config)
 ```
 
 ---
 
-## 第二条：基准（唯一且固定）
+## 第二条：模型参数（代码强制）
 
-**基准 = 全池等权（所有可交易股票的等权组合）**
+| 参数 | 上限 | 理由 |
+|------|------|------|
+| n_estimators | ≤ 100 | 教训#6: 600树过拟合 |
+| max_depth | ≤ 3 | 极端正则化 |
+| min_data_in_leaf | ≥ 200 | 防止叶节点过拟合 |
 
-- 不得使用子集（top-30、文件最大、任何筛选后的切片）作为基准
+**代码强制**: `gate.py` 检查 config.yaml 中的模型参数。超限 → 脚本被阻止。
+
+**生产路径**: IC加权线性 (`model.type: linear`)，不使用ML模型。
+**研究路径**: LightGBM 仅用于验证"ML是否比线性好"，不进入生产。
+
+---
+
+## 第三条：成本模型（代码强制）
+
+总交易成本 (滑点 + 双边手续费) ≥ 15bp。
+
+当前设定: 滑点30bp + 手续费(2.5bp+7.5bp) = 40bp。合规。
+
+**代码强制**: `gate.py` 计算总成本，低于15bp → 脚本被阻止。
+
+---
+
+## 第四条：实验记录（代码强制）
+
+每次回测/实验必须调用 `experiment_tracker.log_experiment()`。
+记录自动写入 `experiments/exp_YYYYMMDD_HHMMSS_XXXX.json`。
+
+记录内容: config hash、完整参数、结果指标、时间戳、备注。
+
+**规则**: 
+- 不记录实验就跑回测 = 纪律违反
+- 实验记录不可删除、不可修改
+
+---
+
+## 第五条：脚本管理
+
+- 只有 `scripts/active/` 中的 8 个脚本可以使用
+- 同类功能只允许一个脚本
+- 需要"修复"时修改现有脚本，**不得新建**
+- 废弃脚本移入 `scripts/archive/`，在文件头加 `# DEPRECATED`
+- `scripts/archive/` 中的脚本运行结果不可信、不可报告
+
+---
+
+## 第六条：基准（唯一且固定）
+
+**主基准 = CSI1000 指数收益率**
+
+- 从 `data/cache/index_csi1000.parquet` 读取
+- 不得使用子集等权作为主基准
+- 全池等权可作为辅助参考（标注为"辅助"），但报告以CSI1000为准
 - 不得更换基准来让数字好看
-- 基准在每个回测脚本中自动计算，不允许手动指定
-
-```python
-# 基准计算（唯一合法方式）:
-benchmark_return_t = mean(all_stock_returns_on_date_t)
-# 其中 all_stocks = 当日所有可交易股票（非ST、非停牌、上市>60天）
-```
 
 ---
 
-## 第三条：Universe（消除幸存者偏差）
+## 第七条：PIT Universe（消除幸存者偏差）
 
-- 不得使用"当前存在的股票"回测过去
-- 必须使用Point-in-Time (PIT) 成分：每个调仓日只用当时存在的股票
-- 如果无法获取完整退市数据，必须在报告中声明："本回测存在潜在幸存者偏差"
+- 每个调仓日只用当时存在的股票
+- 使用 `data/pit_universe.py` 的 `get_universe(date)` 获取合法股票池
 - 禁止按数据长度/文件大小筛选股票
+- 如果无法获取完整退市数据，必须在报告中声明
 
 ---
 
-## 第四条：验证门（结果必须通过才能报告）
+## 第八条：验证门（结果必须通过才能报告）
 
-任何回测结果在报告之前，必须通过以下自动化检验：
+任何回测结果在报告之前，必须通过以下检验：
 
-```python
-def validate_result(result) -> bool:
-    checks = []
-    
-    # 1. 换手率不能为0（策略必须在交易）
-    checks.append(result.avg_turnover > 0.05)  # >5%/rb
-    
-    # 2. 换手率不能过高（不是随机交易）
-    checks.append(result.avg_turnover < 0.95)  # <95%/rb
-    
-    # 3. Sharpe不能异常高（>2.5大概率有问题）
-    checks.append(result.sharpe < 2.5)
-    
-    # 4. IR不能异常高（>1.5大概率有问题）
-    checks.append(result.ir < 1.5)
-    
-    # 5. 必须有年度拆分（不能只看总数）
-    checks.append(len(result.yearly_returns) >= 3)
-    
-    # 6. 年度胜率必须报告
-    win_rate = sum(1 for y in result.yearly_returns.values() if y > 0) / len(result.yearly_returns)
-    checks.append(True)  # 只要求报告，不要求通过
-    
-    # 7. 成本必须>15bp round-trip（不能放水）
-    checks.append(result.cost_rate >= 0.0015)
-    
-    # 8. 持仓数量必须>0
-    checks.append(result.n_positions > 0)
-    
-    return all(checks)
-```
+1. 换手率 > 5%/调仓期（策略必须在交易）
+2. 换手率 < 95%/调仓期（不是随机交易）
+3. Sharpe < 2.5（异常高大概率有问题）
+4. IR < 1.5（异常高大概率有问题）
+5. 必须有年度拆分（不能只看总数）
+6. 成本 ≥ 15bp round-trip
+7. 持仓数量 > 0
 
-**未通过验证门的结果禁止写入任何报告或commit message。**
+**未通过验证门的结果禁止写入任何报告。**
 
 ---
 
-## 第五条：实验记录（可复现）
+## 第九条：唯一合法开发流程
 
-每次回测必须记录：
-
-```json
-{
-    "experiment_id": "exp_20260731_001",
-    "timestamp": "2026-07-31T12:00:00",
-    "partition": "val",
-    "universe": "all_1372",
-    "benchmark": "full_ew",
-    "strategy": "ic_linear_63d_embargo",
-    "parameters": {
-        "top_k": 30,
-        "ic_lookback": 252,
-        "decay_halflife": 126,
-        "embargo_days": 63,
-        "cost_model": "period_dependent"
-    },
-    "results": {
-        "ann_return": 0.155,
-        "ann_excess": -0.072,
-        "sharpe": 0.71,
-        "ir": -0.845,
-        "max_drawdown": -0.299,
-        "avg_turnover": 0.0,
-        "yearly": {"2024": 0.05, "2025": -0.12}
-    },
-    "validation": {
-        "passed": false,
-        "failures": ["turnover_too_low"]
-    },
-    "notes": "换手控制bug导致0%换手，结果无效"
-}
+```
+1. 假设 → 写下: "因子X在Y条件下有Z方向alpha"
+2. 因子开发 (research分区) → IC/ICIR验证
+3. 组合验证 (development分区) → walk-forward回测
+4. 最终测试 (test分区, 只跑一次) → 结果锁定
+5. 模拟盘 (blind分区) → 每日运行, 永不回测
 ```
 
-存储位置: `experiments/YYYY-MM-DD_exp_NNN.json`
+**禁止事项:**
+- ❌ 在blind分区做任何回测
+- ❌ 在test分区迭代参数
+- ❌ 新建回测脚本
+- ❌ 不记录实验就跑回测
+- ❌ 修改config.yaml后不验证gate
+- ❌ 报告未通过验证门的结果
 
 ---
 
 ## 附录：已确认的教训清单
 
-| # | 教训 | 首次犯错 | 重犯次数 |
-|---|------|---------|---------|
-| 1 | 不按文件大小选池 | v2.0 | 1 |
-| 2 | 不用子集当基准 | v2.0 | 1 |
-| 3 | IC必须有embargo | v2.0 | 1 |
-| 4 | 不碾数据分区 | v2.0 | 2 |
-| 5 | 不放水成本 | v2.0 | 1 |
-| 6 | 不用600树ML | v1.0 | 0 |
-| 7 | 换手=0必须报警 | v4 | 首次 |
-| 8 | IR>1.5必须质疑 | v3 | 首次 |
+| # | 教训 | 首次犯错 | 重犯次数 | 代码强制? |
+|---|------|---------|---------|-----------|
+| 1 | 不按文件大小选池 | v2.0 | 1 | ✓ pit_universe |
+| 2 | 不用子集当基准 | v2.0 | 1 | ✓ CSI1000 |
+| 3 | IC必须有embargo | v2.0 | 1 | ✓ config |
+| 4 | 不碾数据分区 | v2.0 | 2 | ✓ gate.py |
+| 5 | 不放水成本 | v2.0 | 1 | ✓ gate.py |
+| 6 | 不用600树ML | v1.0 | 1 | ✓ gate.py |
+| 7 | 换手=0必须报警 | v4 | 1 | 验证门 |
+| 8 | IR>1.5必须质疑 | v3 | 1 | 验证门 |
+| 9 | 盲测偷看后必须作废 | v4 | 1 | ✓ config.contaminated |
+| 10 | 多次实验必须Bonferroni校正 | v4 | 1 | 实验追踪 |
 
 ---
 
-## 执行方式
+## 执行架构
 
-1. 将验证门代码写入 `src/quant/evaluation/gate.py`
-2. 所有回测脚本 import 并在输出前调用
-3. CI/CD中: 如果commit message包含回测数字但没有对应experiment JSON → 拒绝
-4. 每月审查: 对比paper trading实际收益 vs 回测预期，偏差>2% → 策略审查
+```
+gate.py              ← 硬门禁 (脚本入口检查)
+experiment_tracker.py ← 实验自动记录
+config_validator.py  ← 配置一致性校验 (集成在gate.py中)
+logger.py            ← 结构化日志
+config.yaml          ← 唯一配置源
+scripts/active/      ← 唯一合法脚本
+```
