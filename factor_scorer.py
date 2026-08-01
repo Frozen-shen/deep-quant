@@ -220,6 +220,24 @@ def _build_full_auto_preset():
 FACTOR_PRESETS["full_auto"] = _build_full_auto_preset()
 
 
+# ── 动态构建 alpha158_full 预设: Qlib Alpha158 价量因子全集, 权重=1.0 (由LightGBM/IC学习) ──
+def _build_alpha158_full_preset():
+    from factor_library import (NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS,
+        NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS, ALPHA158_FACTORS)
+    merged = {}
+    for d in [NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS, NEW_TURNOVER_FACTORS,
+              NEW_BOLL_FACTORS, ALPHA158_FACTORS]:
+        merged.update(d)
+    return {
+        "name": "Alpha158价量因子全集(LightGBM/IC自动学习权重)",
+        "factors": {name: 1.0 for name in merged},
+        "buy_threshold": 0.15,
+        "sell_threshold": -0.10,
+    }
+
+FACTOR_PRESETS["alpha158_full"] = _build_alpha158_full_preset()
+
+
 # ================================================================
 #  因子打分引擎
 # ================================================================
@@ -264,10 +282,12 @@ class FactorScorer:
         from factor_library import (PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS,
             CANDLESTICK_FACTORS, NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS,
             NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS, EXPANDED_FACTORS,
-            PHASE2_FACTORS, P2_ENHANCED_FACTORS)
+            PHASE2_FACTORS, P2_ENHANCED_FACTORS, MICROSTRUCTURE_FACTORS,
+            ALPHA158_FACTORS)
         for d in [PRICE_FACTORS, MA_FACTORS, VOLUME_FACTORS, CANDLESTICK_FACTORS,
                   NEW_KLINE_FACTORS, NEW_ROLLING_FACTORS, NEW_TURNOVER_FACTORS, NEW_BOLL_FACTORS,
-                  EXPANDED_FACTORS, PHASE2_FACTORS, P2_ENHANCED_FACTORS]:
+                  EXPANDED_FACTORS, PHASE2_FACTORS, P2_ENHANCED_FACTORS,
+                  MICROSTRUCTURE_FACTORS, ALPHA158_FACTORS]:
             all_config.update(d)
         return all_config.get(name, f"${name}")
 

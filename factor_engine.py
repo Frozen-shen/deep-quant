@@ -260,37 +260,140 @@ class CorrFactor(Factor):
         return f"Corr({self.child_a},{self.child_b},{self.window})"
 
 
-class RSqrFactor(Factor):
-    """R² 趋势拟合度: 滚动线性回归的拟合优度"""
+class SlopeFactor(Factor):
+    """滚动线性回归斜率: Slope(field, N)
+
+    对窗口内的 y=field 关于时间索引 x=[0,1,...,N-1] 做 OLS 回归, 返回斜率。
+    斜率对 x 的平移不变, 故可用全局时间索引 t 配合 rolling.cov / rolling.var 向量化:
+        slope = Cov(t, y) / Var(t)
+    """
     def __init__(self, child: Factor, window: int):
         self.child = child
         self.window = window
 
     def evaluate(self, df: pd.DataFrame) -> pd.Series:
         s = self.child.evaluate(df)
-        n = self.window
-        result = pd.Series(np.nan, index=s.index)
-        for i in range(n - 1, len(s)):
-            y = s.iloc[i - n + 1:i + 1].values
-            x = np.arange(n, dtype=float)
-            if np.std(y) == 0:
-                result.iloc[i] = 0.0
-                continue
-            mx, my = x.mean(), y.mean()
-            ss_xy = np.sum((x - mx) * (y - my))
-            ss_xx = np.sum((x - mx) ** 2)
-            ss_yy = np.sum((y - my) ** 2)
-            if ss_xx > 0 and ss_yy > 0:
-                slope = ss_xy / ss_xx
-                y_pred = my + slope * (x - mx)
-                ss_res = np.sum((y - y_pred) ** 2)
-                result.iloc[i] = max(0.0, 1.0 - ss_res / ss_yy)
-            else:
-                result.iloc[i] = 0.0
-        return result
+        t = pd.Series(np.arange(len(s), dtype=float), index=s.index)
+        min_p = max(2, self.window // 2)
+        cov = t.rolling(self.window, min_periods=min_p).cov(s)
+        var = t.rolling(self.window, min_periods=min_p).var()
+        return cov / var.replace(0, np.nan)
+
+    def __repr__(self):
+        return f"Slope({self.child},{self.window})"
+
+
+class RSqrFactor(Factor):
+    """R² 趋势拟合度: 滚动线性回归的拟合优度 (向量化)
+
+    一元线性回归中 R² = corr(x, y)²。用全局时间索引 t 配合 rolling.corr 向量化:
+        R² = Corr(t, y)²
+    """
+    def __init__(self, child: Factor, window: int):
+        self.child = child
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        s = self.child.evaluate(df)
+        t = pd.Series(np.arange(len(s), dtype=float), index=s.index)
+        corr = t.rolling(self.window, min_periods=max(2, self.window // 2)).corr(s)
+        return corr ** 2
 
     def __repr__(self):
         return f"RSqr({self.child},{self.window})"
+
+
+class ResiFactor(Factor):
+    """滚动线性回归残差: Resi(field, N)
+
+    返回窗口最后一个点处的回归残差:
+        resi_i = y_i - [y_mean + slope * (t_i - t_mean)]
+    其中 slope = Cov(t, y) / Var(t)。全程向量化。
+    """
+    def __init__(self, child: Factor, window: int):
+        self.child = child
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        s = self.child.evaluate(df)
+        t = pd.Series(np.arange(len(s), dtype=float), index=s.index)
+        min_p = max(2, self.window // 2)
+        cov = t.rolling(self.window, min_periods=min_p).cov(s)
+        var = t.rolling(self.window, min_periods=min_p).var()
+        slope = cov / var.replace(0, np.nan)
+        t_mean = t.rolling(self.window, min_periods=min_p).mean()
+        y_mean = s.rolling(self.window, min_periods=min_p).mean()
+        y_pred = y_mean + slope * (t - t_mean)
+        return s - y_pred
+
+    def __repr__(self):
+        return f"Resi({self.child},{self.window})"
+
+
+class IdxMaxFactor(Factor):
+    """滚动窗口最大值的位置: IdxMax(field, N)
+
+    返回窗口内最大值距当前点的回看天数 (0=今天), 与 Qlib 语义一致。
+    基于 argmax 实现, O(N) 向量化 (避免 rolling.apply)。
+    """
+    def __init__(self, child: Factor, window: int):
+        self.child = child
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        s = self.child.evaluate(df)
+        n = len(s)
+        idx = np.full(n, np.nan)
+        a = s.to_numpy(dtype=float)
+        w = self.window
+        if n >= w:
+            shape = (n - w + 1, w)
+            strides = (a.strides[0], a.strides[0])
+            win = np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+            valid = ~np.isnan(win)
+            has_nan = (~valid).any(axis=1)
+            am = np.where(valid, win, -np.inf).argmax(axis=1)
+            dist = (w - 1) - am
+            dist = dist.astype(float)
+            dist[has_nan] = np.nan
+            idx[w - 1:] = dist
+        return pd.Series(idx, index=s.index)
+
+    def __repr__(self):
+        return f"IdxMax({self.child},{self.window})"
+
+
+class IdxMinFactor(Factor):
+    """滚动窗口最小值的位置: IdxMin(field, N)
+
+    返回窗口内最小值距当前点的回看天数 (0=今天), 与 Qlib 语义一致。
+    基于 argmin 实现, O(N) 向量化 (避免 rolling.apply)。
+    """
+    def __init__(self, child: Factor, window: int):
+        self.child = child
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        s = self.child.evaluate(df)
+        n = len(s)
+        idx = np.full(n, np.nan)
+        a = s.to_numpy(dtype=float)
+        w = self.window
+        if n >= w:
+            shape = (n - w + 1, w)
+            strides = (a.strides[0], a.strides[0])
+            win = np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+            valid = ~np.isnan(win)
+            has_nan = (~valid).any(axis=1)
+            am = np.where(valid, win, np.inf).argmin(axis=1)
+            dist = (w - 1) - am
+            dist = dist.astype(float)
+            dist[has_nan] = np.nan
+            idx[w - 1:] = dist
+        return pd.Series(idx, index=s.index)
+
+    def __repr__(self):
+        return f"IdxMin({self.child},{self.window})"
 
 
 # ============================================================================
@@ -456,12 +559,40 @@ def _make_func(name: str, args: List[Factor]) -> Factor:
         window = int(float(args[2].__repr__())) if isinstance(args[2], ConstFactor) else 10
         return CorrFactor(args[0], args[1], window)
 
+    # Slope: Slope(field, window) — 滚动线性回归斜率
+    if name == "Slope":
+        if len(args) != 2:
+            raise SyntaxError("Slope 需要2个参数: (field, window)")
+        window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
+        return SlopeFactor(args[0], window)
+
     # RSqr: RSqr(field, window) — 趋势拟合度
     if name == "RSqr":
         if len(args) != 2:
             raise SyntaxError("RSqr 需要2个参数: (field, window)")
         window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
         return RSqrFactor(args[0], window)
+
+    # Resi: Resi(field, window) — 滚动线性回归残差
+    if name == "Resi":
+        if len(args) != 2:
+            raise SyntaxError("Resi 需要2个参数: (field, window)")
+        window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
+        return ResiFactor(args[0], window)
+
+    # IdxMax: IdxMax(field, window) — 窗口最大值回看天数
+    if name == "IdxMax":
+        if len(args) != 2:
+            raise SyntaxError("IdxMax 需要2个参数: (field, window)")
+        window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
+        return IdxMaxFactor(args[0], window)
+
+    # IdxMin: IdxMin(field, window) — 窗口最小值回看天数
+    if name == "IdxMin":
+        if len(args) != 2:
+            raise SyntaxError("IdxMin 需要2个参数: (field, window)")
+        window = int(float(args[1].__repr__())) if isinstance(args[1], ConstFactor) else 20
+        return IdxMinFactor(args[0], window)
 
     # Abs / Log / Sign
     if name == "Abs" and len(args) == 1:

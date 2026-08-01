@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "description": "分析师修正 + 事件信号因子 IC 验证 (P4)",
+    "limitation": "分析师数据历史极短(快照需逐日积累)、覆盖窄(研报数>=3), lockup/lhb为稀有事件。有效天数少→统计功效弱, 结果仅供参考。",
+    "recommended_use": "作为实时叠加层 (overlay), 权重设低 (5-10%)",
+    "sample_interval": 5,
+    "horizons": [
+      5,
+      10,
+      20
+    ],
+    "n_analyst_snapshots": 1,
+    "n_stocks_covered_ge3": 1645,
+    "coverage_pct": 0.6976,
+    "n_lockup_events": 697,
+    "n_lhb_events": 6186,
+    "n_preview_events": 69202,
+    "n_sample_days": 413,
+    "generated_at": "2026-08-01 14:16:19"
+  },
+  "ic_by_factor": {
+    "revision_30d": {
+      "h5": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h10": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h20": {
+        "status": "insufficient_data",
+        "n_days": 0
+      }
+    },
+    "upgrade_ratio": {
+      "h5": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h10": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h20": {
+        "status": "insufficient_data",
+        "n_days": 0
+      }
+    },
+    "target_deviation": {
+      "h5": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h10": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h20": {
+        "status": "insufficient_data",
+        "n_days": 0
+      }
+    },
+    "coverage_change": {
+      "h5": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h10": {
+        "status": "insufficient_data",
+        "n_days": 0
+      },
+      "h20": {
+        "status": "insufficient_data",
+        "n_days": 0
+      }
+    },
+    "lockup_pressure": {
+      "h5": {
+        "ic_mean": -0.005432,
+        "ic_std": 0.023377,
+        "icir": -0.2324,
+        "pos_ratio": 0.2,
+        "n_days": 5
+      },
+      "h10": {
+        "ic_mean": -0.009454,
+        "ic_std": 0.019261,
+        "icir": -0.4908,
+        "pos_ratio": 0.4,
+        "n_days": 5
+      },
+      "h20": {
+        "ic_mean": -0.004604,
+        "ic_std": 0.014084,
+        "icir": -0.3269,
+        "pos_ratio": 0.2,
+        "n_days": 5
+      }
+    },
+    "lhb_institutional": {
+      "h5": {
+        "ic_mean": 0.018143,
+        "ic_std": 0.037617,
+        "icir": 0.4823,
+        "pos_ratio": 0.625,
+        "n_days": 8
+      },
+      "h10": {
+        "ic_mean": 0.012105,
+        "ic_std": 0.045666,
+        "icir": 0.2651,
+        "pos_ratio": 0.75,
+        "n_days": 8
+      },
+      "h20": {
+        "ic_mean": -0.003518,
+        "ic_std": 0.04254,
+        "icir": -0.0827,
+        "pos_ratio": 0.5,
+        "n_days": 8
+      }
+    },
+    "preview_surprise": {
+      "h5": {
+        "ic_mean": 0.020407,
+        "ic_std": 0.179622,
+        "icir": 0.1136,
+        "pos_ratio": 0.5128,
+        "n_days": 195
+      },
+      "h10": {
+        "ic_mean": 0.032827,
+        "ic_std": 0.180951,
+        "icir": 0.1814,
+        "pos_ratio": 0.5487,
+        "n_days": 195
+      },
+      "h20": {
+        "ic_mean": 0.032159,
+        "ic_std": 0.179374,
+        "icir": 0.1793,
+        "pos_ratio": 0.5231,
+        "n_days": 195
+      }
+    }
+  },
+  "independence": {
+    "lockup_pressure_vs_return_30d": {
+      "spearman_corr": -0.0213,
+      "p_value": 0.262518,
+      "n_samples": 2766
+    },
+    "lhb_institutional_vs_return_30d": {
+      "spearman_corr": 0.024,
+      "p_value": 0.206497,
+      "n_samples": 2766
+    }
+  }
+}

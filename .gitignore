@@ -54,7 +54,14 @@ data_store/
 data/event_cache/
 data/fundamental_cache/
 data/pead_cache/
+data/factor_cache/
 data/cache/
+
+# Logs directory
+logs/
+
+# Experiment tracking (auto-generated)
+experiments/
 
 # Experiment artifacts
 blind_results/

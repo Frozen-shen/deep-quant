@@ -288,6 +288,71 @@ MICROSTRUCTURE_FACTORS = {
 }
 
 
+# ================================================================
+#  Alpha158 补全因子 (Qlib 价量因子, 仅用 OHLCV)
+#  BETA/RSQR/RESI/IMAX/IMIN/IMXD/WVMA/CORD/SUMP/SUMN/SUMD/VMA/VSTD
+#  每个家族覆盖窗口 d ∈ {5, 10, 20, 30, 60}
+# ================================================================
+
+_ALPHA158_WINDOWS = [5, 10, 20, 30, 60]
+
+ALPHA158_FACTORS = {}
+
+# BETA — 滚动线性回归斜率 (趋势方向与速率, 除以价格做尺度归一)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"beta_{_d}"] = f"Slope($close, {_d}) / $close"
+
+# RSQR — 趋势拟合优度 R² (越接近1趋势越线性)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"rsqr_{_d}"] = f"RSqr($close, {_d})"
+
+# RESI — 回归残差 (价格偏离趋势的程度, 除以价格归一)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"resi_{_d}"] = f"Resi($close, {_d}) / $close"
+
+# IMAX — 距N日最高点的回看天数 (归一到 [0,1])
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"imax_{_d}"] = f"IdxMax($high, {_d}) / {_d}"
+
+# IMIN — 距N日最低点的回看天数 (归一到 [0,1])
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"imin_{_d}"] = f"IdxMin($low, {_d}) / {_d}"
+
+# IMXD — 最高点与最低点位置之差 (衡量高低点先后顺序)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"imxd_{_d}"] = f"(IdxMax($high, {_d}) - IdxMin($low, {_d})) / {_d}"
+
+# WVMA — 成交量加权波动率 (放量波动 vs 平均放量波动)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"wvma_{_d}"] = (
+        f"Std(Abs($close/Ref($close,1)-1)*$volume, {_d}) / "
+        f"(Mean(Abs($close/Ref($close,1)-1)*$volume, {_d})+0.01)"
+    )
+
+# CORD — 收益率与成交量变化的相关性 (量价联动)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"cord_{_d}"] = (
+        f"Corr($close/Ref($close,1), Log($volume/Ref($volume,1)+1), {_d})"
+    )
+
+# SUMP / SUMN / SUMD — RSI 类 (上涨/下跌动量占比及其差)
+for _d in _ALPHA158_WINDOWS:
+    _denom = f"(Sum(Abs($close-Ref($close,1)), {_d})+0.01)"
+    _up = f"Sum(($close-Ref($close,1))*($close>Ref($close,1)), {_d})"
+    _dn = f"Sum((Ref($close,1)-$close)*($close<Ref($close,1)), {_d})"
+    ALPHA158_FACTORS[f"sump_{_d}"] = f"{_up} / {_denom}"
+    ALPHA158_FACTORS[f"sumn_{_d}"] = f"{_dn} / {_denom}"
+    ALPHA158_FACTORS[f"sumd_{_d}"] = f"({_up} - {_dn}) / {_denom}"
+
+# VMA — 成交量均值比 (当前量相对N日均量)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"vma_{_d}"] = f"Mean($volume, {_d}) / ($volume+1)"
+
+# VSTD — 成交量波动比 (N日量的波动相对当前量)
+for _d in _ALPHA158_WINDOWS:
+    ALPHA158_FACTORS[f"vstd_{_d}"] = f"Std($volume, {_d}) / ($volume+1)"
+
+
 def get_price_factors() -> FactorLibrary:
     return FactorLibrary.from_config(PRICE_FACTORS)
 
@@ -300,8 +365,12 @@ def get_volume_factors() -> FactorLibrary:
 def get_candlestick_factors() -> FactorLibrary:
     return FactorLibrary.from_config(CANDLESTICK_FACTORS)
 
+def get_alpha158_factors() -> FactorLibrary:
+    """Alpha158 补全因子 (BETA/RSQR/RESI/IMAX/IMIN/IMXD/WVMA/CORD/SUMP/SUMN/SUMD/VMA/VSTD)。"""
+    return FactorLibrary.from_config(ALPHA158_FACTORS)
+
 def get_all_factors() -> FactorLibrary:
-    """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构)。"""
+    """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构 + Alpha158补全)。"""
     all_config = {}
     all_config.update(PRICE_FACTORS)
     all_config.update(MA_FACTORS)
@@ -311,4 +380,5 @@ def get_all_factors() -> FactorLibrary:
     all_config.update(PHASE2_FACTORS)
     all_config.update(P2_ENHANCED_FACTORS)
     all_config.update(MICROSTRUCTURE_FACTORS)
+    all_config.update(ALPHA158_FACTORS)
     return FactorLibrary.from_config(all_config)
