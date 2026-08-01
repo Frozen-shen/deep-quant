@@ -1,78 +1,85 @@
-blind_test:
-  config_hash: 9899faed0bf0
-  last_run: '2026-07-30'
-  locked: true
-  trial_count: 3             # Trial#1(合法-19.1%) + Trial#2(v4作废) + Trial#3(本次污染)
+# ═══════════════════════════════════════════════════════════
+# quant-starter 统一配置 (v2.0 — 2026-08-01 重构)
+# 唯一配置源。所有代码从此文件读取。
+# 修改此文件后必须更新 blind_test.config_hash。
+# ═══════════════════════════════════════════════════════════
+
+# ── 数据分区 (唯一合法定义, 与 DEVELOPMENT_DISCIPLINE.md v2 同步) ──
 data_partition:
-  blind_test:
-    end: '2026-07-10'
-    start: '2024-07-01'
-  development:
-    end: '2024-06-30'
-    start: '2021-01-01'
-  full_end: '2026-07-10'
-  full_start: '2018-01-01'
-  research:
-    end: '2022-12-31'
-    start: '2018-01-01'
+  research:    {start: "2018-01-01", end: "2022-12-31"}  # 因子开发、IC计算
+  development: {start: "2023-01-01", end: "2024-06-30"}  # 组合验证、参数调优
+  test:        {start: "2024-07-01", end: "2025-06-30"}  # 最终测试 (只跑一次)
+  blind:       {start: "2025-07-01", end: "2026-07-31"}  # 模拟盘跟踪 (永不回测)
+  full_start: "2018-01-01"
+  full_end: "2026-07-31"
+
+# ── 盲测状态 ──
+blind_test:
+  locked: true
+  contaminated: true  # 旧blind期(2024-07~2026-07)已被污染(trial_count=3)
+  note: "新blind期从2025-07-01开始, 旧结果全部作废"
+
+# ── 执行参数 ──
 execution:
-  execution_price: open
   initial_capital: 100000
   lot_size: 100
-  market_filter: false
-  market_ma: 60
-  max_positions: 5
-  max_single_pct: 0.25
-  signal_delay: 1
-  top_k: 30                 # ★ 宽度改造: 30只持仓
-  max_positions: 40
-  slippage_bps: 30           # ★ 小盘滑点30bp
-  turnover_limit_pct: 0.5    # ★ 月单边换手≤50%
-  pead_defense: false  # 坏消息CAR不显著(v2 p=0.82)         # ★ PEAD负面预告强制卖出
-  # -- 分钟级执行 (模拟盘建议开启) --
-  minute_mode: true          # true=分钟线VWAP/TWAP成交, false=日线开盘价
-  minute_period: "5"         # 5分钟K线
-  execution_algo: vwap       # vwap / twap / open / close
-  twap_slices: 8             # TWAP拆单段数
-factors:
-  freeze_date: '2023-01-01'
-  preset: ic_auto
-  use_fundamental: false    # 校准阶段关闭, 纯价量基线
-  pead_weight: 0.0          # PEAD 事件因子权重 (0=关闭)
-  buyback_weight: 0.15      # ★ 回购事件增强权重
-  buyback_decay_days: 20    # 回购事件有效窗口
-label:
-  horizon_days: 20          # CSI1000低频信号
-  type: rank
+  top_k: 30                    # 持仓数量
+  max_positions: 40            # 最大持仓上限
+  max_single_pct: 0.25         # 单票仓位上限
+  slippage_bps: 30             # 滑点 (小盘股30bp)
+  commission_buy: 0.00025      # 买入手续费
+  commission_sell: 0.00075     # 卖出手续费 (含印花税)
+  signal_delay: 1              # T+1信号延迟
+  execution_price: open        # 成交价: 次日开盘
+  turnover_limit_pct: 0.5      # 月单边换手≤50%
+
+# ── 模型参数 (教训#6: 极端正则化) ──
 model:
-  type: ensemble              # ★ 集成模型 (3×LGB不同seed)
-  ensemble_members: ['lgb', 'lgb', 'lgb']
-  blend_method: equal
-  # type: lgb                 # 原始单模型(备选)
-  lambda_l1: 0.3
-  learning_rate: 0.03
-  max_depth: 5
-  min_data_in_leaf: 40
-  n_estimators: 600
-  ridge_alpha: 1.0          # 仅 l2 模式使用
-  val_ratio: 0.15
-portfolio:
-  buy_confirm_days: 1
-  cost_threshold: 0.08
-  hold_thresh: 30           # ★ 宽度改造: 月度调仓
-  n_drop: 2
-  sector_neutral: true       # ★ 行业中性化
-  sell_rank_buffer: 2
+  type: linear                 # 生产路径: IC加权线性 (不用ML)
+  # 以下为研究用ML参数 (model/pipeline.py 使用, 非生产路径)
+  research_lgb:
+    n_estimators: 50
+    max_depth: 2
+    min_data_in_leaf: 200
+    lambda_l1: 1.0
+    lambda_l2: 1.0
+    learning_rate: 0.05
+    early_stopping_rounds: 10
+
+# ── 因子配置 ──
+factors:
+  preset: ic_auto
+  use_fundamental: false       # 基本面数据就绪后改为 true
+  corr_threshold: 0.6          # 独立性剪枝阈值 (从0.4放宽到0.6)
+
+# ── 标签 ──
+label:
+  horizon_days: 20
+  type: rank
+
+# ── 滚动验证 ──
 rolling:
-  day_step: 2
-  embargo_days: 30          # T+20标签, 30天embargo
-  test_months: 9
   train_months: 4
+  test_months: 9
+  embargo_days: 30
+  day_step: 2
+
+# ── 组合管理 ──
+portfolio:
+  hold_thresh: 30              # 月度调仓
+  sector_neutral: true
+  buy_confirm_days: 1
+  sell_rank_buffer: 2
+  n_drop: 2
+
+# ── 时间衰减 ──
 time_decay:
   half_life_years: 0.5
+
+# ── Universe ──
 universe:
-  data_version: v20260729
+  index: "all_cached"
   include_delisted: true
-  index: 'all_cached'         # ★ 全部缓存股票(≈950只) 宽度改造
   min_list_days: 250
   snapshot_mode: monthly
+  data_version: v20260801
