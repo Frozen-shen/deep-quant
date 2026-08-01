@@ -29,8 +29,10 @@ sys.path.insert(0, os.path.join(BASE_DIR, "scripts", "active"))
 from gate import load_config, GateViolation
 from logger import get_logger
 from experiment_tracker import log_experiment
+from alerter import AlertManager, check_and_alert
 
 log = get_logger("daily_pipeline")
+_alert_manager = AlertManager()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -89,19 +91,18 @@ def step_trading_day_check(date_str: str) -> str:
 
 
 def step_data_fetch(date_str: str, resume: bool = True) -> str:
-    """增量数据更新 — 调用 fetch_daily_data 的核心逻辑。"""
+    """增量数据更新 — 调用 update_daily_data 的增量逻辑 (腾讯数据源)。"""
     import pandas as pd
 
-    # 动态导入 (避免顶层 import 失败)
-    from fetch_daily_data import run as fetch_run
+    from update_daily_data import run as update_run
 
     end_date = pd.Timestamp(date_str).strftime("%Y%m%d")
-    meta = fetch_run(
+    meta = update_run(
         start_date="20180101",
         end_date=end_date,
         force=False,
         resume=resume,
-        check_only=False,
+        check_only_mode=False,
         limit=None,
     )
 
@@ -182,6 +183,32 @@ def step_ic_monitor() -> str:
         return f"IC 监控异常: {e}"
 
 
+def step_circuit_breaker() -> str:
+    """检查回撤熔断状态。"""
+    try:
+        from execution.circuit_breaker import CircuitBreaker
+        cb = CircuitBreaker()
+        state = cb.check()
+        report = cb.get_status_report()
+        dd = report.get("drawdown_pct", 0)
+        if state in ("halted", "halted_manual"):
+            log.warning("熔断状态: %s (回撤 %.2f%%)", state, dd)
+            _alert_manager.send("circuit_breaker", {
+                "state": state,
+                "drawdown": dd,
+                "equity": report.get("current_equity", 0),
+            }, level="ERROR")
+            return f"熔断: {state} (回撤 {dd:.2f}%)"
+        elif state == "warning":
+            log.warning("回撤警告: %.2f%%", dd)
+            return f"警告: 回撤 {dd:.2f}%"
+        return f"正常 (回撤 {dd:.2f}%)"
+    except ImportError:
+        return "circuit_breaker 不可用, 跳过"
+    except Exception as e:
+        return f"熔断检查异常: {e}"
+
+
 # ═══════════════════════════════════════════════════════════
 #  主管道
 # ═══════════════════════════════════════════════════════════
@@ -234,6 +261,16 @@ def run_pipeline(
             elapsed = time.time() - t0
             log.error("  ❌ %s (%.1fs): %s", name, elapsed, e)
             run.add(name, False, str(e), elapsed)
+            # 关键步骤失败时推送告警
+            if name in ("数据更新", "信号生成"):
+                try:
+                    _alert_manager.send("data_fetch_failed" if name == "数据更新"
+                                       else "signal_empty",
+                                       {"step": name, "error": str(e),
+                                        "date": today},
+                                       level="ERROR")
+                except Exception:
+                    pass
             raise
 
     try:
@@ -266,6 +303,12 @@ def run_pipeline(
             except Exception:
                 pass  # 非关键步骤
 
+            # Step 6: 回撤熔断检查 (非关键, 失败不中断)
+            try:
+                _run_step("熔断检查", step_circuit_breaker)
+            except Exception:
+                pass  # 非关键步骤
+
         log.info("管道完成: %s", "✅" if run.success else "❌")
 
     except Exception as e:
@@ -288,6 +331,12 @@ def run_pipeline(
             )
         except Exception as e:
             log.warning("实验记录失败: %s", e)
+
+        # 最终告警扫描 (检查数据/信号/净值/熔断/IC 各项异常)
+        try:
+            check_and_alert()
+        except Exception as e:
+            log.warning("告警扫描失败: %s", e)
 
     return run
 

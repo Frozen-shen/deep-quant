@@ -32,6 +32,10 @@ sys.path.insert(0, BASE_DIR)
 from data.calendar import (
     get_trading_days, is_trading_day, next_trading_day, prev_trading_day
 )
+from data.calendar import _ensure_calendar, _trading_days_list
+
+
+def count_trading_days(start, end) -> int:
     """计算两个日期之间的交易日数量。"""
     _ensure_calendar()
     start_dt = pd.Timestamp(start)
