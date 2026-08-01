@@ -1,10 +1,16 @@
 """
-run_p5_portfolio_validation.py — P5 全因子组合验证 (v2)
+run_p5_portfolio_validation.py — P5 全因子组合验证 (v3 — 四项优化)
 
-基于 p3_full_ic.json 的 IC 结果, 做:
-  1. 因子筛选 (|ICIR| > 0.3)
+优化内容:
+  A. 降换手: 使用 regime-adaptive hold_thresh/n_drop/cost_threshold (月换手<30%)
+  B. 状态自适应: 牛市加动量(正IC)权重, 熊市加防御(负IC)权重
+  C. 放宽阈值: |ICIR| > 0.2 (原0.3), 纳入动量因子
+  D. 基本面因子: 预留接口 (需网络, 当前graceful fallback)
+
+流程:
+  1. 因子筛选 (|ICIR| > 0.2)
   2. 独立性剪枝 (|corr| > 0.6)
-  3. IC加权线性组合
+  3. Regime-adaptive IC加权线性组合
   4. Walk-Forward 回测 (development 分区: 2023-01 ~ 2024-06)
   5. Bootstrap 统计检验
   6. Go/No-Go 判定
@@ -14,6 +20,7 @@ run_p5_portfolio_validation.py — P5 全因子组合验证 (v2)
 用法:
   py scripts/run_p5_portfolio_validation.py
   py scripts/run_p5_portfolio_validation.py --skip-bt   # 仅因子选择+独立性
+  py scripts/run_p5_portfolio_validation.py --no-regime  # 禁用regime自适应 (对比用)
 
 输出:
   data/ic_validation/p5_portfolio_report.json
@@ -72,8 +79,8 @@ BT_CONFIG = {
     "commission_sell": config["execution"]["commission_sell"],
 }
 
-# 因子筛选阈值
-MIN_ABS_ICIR = 0.3
+# ═══ 优化 C: 放宽因子阈值 ═══
+MIN_ABS_ICIR = 0.2  # 原 0.3, 放宽以纳入动量因子 (return_30d ICIR=+0.56 等)
 
 # Go/No-Go 标准
 GO_CRITERIA = {
@@ -89,7 +96,7 @@ GO_CRITERIA = {
 # ═══════════════════════════════════════════════════════════
 
 def load_and_select_factors() -> List[dict]:
-    """加载 IC 结果并筛选。"""
+    """加载 IC 结果并筛选 (优化 C: 阈值 0.2)。"""
     if not os.path.exists(IC_INPUT):
         log.error("IC 结果文件不存在: %s", IC_INPUT)
         sys.exit(1)
@@ -116,7 +123,12 @@ def load_and_select_factors() -> List[dict]:
             })
 
     selected.sort(key=lambda x: -x["abs_icir"])
-    log.info("筛选通过 (|ICIR| > %.1f): %d 个因子", MIN_ABS_ICIR, len(selected))
+
+    # 统计正/负IC因子
+    n_pos = sum(1 for f in selected if f["icir"] > 0)
+    n_neg = sum(1 for f in selected if f["icir"] < 0)
+    log.info("筛选通过 (|ICIR| > %.1f): %d 个因子 (正IC: %d, 负IC: %d)",
+             MIN_ABS_ICIR, len(selected), n_pos, n_neg)
 
     for f in selected[:10]:
         log.info("  %s: ICIR=%+.4f", f["name"], f["icir"])
@@ -219,8 +231,10 @@ def prune_correlated_factors(selected: List[dict], all_data: dict,
             kept.append(f)
             kept_indices.append(idx)
 
-    log.info("  剪枝前: %d, 剪枝后: %d, 剔除: %d",
-             len(selected), len(kept), len(pruned_info))
+    n_pos_kept = sum(1 for f in kept if f["icir"] > 0)
+    n_neg_kept = sum(1 for f in kept if f["icir"] < 0)
+    log.info("  剪枝前: %d, 剪枝后: %d (正IC: %d, 负IC: %d), 剔除: %d",
+             len(selected), len(kept), n_pos_kept, n_neg_kept, len(pruned_info))
     for name, info in list(pruned_info.items())[:5]:
         log.info("    ✂ %s (与 %s 相关 %.3f)", name, info["pruned_by"], info["correlation"])
 
@@ -236,7 +250,7 @@ def prune_correlated_factors(selected: List[dict], all_data: dict,
 
 
 # ═══════════════════════════════════════════════════════════
-#  Part 3: Walk-Forward 回测
+#  Part 3: Walk-Forward 回测 (含 Regime 自适应)
 # ═══════════════════════════════════════════════════════════
 
 def compute_composite_scores(factors: List[dict], all_data: dict,
@@ -295,18 +309,28 @@ def load_benchmark() -> pd.DataFrame:
 
 
 def run_walkforward_backtest(factors: List[dict], all_data: dict,
-                             factor_cache) -> dict:
-    """Walk-Forward 回测 (development 分区)。"""
+                             factor_cache, use_regime: bool = True) -> dict:
+    """
+    Walk-Forward 回测 (development 分区)。
+
+    优化 A: regime-adaptive 换手控制
+    优化 B: regime-adaptive 因子权重
+    """
     log.info("=" * 60)
-    log.info("  Walk-Forward 回测")
+    log.info("  Walk-Forward 回测 (v3 — Regime自适应)")
     log.info("  期间: %s ~ %s", BT_CONFIG["start"], BT_CONFIG["end"])
     log.info("  调仓: 每%d日, Top-%d", BT_CONFIG["rebalance_days"], BT_CONFIG["top_k"])
-    log.info("  因子: %d 个", len(factors))
+    log.info("  因子: %d 个, Regime自适应: %s", len(factors), use_regime)
     log.info("=" * 60)
 
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
     from portfolio_ranker import PortfolioRanker
+    from regime_detector import RegimeDetector, Regime
+
+    # ═══ 优化 B: 初始化 Regime 检测器 ═══
+    bench_path = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
+    regime_detector = RegimeDetector.from_benchmark_parquet(bench_path)
 
     bt = SimpleBacktest(
         initial_capital=BT_CONFIG["initial_capital"],
@@ -316,13 +340,17 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
         turnover_limit_pct=1.0,
     )
     rules = TradingRules()
+
+    # ═══ 优化 A: 初始 ranker — 回测中适度控制换手 ═══
+    # 注意: 回测中 n_drop 不能太小, 否则从0建仓到top_k需要太多周期
+    # 生产环境可以用更严格的参数 (因为已有持仓)
     ranker = PortfolioRanker(
         top_k=BT_CONFIG["top_k"],
-        n_drop=BT_CONFIG["top_k"],
-        hold_thresh=1,
-        sell_rank_buffer=0,
+        n_drop=10,              # 回测中允许较快建仓 (生产用2~5)
+        hold_thresh=10,         # 回测中10天 (生产用20~30)
+        sell_rank_buffer=3,     # 缓冲区: 排名跌出 top_k+3 才卖
         buy_confirm_days=1,
-        cost_threshold=0.0,
+        cost_threshold=0.03,    # 回测中3%门槛 (生产用0.10~0.15)
     )
 
     # 交易日
@@ -344,6 +372,7 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
     equity_curve = []
     daily_returns = []
     turnover_history = []
+    regime_history = []
     rebalance_count = 0
     total_trades = 0
     pending_decision = None
@@ -358,7 +387,25 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
 
         # 调仓日
         if di % BT_CONFIG["rebalance_days"] == 0:
-            scores = compute_composite_scores(factors, all_data, factor_cache, today)
+            # ═══ 优化 B: 检测 regime, 调整因子权重 ═══
+            if use_regime:
+                regime = regime_detector.detect(today)
+                adapted_factors = regime_detector.adapt_factor_weights(factors, today, regime)
+                # ═══ 优化 A: 调整换手参数 ═══
+                tp = regime_detector.get_turnover_params(today, regime)
+                ranker.hold_thresh = tp["hold_thresh"]
+                ranker.n_drop = tp["n_drop"]
+                ranker.cost_threshold = tp["cost_threshold"]
+                ranker.sell_rank_buffer = tp["sell_rank_buffer"]
+                regime_history.append({
+                    "date": str(today.date() if hasattr(today, 'date') else today),
+                    "regime": regime.value,
+                })
+            else:
+                adapted_factors = factors
+                regime = Regime.RANGE
+
+            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today)
             if scores and len(scores) >= BT_CONFIG["top_k"]:
                 tradeable = {}
                 for sym, sc in scores.items():
@@ -378,13 +425,15 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
                                            s, all_data[s][all_data[s]["date"] <= today].tail(2))]
                     pending_decision = decision
                     rebalance_count += 1
-                    n_turnover = (len(decision.get("sell", [])) + len(decision.get("buy", []))) / (2 * BT_CONFIG["top_k"])
-                    turnover_history.append(n_turnover)
+                    n_turn = (len(decision.get("sell", [])) + len(decision.get("buy", []))) / (2 * BT_CONFIG["top_k"])
+                    turnover_history.append(n_turn)
 
             if rebalance_count > 0 and rebalance_count % 6 == 0:
-                log.info("    调仓 #%d: %s, 持仓=%d", rebalance_count,
+                regime_str = regime.value if use_regime else "N/A"
+                log.info("    调仓 #%d: %s, 持仓=%d, regime=%s",
+                         rebalance_count,
                          today.date() if hasattr(today, 'date') else today,
-                         len(bt.positions))
+                         len(bt.positions), regime_str)
 
         # Mark-to-market
         close_prices = {}
@@ -454,6 +503,12 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
     one_way_cost = (BT_CONFIG["slippage_bps"] / 10000 + BT_CONFIG["commission_buy"] + BT_CONFIG["commission_sell"]) / 2
     cost_drag = avg_turnover * one_way_cost * 12 * 2
 
+    # Regime 分布统计
+    regime_counts = {}
+    for rh in regime_history:
+        r = rh["regime"]
+        regime_counts[r] = regime_counts.get(r, 0) + 1
+
     log.info("  回测结果:")
     log.info("    总收益: %+.1f%%", total_return * 100)
     log.info("    年化收益: %+.1f%%", annual_return * 100)
@@ -465,6 +520,8 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
     log.info("    Calmar: %.2f", calmar)
     log.info("    月均换手: %.1f%%", avg_turnover * 100)
     log.info("    年化成本: %.2f%%", cost_drag * 100)
+    if regime_counts:
+        log.info("    Regime分布: %s", regime_counts)
 
     return {
         "total_return": round(total_return, 6),
@@ -481,6 +538,7 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
         "total_trades": total_trades,
         "n_days": len(bt_dates),
         "equity_curve": equity_curve[::5],
+        "regime_history": regime_history,
         "_active_returns": active_returns.tolist(),
     }
 
@@ -573,15 +631,19 @@ def make_verdict(bt_result: dict, bootstrap: dict) -> Tuple[str, List[str]]:
 # ═══════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="P5 全因子组合验证")
+    parser = argparse.ArgumentParser(description="P5 全因子组合验证 (v3)")
     parser.add_argument("--skip-bt", action="store_true", help="跳过回测")
+    parser.add_argument("--no-regime", action="store_true", help="禁用regime自适应 (对比用)")
     args = parser.parse_args()
 
+    use_regime = not args.no_regime
     t_start = time.time()
     log.info("=" * 60)
-    log.info("  P5 全因子组合验证 (v2)")
+    log.info("  P5 全因子组合验证 (v3 — 四项优化)")
     log.info("  Development 期: %s ~ %s", DEV_START, DEV_END)
     log.info("  CORR_THRESHOLD: %.1f", CORR_THRESHOLD)
+    log.info("  MIN_ABS_ICIR: %.1f (优化C)", MIN_ABS_ICIR)
+    log.info("  Regime自适应: %s (优化A+B)", use_regime)
     log.info("=" * 60)
 
     # Part 1: 因子选择
@@ -628,7 +690,7 @@ def main():
         verdict, reasons = "SKIP", ["回测已跳过"]
     else:
         # Part 3: 回测
-        bt_result = run_walkforward_backtest(kept, all_data, factor_cache)
+        bt_result = run_walkforward_backtest(kept, all_data, factor_cache, use_regime=use_regime)
 
         # Part 4: Bootstrap
         if bt_result:
@@ -646,9 +708,17 @@ def main():
     report = {
         "meta": {
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "description": "P5 全因子组合验证报告 (v2)",
+            "description": "P5 全因子组合验证报告 (v3 — 四项优化)",
+            "optimizations": {
+                "A_turnover_control": "regime-adaptive hold_thresh/n_drop/cost_threshold",
+                "B_regime_weights": "牛市加动量×1.5, 熊市加防御×1.3",
+                "C_threshold": f"MIN_ABS_ICIR={MIN_ABS_ICIR} (原0.3)",
+                "D_fundamental": "预留接口 (需网络)",
+            },
             "bt_config": BT_CONFIG,
             "corr_threshold": CORR_THRESHOLD,
+            "min_abs_icir": MIN_ABS_ICIR,
+            "use_regime": use_regime,
             "data_partition": "development",
             "n_stocks": len(all_data),
             "elapsed_s": round(time.time() - t_start, 1),
@@ -688,10 +758,12 @@ def main():
         log_experiment(
             script_name="run_p5_portfolio_validation",
             partition="development",
-            config={"corr_threshold": CORR_THRESHOLD, "n_factors": len(kept)},
+            config={"corr_threshold": CORR_THRESHOLD, "n_factors": len(kept),
+                    "min_icir": MIN_ABS_ICIR, "use_regime": use_regime},
             results={"verdict": verdict, "ir": bt_result.get("ir", 0),
-                     "excess": bt_result.get("excess_annual", 0)},
-            notes="P5 v2 with full IC data",
+                     "excess": bt_result.get("excess_annual", 0),
+                     "turnover": bt_result.get("monthly_turnover", 0)},
+            notes="P5 v3: A(turnover)+B(regime)+C(threshold 0.2)",
             experiments_dir=os.path.join(BASE_DIR, "experiments"),
         )
     except Exception:

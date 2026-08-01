@@ -1,7 +1,13 @@
 {
   "meta": {
-    "generated_at": "2026-08-01 16:31:42",
-    "description": "P5 全因子组合验证报告 (v2)",
+    "generated_at": "2026-08-01 18:22:08",
+    "description": "P5 全因子组合验证报告 (v3 — 四项优化)",
+    "optimizations": {
+      "A_turnover_control": "regime-adaptive hold_thresh/n_drop/cost_threshold",
+      "B_regime_weights": "牛市加动量×1.5, 熊市加防御×1.3",
+      "C_threshold": "MIN_ABS_ICIR=0.2 (原0.3)",
+      "D_fundamental": "预留接口 (需网络)"
+    },
     "bt_config": {
       "start": "2023-01-01",
       "end": "2024-06-30",
@@ -14,9 +20,11 @@
       "commission_sell": 0.00075
     },
     "corr_threshold": 0.6,
+    "min_abs_icir": 0.2,
+    "use_regime": true,
     "data_partition": "development",
     "n_stocks": 2979,
-    "elapsed_s": 801.5
+    "elapsed_s": 2041.6
   },
   "selected_factors": [
     {
@@ -228,6 +236,76 @@
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 241
+    },
+    {
+      "name": "vma_10",
+      "icir": 0.2814,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "doji",
+      "icir": 0.2762,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 243
+    },
+    {
+      "name": "imin_10",
+      "icir": -0.2758,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 241
+    },
+    {
+      "name": "big_bear",
+      "icir": -0.2647,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 243
+    },
+    {
+      "name": "vstd_5",
+      "icir": -0.2497,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "up_streak",
+      "icir": -0.2443,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "ma5_cross_ma60",
+      "icir": -0.2434,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 236
+    },
+    {
+      "name": "imax_5",
+      "icir": 0.2315,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "return_3d",
+      "icir": 0.2149,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "rsqr_10",
+      "icir": 0.2017,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
     }
   ],
   "correlation_matrix": {
@@ -301,15 +379,15 @@
   "pruned_factors": {
     "volume_price_corr_20d": {
       "pruned_by": "corr_pv_10",
-      "correlation": 0.6092046089376757
+      "correlation": 0.6092046089376759
     },
     "corr_pv_20": {
       "pruned_by": "corr_pv_10",
-      "correlation": 0.6038753122765208
+      "correlation": 0.6038753122765209
     },
     "cord_20": {
       "pruned_by": "cord_30",
-      "correlation": 0.8161077450763683
+      "correlation": 0.8161077450763682
     },
     "cord_60": {
       "pruned_by": "cord_30",
@@ -321,7 +399,7 @@
     },
     "amplitude_5d": {
       "pruned_by": "volatility_5d",
-      "correlation": 0.8005110292627785
+      "correlation": 0.8005110292627786
     },
     "volatility_10d": {
       "pruned_by": "volatility_5d",
@@ -329,19 +407,19 @@
     },
     "return_30d": {
       "pruned_by": "imax_30",
-      "correlation": 0.6261177180762495
+      "correlation": 0.6261177180762494
     },
     "imxd_30": {
       "pruned_by": "imax_30",
-      "correlation": 0.8718230430003042
+      "correlation": 0.8718230430003043
     },
     "momentum_20d": {
       "pruned_by": "imax_20",
-      "correlation": 0.6262822607771545
+      "correlation": 0.6262822607771547
     },
     "return_20d": {
       "pruned_by": "imax_20",
-      "correlation": 0.6262822607771545
+      "correlation": 0.6262822607771547
     },
     "beta_30": {
       "pruned_by": "imax_30",
@@ -349,7 +427,7 @@
     },
     "volatility_20d": {
       "pruned_by": "volatility_5d",
-      "correlation": 0.6707201318026974
+      "correlation": 0.6707201318026973
     },
     "ma10_ma30_spread": {
       "pruned_by": "ma60_bias",
@@ -369,11 +447,11 @@
     },
     "amplitude_20d": {
       "pruned_by": "volatility_5d",
-      "correlation": 0.6209002730626202
+      "correlation": 0.6209002730626203
     },
     "high_low_ratio_5d": {
       "pruned_by": "volatility_5d",
-      "correlation": 0.7364416318260119
+      "correlation": 0.7364416318260117
     },
     "sump_30": {
       "pruned_by": "imax_30",
@@ -389,15 +467,15 @@
     },
     "sumd_30": {
       "pruned_by": "imax_30",
-      "correlation": -0.663612776719762
+      "correlation": -0.6636127767197619
     },
     "return_15d": {
       "pruned_by": "ma60_bias",
-      "correlation": 0.6879304013144395
+      "correlation": 0.6879304013144394
     },
     "sumn_30": {
       "pruned_by": "imax_30",
-      "correlation": 0.6637269308742256
+      "correlation": 0.6637269308742255
     },
     "beta_20": {
       "pruned_by": "imax_20",
@@ -413,7 +491,7 @@
     },
     "return_90d": {
       "pruned_by": "ma60_bias",
-      "correlation": 0.6330552790184416
+      "correlation": 0.6330552790184417
     },
     "ma10_ma60_spread": {
       "pruned_by": "ma60_bias",
@@ -421,7 +499,7 @@
     },
     "ma10_ma20_spread": {
       "pruned_by": "ma60_bias",
-      "correlation": -0.6524607334118554
+      "correlation": -0.6524607334118553
     },
     "sump_20": {
       "pruned_by": "imax_20",
@@ -429,19 +507,19 @@
     },
     "sharpe_20d": {
       "pruned_by": "imax_20",
-      "correlation": 0.6699451805956402
+      "correlation": 0.6699451805956401
     },
     "ma20_bias": {
       "pruned_by": "ma60_bias",
-      "correlation": 0.6856308949657627
+      "correlation": 0.6856308949657628
     },
     "volatility_90d": {
       "pruned_by": "volatility_60d",
-      "correlation": 0.9216079457292273
+      "correlation": 0.9216079457292271
     },
     "sump_60": {
       "pruned_by": "ma60_bias",
-      "correlation": -0.7865439377668998
+      "correlation": -0.7865439377668997
     },
     "sumd_60": {
       "pruned_by": "ma60_bias",
@@ -449,11 +527,11 @@
     },
     "sumd_20": {
       "pruned_by": "imax_20",
-      "correlation": -0.6706510182229812
+      "correlation": -0.6706510182229813
     },
     "sumn_60": {
       "pruned_by": "ma60_bias",
-      "correlation": 0.7878888433650766
+      "correlation": 0.7878888433650767
     },
     "ma5_ma20_spread": {
       "pruned_by": "ma60_bias",
@@ -461,11 +539,11 @@
     },
     "sumn_20": {
       "pruned_by": "imax_20",
-      "correlation": 0.6705579381327916
+      "correlation": 0.6705579381327917
     },
     "ma3_ma20_spread": {
       "pruned_by": "ma60_bias",
-      "correlation": -0.6806771945196987
+      "correlation": -0.6806771945196984
     },
     "imxd_60": {
       "pruned_by": "ma60_bias",
@@ -477,15 +555,15 @@
     },
     "return_10d": {
       "pruned_by": "channel_low_20",
-      "correlation": -0.6322000245976854
+      "correlation": -0.6322000245976853
     },
     "vma_20": {
       "pruned_by": "vma_60",
-      "correlation": 0.7416329391285518
+      "correlation": 0.7416329391285517
     },
     "vstd_60": {
       "pruned_by": "vma_60",
-      "correlation": 0.8549409322477917
+      "correlation": 0.8549409322477916
     },
     "imin_30": {
       "pruned_by": "imin_20",
@@ -517,11 +595,11 @@
     },
     "beta_10": {
       "pruned_by": "imax_10",
-      "correlation": -0.6285605115644145
+      "correlation": -0.6285605115644146
     },
     "ma5_ma10_spread": {
       "pruned_by": "imax_10",
-      "correlation": -0.6017935650112832
+      "correlation": -0.6017935650112831
     },
     "return_7d": {
       "pruned_by": "momentum_7d",
@@ -541,11 +619,11 @@
     },
     "sump_10": {
       "pruned_by": "channel_low_20",
-      "correlation": 0.6410991923114606
+      "correlation": 0.6410991923114605
     },
     "ma10_bias": {
       "pruned_by": "channel_low_20",
-      "correlation": -0.6153141083567905
+      "correlation": -0.6153141083567903
     },
     "ma3_ma10_spread": {
       "pruned_by": "momentum_7d",
@@ -562,21 +640,77 @@
     "return_5d": {
       "pruned_by": "momentum_7d",
       "correlation": 0.7819011922442164
+    },
+    "sumn_10": {
+      "pruned_by": "channel_low_20",
+      "correlation": -0.6276017079831647
+    },
+    "realized_vol_ratio": {
+      "pruned_by": "volatility_5d",
+      "correlation": 0.6091198046081964
+    },
+    "macd_hist": {
+      "pruned_by": "momentum_7d",
+      "correlation": -0.6600767417420451
+    },
+    "close_position_20d": {
+      "pruned_by": "channel_low_20",
+      "correlation": 0.7300379413682359
+    },
+    "body_ratio": {
+      "pruned_by": "doji",
+      "correlation": -0.738803089757826
+    },
+    "boll_width_30": {
+      "pruned_by": "volatility_60d",
+      "correlation": 0.656251987497903
+    },
+    "beta_5": {
+      "pruned_by": "momentum_7d",
+      "correlation": -0.6457451034574024
+    },
+    "sump_5": {
+      "pruned_by": "momentum_7d",
+      "correlation": -0.7264425258310699
+    },
+    "vstd_30": {
+      "pruned_by": "vma_10",
+      "correlation": 0.6564558719769882
+    },
+    "reversal_3d": {
+      "pruned_by": "return_3d",
+      "correlation": -1.0
+    },
+    "ma5_bias": {
+      "pruned_by": "return_3d",
+      "correlation": 0.9235166274058967
+    },
+    "sumd_5": {
+      "pruned_by": "momentum_7d",
+      "correlation": -0.7263024073752254
+    },
+    "sharpe_5d": {
+      "pruned_by": "momentum_7d",
+      "correlation": 0.7258664350764855
+    },
+    "vma_5": {
+      "pruned_by": "vma_10",
+      "correlation": 0.8251394357091253
     }
   },
   "backtest": {
-    "total_return": -0.182021,
-    "annual_return": -0.131541,
+    "total_return": -0.155036,
+    "annual_return": -0.111527,
     "benchmark_annual": -0.173565,
-    "excess_annual": 0.042024,
-    "sharpe": -0.943,
-    "ir": 0.1413,
-    "max_drawdown": -0.302325,
-    "calmar": -0.4351,
-    "monthly_turnover": 0.8241,
-    "cost_drag": 0.039556,
+    "excess_annual": 0.062038,
+    "sharpe": -0.5416,
+    "ir": 0.2365,
+    "max_drawdown": -0.356815,
+    "calmar": -0.3126,
+    "monthly_turnover": 0.1361,
+    "cost_drag": 0.006533,
     "rebalance_count": 18,
-    "total_trades": 792,
+    "total_trades": 64,
     "n_days": 359,
     "equity_curve": [
       {
@@ -585,303 +719,377 @@
       },
       {
         "date": "2023-01-10",
-        "equity": 100279.59350000003
+        "equity": 101529.4702
       },
       {
         "date": "2023-01-17",
-        "equity": 101646.29350000003
+        "equity": 104341.4702
       },
       {
         "date": "2023-01-31",
-        "equity": 105801.39350000003
+        "equity": 109837.57019999999
       },
       {
         "date": "2023-02-07",
-        "equity": 107432.29350000003
+        "equity": 114150.8702
       },
       {
         "date": "2023-02-14",
-        "equity": 108601.02920000005
+        "equity": 114734.4702
       },
       {
         "date": "2023-02-21",
-        "equity": 108612.02920000005
+        "equity": 112937.5702
       },
       {
         "date": "2023-02-28",
-        "equity": 109081.72920000003
+        "equity": 110752.0702
       },
       {
         "date": "2023-03-07",
-        "equity": 107347.22920000003
+        "equity": 110150.7702
       },
       {
         "date": "2023-03-14",
-        "equity": 105251.23730000005
+        "equity": 109278.2442
       },
       {
         "date": "2023-03-21",
-        "equity": 106089.93730000005
+        "equity": 108432.5442
       },
       {
         "date": "2023-03-28",
-        "equity": 106002.43730000005
+        "equity": 107102.3442
       },
       {
         "date": "2023-04-04",
-        "equity": 105183.53730000005
+        "equity": 105221.3442
       },
       {
         "date": "2023-04-12",
-        "equity": 105151.8503000001
+        "equity": 105275.46480000002
       },
       {
         "date": "2023-04-19",
-        "equity": 104766.1503000001
+        "equity": 104801.56480000001
       },
       {
         "date": "2023-04-26",
-        "equity": 101274.0503000001
+        "equity": 101244.96480000002
       },
       {
         "date": "2023-05-08",
-        "equity": 102630.2503000001
+        "equity": 100861.36480000001
       },
       {
         "date": "2023-05-15",
-        "equity": 101196.59210000011
+        "equity": 102555.9814
       },
       {
         "date": "2023-05-22",
-        "equity": 104311.69210000012
+        "equity": 105145.7814
       },
       {
         "date": "2023-05-29",
-        "equity": 101801.09210000011
+        "equity": 104106.6814
       },
       {
         "date": "2023-06-05",
-        "equity": 103238.09210000011
+        "equity": 104935.2814
       },
       {
         "date": "2023-06-12",
-        "equity": 101588.14370000007
+        "equity": 104395.9459
       },
       {
         "date": "2023-06-19",
-        "equity": 101529.0437000001
+        "equity": 107302.6459
       },
       {
         "date": "2023-06-28",
-        "equity": 101111.84370000008
+        "equity": 107827.4459
       },
       {
         "date": "2023-07-05",
-        "equity": 103008.0437000001
+        "equity": 110724.8459
       },
       {
         "date": "2023-07-12",
-        "equity": 101743.2898000001
+        "equity": 110790.0459
       },
       {
         "date": "2023-07-19",
-        "equity": 102198.0898000001
+        "equity": 109809.3459
       },
       {
         "date": "2023-07-26",
-        "equity": 103422.4898000001
+        "equity": 108960.94589999999
       },
       {
         "date": "2023-08-02",
-        "equity": 103773.18980000011
+        "equity": 111239.64589999999
       },
       {
         "date": "2023-08-09",
-        "equity": 102869.2496000001
+        "equity": 108684.7459
       },
       {
         "date": "2023-08-16",
-        "equity": 101474.5496000001
+        "equity": 106171.0459
       },
       {
         "date": "2023-08-23",
-        "equity": 97903.5496000001
+        "equity": 106017.5459
       },
       {
         "date": "2023-08-30",
-        "equity": 100074.8496000001
+        "equity": 108144.74590000001
       },
       {
         "date": "2023-09-06",
-        "equity": 100114.20120000011
+        "equity": 108383.1459
       },
       {
         "date": "2023-09-13",
-        "equity": 99679.20120000011
+        "equity": 107351.6459
       },
       {
         "date": "2023-09-20",
-        "equity": 99415.20120000011
+        "equity": 104709.74590000001
       },
       {
         "date": "2023-09-27",
-        "equity": 99431.20120000011
+        "equity": 105688.7459
       },
       {
         "date": "2023-10-12",
-        "equity": 98675.95310000013
+        "equity": 105705.8459
       },
       {
         "date": "2023-10-19",
-        "equity": 95377.85310000014
+        "equity": 102308.5459
       },
       {
         "date": "2023-10-26",
-        "equity": 96728.55310000014
+        "equity": 104249.1459
       },
       {
         "date": "2023-11-02",
-        "equity": 97276.25310000013
+        "equity": 102908.7459
       },
       {
         "date": "2023-11-09",
-        "equity": 99223.82090000017
+        "equity": 107209.2459
       },
       {
         "date": "2023-11-16",
-        "equity": 100057.12090000018
+        "equity": 110304.0459
       },
       {
         "date": "2023-11-23",
-        "equity": 100616.62090000018
+        "equity": 109836.7459
       },
       {
         "date": "2023-11-30",
-        "equity": 98599.52090000018
+        "equity": 109098.9459
       },
       {
         "date": "2023-12-07",
-        "equity": 96123.57810000019
+        "equity": 108432.0459
       },
       {
         "date": "2023-12-14",
-        "equity": 95546.67810000018
+        "equity": 109168.7459
       },
       {
         "date": "2023-12-21",
-        "equity": 93805.87810000019
+        "equity": 105761.6459
       },
       {
         "date": "2023-12-28",
-        "equity": 95354.07810000019
+        "equity": 106760.4459
       },
       {
         "date": "2024-01-05",
-        "equity": 94627.22310000015
+        "equity": 104065.0474
       },
       {
         "date": "2024-01-12",
-        "equity": 93624.62310000014
+        "equity": 101538.9474
       },
       {
         "date": "2024-01-19",
-        "equity": 92062.62310000014
+        "equity": 96430.5474
       },
       {
         "date": "2024-01-26",
-        "equity": 92895.02310000015
+        "equity": 93751.4474
       },
       {
         "date": "2024-02-02",
-        "equity": 81120.06470000013
+        "equity": 80527.9474
       },
       {
         "date": "2024-02-19",
-        "equity": 81735.96470000013
+        "equity": 82655.04740000001
       },
       {
         "date": "2024-02-26",
-        "equity": 87519.36470000012
+        "equity": 90159.1474
       },
       {
         "date": "2024-03-04",
-        "equity": 87732.96470000013
+        "equity": 90833.24740000001
       },
       {
         "date": "2024-03-11",
-        "equity": 88527.60180000015
+        "equity": 92031.24740000001
       },
       {
         "date": "2024-03-18",
-        "equity": 89950.60180000015
+        "equity": 96677.6474
       },
       {
         "date": "2024-03-25",
-        "equity": 88262.60180000015
+        "equity": 92653.4474
       },
       {
         "date": "2024-04-01",
-        "equity": 90135.60180000015
+        "equity": 96719.8474
       },
       {
         "date": "2024-04-10",
-        "equity": 88970.6432000002
+        "equity": 94860.8921
       },
       {
         "date": "2024-04-17",
-        "equity": 88144.1432000002
+        "equity": 93599.3921
       },
       {
         "date": "2024-04-24",
-        "equity": 87807.1432000002
+        "equity": 93812.9921
       },
       {
         "date": "2024-05-06",
-        "equity": 91679.54320000019
+        "equity": 96343.8921
       },
       {
         "date": "2024-05-13",
-        "equity": 89713.51010000019
+        "equity": 95574.81450000001
       },
       {
         "date": "2024-05-20",
-        "equity": 91235.51010000019
+        "equity": 96255.81450000001
       },
       {
         "date": "2024-05-27",
-        "equity": 89193.9101000002
+        "equity": 94364.21450000002
       },
       {
         "date": "2024-06-03",
-        "equity": 87606.3101000002
+        "equity": 91454.11450000001
       },
       {
         "date": "2024-06-11",
-        "equity": 85266.17680000019
+        "equity": 89098.92520000001
       },
       {
         "date": "2024-06-18",
-        "equity": 84688.9768000002
+        "equity": 88835.92520000001
       },
       {
         "date": "2024-06-25",
-        "equity": 81103.37680000019
+        "equity": 84333.42520000001
+      }
+    ],
+    "regime_history": [
+      {
+        "date": "2023-01-03",
+        "regime": "range"
+      },
+      {
+        "date": "2023-02-07",
+        "regime": "trend_up"
+      },
+      {
+        "date": "2023-03-07",
+        "regime": "range"
+      },
+      {
+        "date": "2023-04-04",
+        "regime": "trend_up"
+      },
+      {
+        "date": "2023-05-08",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-06-05",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-07-05",
+        "regime": "range"
+      },
+      {
+        "date": "2023-08-02",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-08-30",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-09-27",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-11-02",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2023-11-30",
+        "regime": "range"
+      },
+      {
+        "date": "2023-12-28",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2024-01-26",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2024-03-04",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2024-04-01",
+        "regime": "trend_down"
+      },
+      {
+        "date": "2024-05-06",
+        "regime": "trend_up"
+      },
+      {
+        "date": "2024-06-03",
+        "regime": "range"
       }
     ]
   },
   "bootstrap": {
     "n_samples": 359,
     "n_bootstrap": 1000,
-    "ir_mean": 0.2271,
-    "ir_ci_lower": -0.507,
-    "ir_ci_upper": 1.1224,
+    "ir_mean": 0.3412,
+    "ir_ci_lower": -0.3505,
+    "ir_ci_upper": 1.1699,
     "ci_excludes_zero": false
   },
   "verdict": "FAIL",
   "verdict_reasons": [
-    "FAIL: 年化超额 4.2% <= 5%",
-    "FAIL: IR 0.14 <= 0.5",
-    "FAIL: MaxDD -30.2% < -20%",
-    "FAIL: Bootstrap CI [-0.507, 1.122] 包含0"
+    "PASS: 年化超额 6.2%",
+    "FAIL: IR 0.24 <= 0.5",
+    "FAIL: MaxDD -35.7% < -20%",
+    "FAIL: Bootstrap CI [-0.350, 1.170] 包含0"
   ]
 }

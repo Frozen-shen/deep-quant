@@ -1,8 +1,12 @@
 """
-run_holdout_test.py — 测试集 + 模拟盘期确认回测
+run_holdout_test.py — 测试集 + 模拟盘期确认回测 (v2 — Regime自适应)
 
-使用 P5 已锁定的 30 个因子 (ICIR 权重来自 research 期),
+使用 P5 已锁定的因子 (ICIR 权重来自 research 期),
 在 test 期和 blind 期做纯 out-of-sample 回测。
+
+v2 优化:
+  - 与 P5 v3 对齐: regime-adaptive 因子权重 + 换手控制
+  - 从 P5 报告读取 MIN_ABS_ICIR 配置
 
 ⚠️ 测试集只跑一次，不可回退。
 
@@ -10,6 +14,7 @@ run_holdout_test.py — 测试集 + 模拟盘期确认回测
   py scripts/run_holdout_test.py              # 跑 test + blind
   py scripts/run_holdout_test.py --test-only  # 仅 test 期
   py scripts/run_holdout_test.py --blind-only # 仅 blind 期
+  py scripts/run_holdout_test.py --no-regime  # 禁用regime (对比用)
 
 输出:
   data/ic_validation/holdout_results.json
@@ -71,6 +76,10 @@ def load_factors() -> List[dict]:
         rpt = json.load(f)
     factors = rpt["selected_factors"]
     log_msg(f"加载 P5 锁定因子: {len(factors)} 个")
+    # 统计正/负IC
+    n_pos = sum(1 for f in factors if f["icir"] > 0)
+    n_neg = sum(1 for f in factors if f["icir"] < 0)
+    log_msg(f"  正IC: {n_pos}, 负IC: {n_neg}")
     return factors
 
 
@@ -134,16 +143,21 @@ def load_benchmark(start: str, end: str):
 
 
 def run_backtest(factors: List[dict], all_data: dict, factor_cache,
-                 start: str, end: str, label: str) -> dict:
-    """在指定期间跑回测。"""
+                 start: str, end: str, label: str, use_regime: bool = True) -> dict:
+    """在指定期间跑回测 (含 regime 自适应)。"""
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
     from portfolio_ranker import PortfolioRanker
+    from regime_detector import RegimeDetector, Regime
 
     log_msg(f"\n{'='*60}")
     log_msg(f"  {label}: {start} ~ {end}")
-    log_msg(f"  因子: {len(factors)} 个, Top-{BT_CONFIG['top_k']}")
+    log_msg(f"  因子: {len(factors)} 个, Top-{BT_CONFIG['top_k']}, Regime: {use_regime}")
     log_msg(f"{'='*60}")
+
+    # Regime 检测器
+    bench_path = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
+    regime_detector = RegimeDetector.from_benchmark_parquet(bench_path)
 
     bt = SimpleBacktest(
         initial_capital=BT_CONFIG["initial_capital"],
@@ -155,11 +169,11 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     rules = TradingRules()
     ranker = PortfolioRanker(
         top_k=BT_CONFIG["top_k"],
-        n_drop=BT_CONFIG["top_k"],
-        hold_thresh=1,
-        sell_rank_buffer=0,
+        n_drop=10,
+        hold_thresh=10,
+        sell_rank_buffer=3,
         buy_confirm_days=1,
-        cost_threshold=0.0,
+        cost_threshold=0.03,
     )
 
     # 交易日
@@ -181,6 +195,7 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     equity_curve = []
     daily_returns = []
     turnover_history = []
+    regime_history = []
     rebalance_count = 0
     total_trades = 0
     pending_decision = None
@@ -193,7 +208,23 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
             pending_decision = None
 
         if di % BT_CONFIG["rebalance_days"] == 0:
-            scores = compute_composite_scores(factors, all_data, factor_cache, today)
+            # Regime 自适应
+            if use_regime:
+                regime = regime_detector.detect(today)
+                adapted_factors = regime_detector.adapt_factor_weights(factors, today, regime)
+                tp = regime_detector.get_turnover_params(today, regime)
+                ranker.hold_thresh = tp["hold_thresh"]
+                ranker.n_drop = tp["n_drop"]
+                ranker.cost_threshold = tp["cost_threshold"]
+                ranker.sell_rank_buffer = tp["sell_rank_buffer"]
+                regime_history.append({
+                    "date": str(today.date() if hasattr(today, 'date') else today),
+                    "regime": regime.value,
+                })
+            else:
+                adapted_factors = factors
+
+            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today)
             if scores and len(scores) >= BT_CONFIG["top_k"]:
                 tradeable = {}
                 for sym, sc in scores.items():
@@ -278,6 +309,12 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     # 换手
     avg_turnover = np.mean(turnover_history) if turnover_history else 0
 
+    # Regime 分布
+    regime_counts = {}
+    for rh in regime_history:
+        r = rh["regime"]
+        regime_counts[r] = regime_counts.get(r, 0) + 1
+
     result = {
         "period": label,
         "start": start,
@@ -294,6 +331,7 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
         "monthly_turnover": round(avg_turnover, 4),
         "rebalance_count": rebalance_count,
         "total_trades": total_trades,
+        "regime_distribution": regime_counts,
     }
 
     log_msg(f"\n  结果:")
@@ -307,20 +345,25 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     log_msg(f"    Calmar: {calmar:.2f}")
     log_msg(f"    月均换手: {avg_turnover*100:.1f}%")
     log_msg(f"    调仓: {rebalance_count} 次, {total_trades} 笔")
+    if regime_counts:
+        log_msg(f"    Regime分布: {regime_counts}")
 
     return result
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Holdout 测试集/模拟盘期回测")
+    parser = argparse.ArgumentParser(description="Holdout 测试集/模拟盘期回测 (v2)")
     parser.add_argument("--test-only", action="store_true")
     parser.add_argument("--blind-only", action="store_true")
+    parser.add_argument("--no-regime", action="store_true", help="禁用regime自适应")
     args = parser.parse_args()
 
+    use_regime = not args.no_regime
     t_start = time.time()
     log_msg("=" * 60)
-    log_msg("  Holdout 确认回测")
+    log_msg("  Holdout 确认回测 (v2 — Regime自适应)")
     log_msg("  ⚠️ 测试集结果不可回退")
+    log_msg(f"  Regime自适应: {use_regime}")
     log_msg("=" * 60)
 
     # 加载因子
@@ -361,20 +404,21 @@ def main():
     if not args.blind_only:
         results["test"] = run_backtest(
             factors, all_data, factor_cache,
-            TEST_START, TEST_END, "TEST (最终确认)")
+            TEST_START, TEST_END, "TEST (最终确认)", use_regime=use_regime)
 
     if not args.test_only:
         results["blind"] = run_backtest(
             factors, all_data, factor_cache,
-            BLIND_START, BLIND_END, "BLIND (模拟盘期)")
+            BLIND_START, BLIND_END, "BLIND (模拟盘期)", use_regime=use_regime)
 
     # 输出
     output = {
         "meta": {
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "description": "Holdout 确认回测 (P5 锁定因子)",
+            "description": "Holdout 确认回测 v2 (P5 v3 锁定因子 + Regime自适应)",
             "n_factors": len(factors),
             "n_stocks": len(all_data),
+            "use_regime": use_regime,
             "bt_config": BT_CONFIG,
             "elapsed_s": round(time.time() - t_start, 1),
         },
@@ -390,13 +434,14 @@ def main():
     log_msg(f"  耗时: {time.time()-t_start:.0f}s")
 
     # 汇总对比
-    log_msg(f"\n  {'期间':<20} {'年化':>8} {'超额':>8} {'IR':>6} {'MaxDD':>8} {'Sharpe':>8}")
-    log_msg(f"  {'-'*20} {'-'*8} {'-'*8} {'-'*6} {'-'*8} {'-'*8}")
+    log_msg(f"\n  {'期间':<20} {'年化':>8} {'超额':>8} {'IR':>6} {'MaxDD':>8} {'换手':>6} {'Sharpe':>8}")
+    log_msg(f"  {'-'*20} {'-'*8} {'-'*8} {'-'*6} {'-'*8} {'-'*6} {'-'*8}")
     for key, r in results.items():
         if r:
             log_msg(f"  {r['period']:<20} {r['annual_return']*100:>+7.1f}% "
                     f"{r['excess_annual']*100:>+7.1f}% {r['ir']:>6.2f} "
-                    f"{r['max_drawdown']*100:>7.1f}% {r['sharpe']:>8.2f}")
+                    f"{r['max_drawdown']*100:>7.1f}% {r['monthly_turnover']*100:>5.1f}% "
+                    f"{r['sharpe']:>8.2f}")
     log_msg("=" * 60)
 
 

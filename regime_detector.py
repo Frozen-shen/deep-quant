@@ -1,22 +1,30 @@
 """
-市场状态检测 (Regime Detection)
+市场状态检测 (Regime Detection) + 因子权重自适应
 
 基于指数均线趋势 + ADX 识别三种市场状态:
   - trend_up: 指数在MA60之上, ADX>20 → 趋势上涨 (动量策略, 持有期延长)
   - trend_down: 指数在MA60之下, ADX>20 → 趋势下跌 (防御策略, 降低仓位)
   - range: ADX<=20 → 震荡 (反转策略, 缩短持有期)
 
+因子权重自适应:
+  - trend_up: 正IC因子(动量)权重 ×1.5, 负IC因子(防御)权重 ×0.7
+  - trend_down: 正IC因子权重 ×0.5, 负IC因子权重 ×1.3
+  - range: 不调整
+
 用法:
-    detector = RegimeDetector(market="a")
-    regime = detector.detect(df_index, today)
-    params = detector.get_ranker_params(regime)
+    # 从本地 parquet 加载 (推荐, 无需网络)
+    detector = RegimeDetector.from_benchmark_parquet("data/cache/index_csi1000.parquet")
+    regime = detector.detect(today)
+    factors = detector.adapt_factor_weights(factors, today)
+    turnover_params = detector.get_turnover_params(today)
 """
 
+import os
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 class Regime(Enum):
@@ -67,8 +75,48 @@ class RegimeDetector:
         self._ma60: Optional[pd.Series] = None
         self._adx: Optional[pd.Series] = None
 
+    @classmethod
+    def from_benchmark_parquet(cls, path: str) -> "RegimeDetector":
+        """
+        从本地 parquet 文件加载基准指数 (无需网络)。
+
+        Args:
+          path: parquet 文件路径 (如 data/cache/index_csi1000.parquet)
+
+        Returns:
+          已初始化的 RegimeDetector 实例
+        """
+        detector = cls(market="a")
+        if not os.path.exists(path):
+            print(f"  [Regime] 基准文件不存在: {path}, 使用 RANGE fallback")
+            return detector
+
+        df = pd.read_parquet(path)
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+
+        if len(df) < 120:
+            print(f"  [Regime] 基准数据不足 ({len(df)} 行), 使用 RANGE fallback")
+            return detector
+
+        detector._index_data = df
+
+        # MA60
+        if "close" in df.columns:
+            detector._ma60 = df["close"].rolling(60).mean()
+
+        # ADX(14) — 需要 high/low/close
+        if all(c in df.columns for c in ["high", "low", "close"]):
+            detector._adx = detector._calc_adx(df, period=14)
+        else:
+            # 只有 close 时用简化版: 用 close 的绝对变动代替
+            detector._adx = None
+
+        return detector
+
     def load_index_data(self) -> bool:
-        """加载指数数据 (上证综指 / 恒生指数)。"""
+        """加载指数数据 (上证综指 / 恒生指数)。需要网络。"""
         try:
             from data_fetcher import DataFetcher
 
@@ -187,3 +235,79 @@ class RegimeDetector:
             "cost_threshold": p.cost_threshold,
             "n_drop": p.n_drop,
         }
+
+    # ── 因子权重自适应 ──
+
+    def adapt_factor_weights(self, factors: List[dict], today,
+                             regime: "Regime" = None) -> List[dict]:
+        """
+        根据市场状态调整因子权重 (核心优化 B)。
+
+        策略:
+          - TREND_UP (牛市): 正IC因子(动量)权重 ×1.5, 负IC因子(防御)权重 ×0.7
+          - TREND_DOWN (熊市): 正IC因子权重 ×0.5, 负IC因子权重 ×1.3
+          - RANGE (震荡): 不调整
+
+        Args:
+          factors: [{"name": ..., "icir": ..., "weight_multiplier": ...}, ...]
+          today: 当前日期
+          regime: 可手动指定状态 (跳过检测)
+
+        Returns:
+          调整后的因子列表 (新列表, 不修改原始)
+        """
+        if regime is None:
+            regime = self.detect(today)
+
+        adapted = []
+        for f in factors:
+            new_f = dict(f)
+            icir = f["icir"]
+            base_mult = f.get("weight_multiplier", 1.0)
+
+            if regime == Regime.TREND_UP:
+                # 牛市: 加强动量(正IC), 弱化防御(负IC)
+                if icir > 0:
+                    new_f["weight_multiplier"] = base_mult * 1.5
+                else:
+                    new_f["weight_multiplier"] = base_mult * 0.7
+            elif regime == Regime.TREND_DOWN:
+                # 熊市: 加强防御(负IC), 弱化动量(正IC)
+                if icir > 0:
+                    new_f["weight_multiplier"] = base_mult * 0.5
+                else:
+                    new_f["weight_multiplier"] = base_mult * 1.3
+            # RANGE: 不调整
+
+            adapted.append(new_f)
+
+        return adapted
+
+    def get_turnover_params(self, today, regime: "Regime" = None) -> dict:
+        """
+        根据市场状态返回换手控制参数 (核心优化 A)。
+
+        设计原则:
+          - n_drop 不能太小 (否则从0建仓到top_k需要太多周期)
+          - cost_threshold 不能太大 (否则无法换仓, 持仓僵化)
+          - hold_thresh 控制最短持有期, 防止频繁翻转
+
+        Returns:
+          {"hold_thresh": int, "n_drop": int, "cost_threshold": float,
+           "sell_rank_buffer": int}
+        """
+        if regime is None:
+            regime = self.detect(today)
+
+        if regime == Regime.TREND_UP:
+            # 牛市: 允许更积极调仓, 追涨
+            return {"hold_thresh": 10, "n_drop": 10, "cost_threshold": 0.03,
+                    "sell_rank_buffer": 3}
+        elif regime == Regime.TREND_DOWN:
+            # 熊市: 减少换手, 但不是完全锁死
+            return {"hold_thresh": 15, "n_drop": 6, "cost_threshold": 0.06,
+                    "sell_rank_buffer": 4}
+        else:
+            # 震荡: 中等
+            return {"hold_thresh": 12, "n_drop": 8, "cost_threshold": 0.04,
+                    "sell_rank_buffer": 3}

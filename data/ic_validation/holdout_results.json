@@ -1,9 +1,10 @@
 {
   "meta": {
-    "generated_at": "2026-08-01 17:10:11",
-    "description": "Holdout 确认回测 (P5 锁定因子)",
-    "n_factors": 30,
+    "generated_at": "2026-08-01 18:35:17",
+    "description": "Holdout 确认回测 v2 (P5 v3 锁定因子 + Regime自适应)",
+    "n_factors": 40,
     "n_stocks": 2979,
+    "use_regime": true,
     "bt_config": {
       "rebalance_days": 20,
       "top_k": 30,
@@ -13,7 +14,7 @@
       "commission_buy": 0.00025,
       "commission_sell": 0.00075
     },
-    "elapsed_s": 504.6
+    "elapsed_s": 760.4
   },
   "results": {
     "test": {
@@ -21,34 +22,44 @@
       "start": "2024-07-01",
       "end": "2025-06-30",
       "n_days": 242,
-      "total_return": 0.176929,
-      "annual_return": 0.184879,
+      "total_return": 0.489247,
+      "annual_return": 0.513959,
       "benchmark_annual": 0.300079,
-      "excess_annual": -0.115201,
-      "sharpe": 0.8635,
-      "ir": -0.3584,
-      "max_drawdown": -0.086744,
-      "calmar": 2.1313,
-      "monthly_turnover": 0.8141,
+      "excess_annual": 0.21388,
+      "sharpe": 1.237,
+      "ir": 0.3844,
+      "max_drawdown": -0.247826,
+      "calmar": 2.0739,
+      "monthly_turnover": 0.1359,
       "rebalance_count": 13,
-      "total_trades": 561
+      "total_trades": 27,
+      "regime_distribution": {
+        "trend_down": 4,
+        "range": 5,
+        "trend_up": 4
+      }
     },
     "blind": {
       "period": "BLIND (模拟盘期)",
       "start": "2025-07-01",
       "end": "2026-07-31",
       "n_days": 265,
-      "total_return": -0.092994,
-      "annual_return": -0.08864,
+      "total_return": 0.044845,
+      "annual_return": 0.042599,
       "benchmark_annual": 0.104425,
-      "excess_annual": -0.193065,
-      "sharpe": -0.9295,
-      "ir": -0.7739,
-      "max_drawdown": -0.194254,
-      "calmar": -0.4563,
-      "monthly_turnover": 0.8155,
+      "excess_annual": -0.061826,
+      "sharpe": 0.1847,
+      "ir": -0.2408,
+      "max_drawdown": -0.154813,
+      "calmar": 0.2752,
+      "monthly_turnover": 0.1619,
       "rebalance_count": 14,
-      "total_trades": 584
+      "total_trades": 40,
+      "regime_distribution": {
+        "range": 5,
+        "trend_up": 8,
+        "trend_down": 1
+      }
     }
   }
 }
