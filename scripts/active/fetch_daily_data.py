@@ -338,23 +338,8 @@ def fetch_stock(code: str, start_date: str, end_date: str,
 
     返回 DataFrame (英文列名), 失败返回 None。
     """
-    # 如果已知 eastmoney 不可用, 直接走腾讯
-    if not use_tencent_fallback:
-        last_err = None
-        for attempt in range(max_retries):
-            try:
-                df = _fetch_hist_akshare(code, start_date, end_date, adjust)
-                if df is not None and not df.empty:
-                    return df
-                if df is not None and df.empty:
-                    return None  # 空数据不重试
-            except Exception as e:
-                last_err = e
-                wait = 2 ** (attempt + 1)
-                if attempt < max_retries - 1:
-                    time.sleep(wait)
-
-        # akshare 全部失败, 尝试腾讯 (仅前复权支持)
+    if use_tencent_fallback:
+        # eastmoney 已知不可用, 直接走腾讯
         if adjust == "qfq":
             try:
                 df = _fetch_hist_tencent(code, start_date, end_date)
@@ -362,6 +347,31 @@ def fetch_stock(code: str, start_date: str, end_date: str,
                     return df
             except Exception:
                 pass
+        return None
+
+    # 正常路径: 先试 eastmoney, 失败后回退腾讯
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            df = _fetch_hist_akshare(code, start_date, end_date, adjust)
+            if df is not None and not df.empty:
+                return df
+            if df is not None and df.empty:
+                return None  # 空数据不重试
+        except Exception as e:
+            last_err = e
+            wait = 2 ** (attempt + 1)
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+
+    # akshare 全部失败, 尝试腾讯 (仅前复权支持)
+    if adjust == "qfq":
+        try:
+            df = _fetch_hist_tencent(code, start_date, end_date)
+            if df is not None and not df.empty:
+                return df
+        except Exception:
+            pass
 
     return None
 
