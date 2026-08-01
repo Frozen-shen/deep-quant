@@ -36,7 +36,7 @@ import pandas as pd
 import numpy as np
 
 # ── 路径 ─────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # scripts/active/ → project root
 DATA_STORE = os.path.join(BASE_DIR, "data_store")
 UNADJ_DIR = os.path.join(DATA_STORE, "unadjusted")
 META_FILE = os.path.join(DATA_STORE, "_meta.json")
@@ -136,18 +136,50 @@ def _make_session():
 #  股票列表获取
 # ═══════════════════════════════════════════════════════════════════════
 
+def _get_stock_list_from_local() -> pd.DataFrame:
+    """
+    离线回退: 从本地 data_cache/ + data_store/ 目录扫描股票代码。
+    当所有在线API不可用时使用。
+    """
+    from pathlib import Path
+
+    codes = set()
+
+    # 扫描 data_cache/ (1550只, 双交易所)
+    dc_dir = Path(BASE_DIR) / "data_cache"
+    if dc_dir.exists():
+        for f in dc_dir.glob("*.parquet"):
+            if len(f.stem) == 6 and f.stem.isdigit():
+                codes.add(f.stem)
+
+    # 扫描 data_store/ (2776只, 偏深交所)
+    ds_dir = Path(DATA_STORE)
+    if ds_dir.exists():
+        for f in ds_dir.glob("*.parquet"):
+            if len(f.stem) == 6 and f.stem.isdigit():
+                codes.add(f.stem)
+
+    if not codes:
+        raise RuntimeError("本地无缓存数据, 无法获取股票列表")
+
+    log(f"  本地缓存扫描: {len(codes)} 只 (data_cache + data_store 合并)")
+    df = pd.DataFrame({"code": sorted(codes), "name": ""})
+    return df
+
 def get_stock_list() -> pd.DataFrame:
     """
     获取全部 A 股代码和名称。
 
     主数据源: ak.stock_info_a_code_name()
-    备用: ak.stock_zh_a_spot_em() (eastmoney 实时行情)
+    备用1: ak.stock_zh_a_spot_em() (eastmoney 实时行情)
+    备用2: 本地 data_cache/ + data_store/ 目录扫描 (离线模式)
 
     过滤:
       - 仅保留沪深主板/创业板/科创板 (6/0/3 开头)
       - 剔除 ST / *ST
     """
     import akshare as ak
+    from pathlib import Path
 
     # 主数据源
     try:
@@ -166,7 +198,9 @@ def get_stock_list() -> pd.DataFrame:
             df.columns = ["code", "name"]
             source = "stock_zh_a_spot_em"
         except Exception as e2:
-            raise RuntimeError(f"所有股票列表数据源均失败: {e2}")
+            log(f"  eastmoney 也失败: {e2}, 使用本地缓存列表 ...")
+            df = _get_stock_list_from_local()
+            source = "local_cache_scan"
 
     total = len(df)
     log(f"  原始股票数 ({source}): {total}")
