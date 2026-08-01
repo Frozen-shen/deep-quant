@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pandas as pd
 from data_fetcher import DataFetcher
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
+# 主数据目录: data_store (3000+ 只, 2018-2026, 由 fetch_daily_data.py 维护)
+# 旧 data_cache/ 目录保留但不再作为主源
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_store")
 
 # 默认股票池 (向后兼容)
 SYMBOLS = [
