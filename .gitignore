@@ -23,8 +23,12 @@ test_wfo_equity.png
 orders.log
 alerts.log
 
-# Paper Trade
+# Paper Trade (runtime data)
 paper_trade_comparison.csv
+paper_trade/
+
+# Runtime signals (generated daily)
+signals/
 
 # IDE
 .vscode/
