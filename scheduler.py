@@ -85,117 +85,33 @@ def _log_run(run: SchedulerRun):
 
 def run_daily_pipeline(date_str: str = None, dry_run: bool = False) -> SchedulerRun:
     """
-    执行每日完整流程。
-
-    步骤:
-      1. 交易日检查
-      2. 增量数据更新
-      3. 数据质量校验
-      4. 因子重算 (触发预计算刷新)
-      5. 生成交易信号
-      6. 模拟执行下单
-      7. 权益快照
-      8. 异常告警检查
+    执行每日完整流程 — 委托给 scripts/daily_pipeline.py。
 
     Args:
       date_str: 交易日期 YYYY-MM-DD, None=上一个交易日
       dry_run: 仅预览, 不实际执行
     """
-    today = date_str or datetime.now().strftime("%Y-%m-%d")
-    today_dt = pd.Timestamp(today)
+    import subprocess
 
-    # 找到最近的交易日
-    if not is_trading_day(today_dt):
-        actual = prev_trading_day(today_dt)
-        print(f"[Scheduler] {today} 非交易日, 使用上一个交易日: {actual.date()}")
-        today_dt = actual
-        today = str(actual.date())
+    cmd = [sys.executable, os.path.join(BASE_DIR, "scripts", "daily_pipeline.py")]
+    if date_str:
+        cmd += ["--date", date_str]
+    if dry_run:
+        cmd += ["--dry-run"]
 
-    run = SchedulerRun(date=today, started_at=datetime.now().isoformat())
-    print(f"\n{'='*60}")
-    print(f"  📅 每日调度: {today}")
-    print(f"  {'🔍 DRY-RUN 模式 (仅预览)' if dry_run else '▶️  执行模式'}")
-    print(f"{'='*60}")
+    print(f"[Scheduler] 执行: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False, text=True)
 
-    def _step(name: str, fn, *args, **kwargs):
-        """执行一个步骤并记录结果。"""
-        if dry_run:
-            print(f"  [DRY-RUN] {name}: 将执行 {fn.__name__ if hasattr(fn, '__name__') else str(fn)}")
-            run.add_step(name, None, "dry-run skipped")
-            return True
-        try:
-            print(f"  ▶ {name}...", end=" ", flush=True)
-            result = fn(*args, **kwargs)
-            print("✅")
-            run.add_step(name, True, str(result)[:200] if result else "")
-            return result
-        except Exception as e:
-            print(f"❌ {e}")
-            run.add_step(name, False, str(e))
-            raise
+    run = SchedulerRun(
+        date=date_str or datetime.now().strftime("%Y-%m-%d"),
+        started_at=datetime.now().isoformat(),
+        finished_at=datetime.now().isoformat(),
+        success=(result.returncode == 0),
+        error="" if result.returncode == 0 else f"exit code {result.returncode}",
+    )
+    run.add_step("daily_pipeline", result.returncode == 0,
+                 f"exit={result.returncode}")
 
-    try:
-        # Step 1: 交易日检查 (已在上面完成)
-        run.add_step("交易日检查", True, f"{today} 是交易日")
-
-        # Step 2: 增量数据更新
-        if not dry_run:
-            from scripts.update_daily_data import update_all
-        _step("数据更新", lambda: None if dry_run else update_all(
-            end_date=today_dt.strftime("%Y%m%d"), max_failures=5))
-
-        # Step 3: 数据质量校验
-        if not dry_run:
-            from data.validator import validate_all
-        _step("数据校验", lambda: None if dry_run else validate_all())
-
-        # Step 4: 生成交易信号
-        if not dry_run:
-            from scripts.run_paper_signal import generate_signal
-        signal = _step("信号生成", lambda: None if dry_run else generate_signal(today))
-
-        # Step 5: 模拟执行 (Phase 2 - 待 PaperExecutor 完成后接入)
-        try:
-            from execution.paper_executor import PaperExecutor
-            executor = PaperExecutor()
-            state = executor.load_state()
-            if signal and state:
-                print(f"  ▶ 模拟执行...", end=" ", flush=True)
-                if not dry_run:
-                    report = executor.execute_orders(
-                        signal.get("buy", []),
-                        signal.get("sell", []),
-                        today_dt,
-                    )
-                    executor.snapshot(today)
-                    print(f"✅ 买入{len(report.buy_filled)} 卖出{len(report.sell_filled)}")
-                    run.add_step("模拟执行", True,
-                                f"buy:{len(report.buy_filled)} sell:{len(report.sell_filled)}")
-                else:
-                    print("[DRY-RUN]")
-            else:
-                run.add_step("模拟执行", True, "无待执行信号或状态未初始化")
-        except ImportError:
-            run.add_step("模拟执行", True, "PaperExecutor 尚未创建, 跳过")
-        except Exception as e:
-            print(f"❌ 模拟执行失败: {e}")
-            run.add_step("模拟执行", False, str(e))
-
-        # Step 6: 异常告警检查
-        try:
-            from alerter import check_and_alert
-            _step("告警检查", lambda: None if dry_run else check_and_alert())
-        except ImportError:
-            run.add_step("告警检查", True, "alerter 模块尚未创建")
-
-        print(f"\n  ✅ 每日流程完成")
-
-    except Exception as e:
-        print(f"\n  ❌ 流程中断: {e}")
-        run.error = str(e)
-        run.success = False
-
-    run.finished_at = datetime.now().isoformat()
     if not dry_run:
         _log_run(run)
 
