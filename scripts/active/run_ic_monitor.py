@@ -30,6 +30,8 @@ from data.calendar import get_trading_days
 
 MONITOR_FILE = os.path.join(BASE_DIR, "data", "ic_monitor.json")
 BASELINE_IC_FILE = os.path.join(BASE_DIR, "data", "ic_results.json")
+# Alpha 衰减自动降级: 因子权重覆盖文件
+DOWNGRADE_FILE = os.path.join(BASE_DIR, "data", "factor_downgrade.json")
 
 # 默认参数
 DEFAULT_LOOKBACK = 60     # 最近60个交易日
@@ -275,8 +277,69 @@ def run_ic_monitor(lookback: int = DEFAULT_LOOKBACK) -> dict:
         except Exception:
             pass
 
+        # ★ Alpha 衰减自动降级: 将衰减因子权重降为 0 (从信号生成中剔除)
+        apply_auto_downgrade(decay_info["decayed_factors"])
+
     print(f"\n  输出: {MONITOR_FILE}")
     return entry
+
+
+def apply_auto_downgrade(decayed_factors: List[dict]):
+    """
+    Alpha 衰减自动降级 — 将连续衰减的因子权重覆盖为 0。
+
+    写入 data/factor_downgrade.json, 信号生成脚本 (run_paper_signal.py)
+    在加载因子配置时会读取此文件, 将降级因子的 weight_multiplier 设为 0。
+
+    降级规则:
+      - 连续衰减 >= DECAY_WEEKS 周 → weight_multiplier = 0 (完全剔除)
+      - 降级记录保留, 直到人工复查后手动恢复
+    """
+    downgrade = {}
+    if os.path.exists(DOWNGRADE_FILE):
+        try:
+            with open(DOWNGRADE_FILE, encoding="utf-8") as f:
+                downgrade = json.load(f)
+        except Exception:
+            downgrade = {}
+
+    for d in decayed_factors:
+        factor_name = d["factor"]
+        downgrade[factor_name] = {
+            "weight_multiplier": 0.0,
+            "reason": f"IC衰减自动降级: 当前IC={d['current_ic']:+.4f}, "
+                      f"基线IC={d['baseline_ic']:+.4f}, 降至{d['ratio']:.0%}",
+            "downgraded_at": datetime.now().isoformat(),
+            "current_ic": d["current_ic"],
+            "baseline_ic": d["baseline_ic"],
+        }
+
+    os.makedirs(os.path.dirname(DOWNGRADE_FILE), exist_ok=True)
+    with open(DOWNGRADE_FILE, "w", encoding="utf-8") as f:
+        json.dump(downgrade, f, ensure_ascii=False, indent=2)
+
+    print(f"\n  ⬇️ 自动降级: {len(decayed_factors)} 个因子权重置零")
+    print(f"     降级文件: {DOWNGRADE_FILE}")
+    for d in decayed_factors[:5]:
+        print(f"     {d['factor']}: IC {d['current_ic']:+.4f} → 权重 0")
+
+
+def load_downgrade_overrides() -> Dict[str, float]:
+    """
+    加载因子降级覆盖表。
+
+    Returns:
+      {factor_name: weight_multiplier} — 信号生成时用此覆盖原始权重。
+      空 dict 表示无降级。
+    """
+    if not os.path.exists(DOWNGRADE_FILE):
+        return {}
+    try:
+        with open(DOWNGRADE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v.get("weight_multiplier", 1.0) for k, v in data.items()}
+    except Exception:
+        return {}
 
 
 if __name__ == "__main__":

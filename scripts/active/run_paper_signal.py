@@ -177,6 +177,26 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
         print("  [ERROR] 无可用因子, 终止", flush=True)
         return None
 
+    # ★ Alpha 衰减自动降级: 读取降级覆盖表, 将衰减因子权重置零
+    try:
+        from run_ic_monitor import load_downgrade_overrides
+        downgrade = load_downgrade_overrides()
+        if downgrade:
+            n_downgraded = 0
+            for f in factors:
+                if f["name"] in downgrade:
+                    f["weight_multiplier"] = downgrade[f["name"]]
+                    n_downgraded += 1
+            if n_downgraded > 0:
+                print(f"  [降级] {n_downgraded} 个因子已被IC衰减监控降级", flush=True)
+            # 过滤掉权重为0的因子
+            factors = [f for f in factors if f.get("weight_multiplier", 1.0) != 0.0]
+            if not factors:
+                print("  [ERROR] 所有因子均已被降级, 终止", flush=True)
+                return None
+    except ImportError:
+        pass  # run_ic_monitor 不可用时跳过
+
     print(f"  因子数: {len(factors)}", flush=True)
     print(f"  验证状态: {factor_config.get('verdict', 'UNKNOWN')}", flush=True)
     for f in factors[:5]:
@@ -334,6 +354,19 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             "verdict": factor_config.get("verdict", "UNKNOWN"),
         }
     else:
+        # ★ 熔断检查: HALT 状态下禁止买入, 只允许卖出/持有
+        from execution.circuit_breaker import CircuitBreaker
+        cb = CircuitBreaker()
+        cb_state = cb.check()
+        buy_allowed, cb_reason = cb.allow_buy()
+
+        original_buy = list(decision.get("buy", []))
+        if not buy_allowed:
+            print(f"\n  🛑 熔断检查: {cb_reason}, 禁止买入", flush=True)
+            decision["buy"] = []  # 清空买入列表, 保留卖出
+        elif cb_state == "warning":
+            _, _, dd = cb.calculate_drawdown()
+            print(f"\n  ⚠️ 回撤警告: {dd:.2%}, 继续运行但需关注", flush=True)
         # 分钟数据预拉取
         if config["execution"].get("minute_mode", False):
             try:
@@ -383,6 +416,7 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             "hold": decision.get("hold", []),
             "n_factors": len(factors),
             "verdict": factor_config.get("verdict", "UNKNOWN"),
+            "circuit_breaker": cb_state,
             "execution": {
                 "buy_filled": len(report.buy_filled),
                 "buy_rejected": len(report.buy_rejected),
