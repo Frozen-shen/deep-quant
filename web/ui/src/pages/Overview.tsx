@@ -38,6 +38,7 @@ export default function Overview() {
   return (
     <div>
       <h2>毕业指标（目标 2026-11-03）</h2>
+      {metrics.length ? (
       <Row gutter={[12, 12]}>
         {metrics.map((m) => (
           <Col key={m.key} xs={12} md={6}>
@@ -51,6 +52,9 @@ export default function Overview() {
           </Col>
         ))}
       </Row>
+      ) : (
+        <Empty description="毕业指标待计算（模拟盘 8/3 开跑后产生）" />
+      )}
       <Card title="模拟盘净值与回撤" style={{ marginTop: 16 }}>
         {curve.length === 0 ? (
           <Empty description="模拟盘 8/3 开跑后每日累积权益数据" />

@@ -1,4 +1,4 @@
-import { Card, Col, Row, Table, Typography, Spin, Alert } from 'antd'
+import { Card, Col, Row, Table, Typography, Spin, Alert, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 
@@ -19,10 +19,18 @@ export default function Trading() {
         <Col span={8}><Card size="small" title="持仓数">{data.positions?.length}</Card></Col>
         <Col span={8}><Card size="small" title="今日成交">{data.trades?.length}</Card></Col>
       </Row>
-      <Table rowKey="symbol" dataSource={data.positions ?? []} columns={posCols} size="small" style={{ marginTop: 16 }}
-        pagination={{ pageSize: 10 }} />
+      {data.positions?.length ? (
+        <Table rowKey="symbol" dataSource={data.positions} columns={posCols} size="small" style={{ marginTop: 16 }}
+          pagination={{ pageSize: 10 }} />
+      ) : (
+        <Empty description="暂无持仓" style={{ marginTop: 24 }} />
+      )}
       <Typography.Title level={5} style={{ marginTop: 24 }}>最近成交</Typography.Title>
-      <Table rowKey={(_r, i) => `${i}`} dataSource={data.trades ?? []} columns={tradeCols} size="small" />
+      {data.trades?.length ? (
+        <Table rowKey={(_r, i) => `${i}`} dataSource={data.trades} columns={tradeCols} size="small" />
+      ) : (
+        <Empty description="暂无成交记录" />
+      )}
     </div>
   )
 }

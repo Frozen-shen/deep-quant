@@ -15,6 +15,7 @@ export default function Factors() {
   if (isLoading) return <Spin />
   if (isError) return <Alert type="error" message="加载失败" />
   const sources = data?.sources ?? []
+  const resultOf = (s: string) => data?.results?.[s] ?? { results: [], meta: {} }
   const cols = ['factor', 'ic_mean', 'icir', 'ic_std', 'n_days', 'pos_ratio'].map((k) => ({
     title: k, dataIndex: k,
     render: (v: unknown): ReactNode => (typeof v === 'number' ? Number(v).toFixed(4) : (v as ReactNode)),
@@ -22,20 +23,24 @@ export default function Factors() {
   return (
     <div>
       <Typography.Title level={4}>因子 IC 验证结果</Typography.Title>
+      {sources.length === 0 ? (
+        <Alert type="info" message="暂无因子 IC 数据（数据积累中）" />
+      ) : (
       <Tabs
         items={sources.map((s: string) => ({
           key: s, label: sourceLabel[s] ?? s,
           children: (
             <div>
               <Typography.Paragraph type="secondary">
-                {data.results[s]?.meta?.description ?? ''}
+                {resultOf(s).meta?.description ?? ''}
               </Typography.Paragraph>
               <Table rowKey="factor" size="small" columns={cols}
-                dataSource={data.results[s]?.results ?? []} pagination={{ pageSize: 20 }} />
+                dataSource={resultOf(s).results ?? []} pagination={{ pageSize: 20 }} />
             </div>
           ),
         }))}
       />
+      )}
     </div>
   )
 }

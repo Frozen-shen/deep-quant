@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Card, AutoComplete, Spin, Alert, Typography } from 'antd'
+import { Card, AutoComplete, Spin, Alert, Typography, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
 import { api } from '../api'
@@ -38,13 +38,16 @@ export default function Stocks() {
         style={{ width: 320 }} options={options} onSearch={setQ}
         onSelect={(v) => setSymbol(v)} placeholder="输入代码或名称（如 600519 / 茅台）"
       />
+      {search.isError && <Alert type="error" message="股票搜索服务不可用" style={{ marginTop: 16 }} />}
       {detail.isLoading && <Spin style={{ marginTop: 24, display: 'block' }} />}
       {detail.isError && <Alert type="error" message="股票不存在或数据缺失" style={{ marginTop: 16 }} />}
-      {detail.data && (
+      {detail.data && (ohlc.length ? (
         <Card title={`${detail.data.symbol} ${detail.data.name}`} style={{ marginTop: 16 }}>
           <ReactECharts option={candleOption} style={{ height: 420 }} />
         </Card>
-      )}
+      ) : (
+        <Empty description="该股票暂无行情数据" style={{ marginTop: 24 }} />
+      ))}
     </div>
   )
 }

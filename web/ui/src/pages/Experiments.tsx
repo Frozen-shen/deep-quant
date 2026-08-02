@@ -1,4 +1,4 @@
-import { Card, Col, Row, Table, Typography, Spin, Alert } from 'antd'
+import { Card, Col, Row, Table, Typography, Spin, Alert, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 
@@ -19,7 +19,11 @@ export default function Experiments() {
           脚本分布：{Object.entries(data?.by_script ?? {}).map(([k, v]) => `${k}×${v}`).join('、')}
         </Card></Col>
       </Row>
-      <Table rowKey="experiment_id" dataSource={exps} columns={cols} size="small" style={{ marginTop: 16 }} />
+      {exps.length ? (
+        <Table rowKey="experiment_id" dataSource={exps} columns={cols} size="small" style={{ marginTop: 16 }} />
+      ) : (
+        <Empty description="暂无实验记录" style={{ marginTop: 24 }} />
+      )}
     </div>
   )
 }

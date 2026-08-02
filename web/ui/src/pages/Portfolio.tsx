@@ -1,4 +1,4 @@
-import { Card, Spin, Alert, Table, Typography } from 'antd'
+import { Card, Spin, Alert, Table, Typography, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 
@@ -17,7 +17,11 @@ export default function Portfolio() {
     <div>
       <Typography.Title level={4}>模拟盘组合</Typography.Title>
       <Card>现金 {data.cash?.toLocaleString()} / 初始 {data.initial_capital?.toLocaleString()} / 起始 {data.inception_date}</Card>
-      <Table rowKey="symbol" dataSource={data.positions ?? []} columns={cols} pagination={false} style={{ marginTop: 16 }} />
+      {data.positions?.length ? (
+        <Table rowKey="symbol" dataSource={data.positions} columns={cols} pagination={false} style={{ marginTop: 16 }} />
+      ) : (
+        <Empty description="暂无持仓（模拟盘 8/3 开跑后产生）" style={{ marginTop: 24 }} />
+      )}
     </div>
   )
 }

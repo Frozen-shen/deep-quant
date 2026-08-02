@@ -12,6 +12,8 @@ class PaperAdapter(BrokerAdapter):
 
     def __init__(self, cfg: Optional[dict] = None):
         self.cfg = cfg or {}
+        # 支持隔离测试：传入 cfg["db_path"] 指向临时数据库，避免污染生产 quant.db
+        self.path = self.cfg.get("db_path") or storage.DB_PATH
 
     def connect(self) -> bool:
         return True
@@ -23,7 +25,7 @@ class PaperAdapter(BrokerAdapter):
         # 简化：按最新收盘价成交（真实路径走 PaperExecutor.execute_orders）
         storage.record_trade(symbol=symbol, market="A", date="", action=side,
                              qty=qty, price=price or 0.0, commission=0.0,
-                             reason="paper_adapter")
+                             reason="paper_adapter", path=self.path)
         return order_id
 
     def cancel_order(self, order_id: str) -> bool:
@@ -42,7 +44,7 @@ class PaperAdapter(BrokerAdapter):
 
     def get_positions(self) -> List[Dict]:
         out = []
-        for p in storage.get_all_positions():
+        for p in storage.get_all_positions(path=self.path):
             out.append({"symbol": p["symbol"], "qty": p["qty"],
                         "avg_cost": p["avg_cost"], "market_value": 0.0})
         return out
@@ -51,7 +53,7 @@ class PaperAdapter(BrokerAdapter):
         return []
 
     def get_trades(self, date: str) -> List[Dict]:
-        return storage.get_trades(limit=100)
+        return storage.get_trades(limit=100, path=self.path)
 
     def get_quotes(self, symbols: List[str]) -> Dict:
         import data_cache
