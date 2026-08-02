@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "generated_at": "2026-08-01 22:22:25",
+    "description": "市场相对因子 IC 验证 (P7)",
+    "research_period": "2018-01-01 ~ 2022-12-31",
+    "horizon": 20,
+    "sample_interval": 20,
+    "n_stocks": 2979,
+    "elapsed_s": 614.7
+  },
+  "results": [
+    {
+      "factor": "rel_mom_20d",
+      "icir": -0.5331,
+      "ic_mean": -0.06168,
+      "ic_std": 0.1157,
+      "n_days": 58,
+      "pos_ratio": 0.31,
+      "abs_ic_mean": 0.06168,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "rel_mom_60d",
+      "icir": -0.5274,
+      "ic_mean": -0.06309,
+      "ic_std": 0.11963,
+      "n_days": 58,
+      "pos_ratio": 0.276,
+      "abs_ic_mean": 0.06309,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "true_beta",
+      "icir": -0.0622,
+      "ic_mean": -0.00944,
+      "ic_std": 0.1517,
+      "n_days": 58,
+      "pos_ratio": 0.448,
+      "abs_ic_mean": 0.00944,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "idio_vol",
+      "icir": -0.7329,
+      "ic_mean": -0.09009,
+      "ic_std": 0.12293,
+      "n_days": 58,
+      "pos_ratio": 0.224,
+      "abs_ic_mean": 0.09009,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "rel_strength",
+      "icir": 0.0524,
+      "ic_mean": 0.00686,
+      "ic_std": 0.13093,
+      "n_days": 58,
+      "pos_ratio": 0.534,
+      "abs_ic_mean": 0.00686,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "max_dd_60d",
+      "icir": 0.0725,
+      "ic_mean": 0.00707,
+      "ic_std": 0.09755,
+      "n_days": 58,
+      "pos_ratio": 0.5,
+      "abs_ic_mean": 0.00707,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "downside_vol",
+      "icir": -0.4464,
+      "ic_mean": -0.04533,
+      "ic_std": 0.10156,
+      "n_days": 58,
+      "pos_ratio": 0.328,
+      "abs_ic_mean": 0.04533,
+      "horizon": 20,
+      "category": "relative"
+    },
+    {
+      "factor": "sortino_20d",
+      "icir": -0.5165,
+      "ic_mean": -0.05712,
+      "ic_std": 0.11059,
+      "n_days": 58,
+      "pos_ratio": 0.328,
+      "abs_ic_mean": 0.05712,
+      "horizon": 20,
+      "category": "relative"
+    }
+  ]
+}

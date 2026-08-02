@@ -57,12 +57,13 @@ BLIND_END = PARTITIONS["blind"]["end"]         # 2026-07-31
 
 BT_CONFIG = {
     "rebalance_days": 20,
-    "top_k": config["execution"]["top_k"],
-    "initial_capital": config["execution"]["initial_capital"],
+    "top_k": 15,                              # 优化C: 小资金15只
+    "initial_capital": 100000,                 # 优化C: 10万模拟盘
     "lot_size": config["execution"]["lot_size"],
     "slippage_bps": config["execution"]["slippage_bps"],
     "commission_buy": config["execution"]["commission_buy"],
     "commission_sell": config["execution"]["commission_sell"],
+    "target_annual_vol": 0.15,                 # 优化E: 目标年化波动率15%
 }
 
 
@@ -84,42 +85,99 @@ def load_factors() -> List[dict]:
 
 
 def compute_composite_scores(factors: List[dict], all_data: dict,
-                             factor_cache, today) -> Dict[str, float]:
-    """IC加权线性组合。"""
-    factor_names = [f["name"] for f in factors]
+                             factor_cache, today,
+                             fund_panel: dict = None) -> Dict[str, float]:
+    """IC加权线性组合 (支持价量+基本面+相对+北向因子)。"""
+    pv_factors = [f for f in factors if f.get("category") == "price_volume"]
+    fund_factors = [f for f in factors if f.get("category") == "fundamental"]
+    rel_factors = [f for f in factors if f.get("category") == "relative"]
+    nb_factors = [f for f in factors if f.get("category") == "northbound"]
+    all_factor_names = [f["name"] for f in factors]
     weights = np.array([f["icir"] * f.get("weight_multiplier", 1.0) for f in factors])
     abs_weight_sum = np.sum(np.abs(weights))
     if abs_weight_sum < 1e-9:
         return {}
 
-    raw_values = {name: {} for name in factor_names}
+    # 收集价量因子值
+    raw_values = {name: {} for name in all_factor_names}
+    pv_names = set(f["name"] for f in pv_factors)
+
     for sym in all_data:
         feats = factor_cache.get(sym, today)
         if feats is None:
             continue
-        for name in factor_names:
+        for name in pv_names:
             val = feats.get(name, np.nan)
             if not np.isnan(val):
                 raw_values[name][sym] = val
 
-    valid_syms = None
-    for name in factor_names:
-        s = set(raw_values[name].keys())
-        valid_syms = s if valid_syms is None else (valid_syms & s)
+    # 收集基本面因子值 (point-in-time)
+    if fund_factors and fund_panel:
+        from fundamental_fetcher import compute_fundamental_factors
+        fund_values = compute_fundamental_factors(fund_panel, all_data, today)
+        for sym, fvals in fund_values.items():
+            for name in fvals:
+                if name in raw_values:
+                    raw_values[name][sym] = fvals[name]
 
-    if valid_syms is None or len(valid_syms) < BT_CONFIG["top_k"]:
+    # 收集相对因子值 (需指数数据)
+    if rel_factors:
+        from relative_factors import compute_relative_factors_batch
+        rel_values = compute_relative_factors_batch(all_data, today)
+        for sym, fvals in rel_values.items():
+            for name in fvals:
+                if name in raw_values:
+                    raw_values[name][sym] = fvals[name]
+
+    # 收集北向资金因子值
+    if nb_factors:
+        from smart_money_fetcher import load_smart_money_data, compute_northbound_factors
+        nb_data = load_smart_money_data()
+        if nb_data:
+            nb_values = compute_northbound_factors(nb_data, today)
+            for sym, fvals in nb_values.items():
+                for name in fvals:
+                    if name in raw_values:
+                        raw_values[name][sym] = fvals[name]
+
+    # 收集分钟频因子值
+    min_factors = [f for f in factors if f.get("category") == "minute"]
+    if min_factors:
+        from minute_factors import load_minute_data, compute_minute_factors_batch
+        min_data = load_minute_data()
+        if min_data:
+            min_values = compute_minute_factors_batch(min_data, today)
+            for sym, fvals in min_values.items():
+                for name in fvals:
+                    if name in raw_values:
+                        raw_values[name][sym] = fvals[name]
+
+    # 宽容策略: 股票有 >= 50% 因子有值就参与
+    sym_coverage = {}
+    for name in all_factor_names:
+        for sym in raw_values[name]:
+            sym_coverage[sym] = sym_coverage.get(sym, 0) + 1
+
+    min_coverage = max(1, len(all_factor_names) // 2)
+    valid_syms = sorted(s for s, c in sym_coverage.items() if c >= min_coverage)
+
+    if len(valid_syms) < BT_CONFIG["top_k"]:
         return {}
 
-    valid_syms = sorted(valid_syms)
     n = len(valid_syms)
     composite = np.zeros(n)
 
-    for fi, name in enumerate(factor_names):
-        vals = np.array([raw_values[name][s] for s in valid_syms])
-        mean, std = vals.mean(), vals.std()
+    for fi, name in enumerate(all_factor_names):
+        vals_dict = raw_values[name]
+        vals = np.array([vals_dict.get(s, np.nan) for s in valid_syms])
+        valid_mask = ~np.isnan(vals)
+        if valid_mask.sum() < 30:
+            continue
+        valid_vals = vals[valid_mask]
+        mean, std = valid_vals.mean(), valid_vals.std()
         if std < 1e-9:
             continue
-        z = (vals - mean) / std
+        z = np.where(valid_mask, (vals - mean) / std, 0.0)
         composite += weights[fi] * z
 
     composite /= abs_weight_sum
@@ -143,7 +201,8 @@ def load_benchmark(start: str, end: str):
 
 
 def run_backtest(factors: List[dict], all_data: dict, factor_cache,
-                 start: str, end: str, label: str, use_regime: bool = True) -> dict:
+                 start: str, end: str, label: str, use_regime: bool = True,
+                 fund_panel: dict = None) -> dict:
     """在指定期间跑回测 (含 regime 自适应)。"""
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -169,9 +228,9 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     rules = TradingRules()
     ranker = PortfolioRanker(
         top_k=BT_CONFIG["top_k"],
-        n_drop=10,
+        n_drop=8,               # 适度建仓, 不至于全仓换血
         hold_thresh=10,
-        sell_rank_buffer=3,
+        sell_rank_buffer=2,
         buy_confirm_days=1,
         cost_threshold=0.03,
     )
@@ -200,6 +259,7 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
     total_trades = 0
     pending_decision = None
     prev_equity = float(BT_CONFIG["initial_capital"])
+    vol_scale = 1.0  # 优化E: 波动率缩放因子
 
     for di, today in enumerate(bt_dates):
         if pending_decision is not None:
@@ -224,7 +284,7 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
             else:
                 adapted_factors = factors
 
-            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today)
+            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today, fund_panel=fund_panel)
             if scores and len(scores) >= BT_CONFIG["top_k"]:
                 tradeable = {}
                 for sym, sc in scores.items():
@@ -242,6 +302,11 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
                     decision["sell"] = [s for s in decision["sell"]
                                        if s in all_data and rules.can_sell(
                                            s, all_data[s][all_data[s]["date"] <= today].tail(2))]
+                    # 优化E: 波动率缩放 — 高波动时减少买入数量
+                    if vol_scale < 1.0 and decision.get("buy"):
+                        n_keep = max(1, int(len(decision["buy"]) * vol_scale))
+                        decision["buy"] = decision["buy"][:n_keep]
+
                     pending_decision = decision
                     rebalance_count += 1
                     n_turn = (len(decision.get("sell", [])) + len(decision.get("buy", []))) / (2 * BT_CONFIG["top_k"])
@@ -262,6 +327,15 @@ def run_backtest(factors: List[dict], all_data: dict, factor_cache,
         daily_ret = (equity / prev_equity - 1) if prev_equity > 0 else 0.0
         daily_returns.append(daily_ret)
         prev_equity = equity
+
+        # 优化E: 波动率缩放 — 滚动20日年化波动率超目标时缩仓
+        target_vol = BT_CONFIG.get("target_annual_vol", 0.15)
+        if len(daily_returns) >= 20:
+            recent_vol = np.std(daily_returns[-20:]) * np.sqrt(252)
+            if recent_vol > target_vol:
+                vol_scale = max(0.3, target_vol / recent_vol)  # 最低保留30%仓位
+            else:
+                vol_scale = 1.0
 
         if (di + 1) % 50 == 0:
             log_msg(f"    Day {di+1}/{len(bt_dates)}: equity={equity:,.0f}")
@@ -383,6 +457,14 @@ def main():
             all_data[sym] = df
     log_msg(f"  有效: {len(all_data)} 只")
 
+    # 加载基本面数据
+    from fundamental_fetcher import load_fundamental_panel
+    fund_panel = load_fundamental_panel()
+    if fund_panel:
+        log_msg(f"  基本面: {len(fund_panel)} 只股票已加载")
+    else:
+        log_msg("  基本面: 无数据 (仅使用价量因子)")
+
     # 预计算因子
     log_msg("预计算因子...")
     scorer = FactorScorer.from_preset("full_auto")
@@ -404,12 +486,14 @@ def main():
     if not args.blind_only:
         results["test"] = run_backtest(
             factors, all_data, factor_cache,
-            TEST_START, TEST_END, "TEST (最终确认)", use_regime=use_regime)
+            TEST_START, TEST_END, "TEST (最终确认)", use_regime=use_regime,
+            fund_panel=fund_panel)
 
     if not args.test_only:
         results["blind"] = run_backtest(
             factors, all_data, factor_cache,
-            BLIND_START, BLIND_END, "BLIND (模拟盘期)", use_regime=use_regime)
+            BLIND_START, BLIND_END, "BLIND (模拟盘期)", use_regime=use_regime,
+            fund_panel=fund_panel)
 
     # 输出
     output = {

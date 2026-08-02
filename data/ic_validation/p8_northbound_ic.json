@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "generated_at": "2026-08-02 00:31:33",
+    "description": "北向资金因子 IC 验证 (P8)",
+    "research_period": "2018-01-01 ~ 2022-12-31",
+    "horizon": 20,
+    "sample_interval": 20,
+    "n_stocks": 2979,
+    "n_northbound": 1939,
+    "elapsed_s": 67.4
+  },
+  "results": [
+    {
+      "factor": "nb_holding_pct",
+      "icir": 0.1864,
+      "ic_mean": 0.02495,
+      "ic_std": 0.13383,
+      "n_days": 61,
+      "pos_ratio": 0.574,
+      "abs_ic_mean": 0.02495,
+      "horizon": 20,
+      "category": "northbound"
+    },
+    {
+      "factor": "nb_change_5d",
+      "icir": 0.4794,
+      "ic_mean": 0.02534,
+      "ic_std": 0.05286,
+      "n_days": 61,
+      "pos_ratio": 0.689,
+      "abs_ic_mean": 0.02534,
+      "horizon": 20,
+      "category": "northbound"
+    },
+    {
+      "factor": "nb_change_20d",
+      "icir": 0.2676,
+      "ic_mean": 0.01611,
+      "ic_std": 0.0602,
+      "n_days": 61,
+      "pos_ratio": 0.59,
+      "abs_ic_mean": 0.01611,
+      "horizon": 20,
+      "category": "northbound"
+    },
+    {
+      "factor": "nb_momentum",
+      "icir": 0.5173,
+      "ic_mean": 0.02413,
+      "ic_std": 0.04666,
+      "n_days": 61,
+      "pos_ratio": 0.689,
+      "abs_ic_mean": 0.02413,
+      "horizon": 20,
+      "category": "northbound"
+    },
+    {
+      "factor": "nb_new_high",
+      "icir": 0.3475,
+      "ic_mean": 0.01859,
+      "ic_std": 0.05349,
+      "n_days": 61,
+      "pos_ratio": 0.623,
+      "abs_ic_mean": 0.01859,
+      "horizon": 20,
+      "category": "northbound"
+    }
+  ]
+}

@@ -31,7 +31,7 @@ import numpy as np
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
-MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_cache", "minute")
+MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "minute")
 DEFAULT_PERIOD = "5"        # 5分钟线
 DEFAULT_CACHE_DAYS = 60     # 滚动保留天数
 

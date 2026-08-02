@@ -102,14 +102,26 @@ CANDLESTICK_FACTORS = {
 #  日内因子 (Intraday Factors)
 # ================================================================
 
-INTRADAY_FACTORS = {
-    "intraday_vol":        "日内波动率 (high/low-1)",
-    "vwap_deviation":      "收盘价 vs VWAP 偏离度",
-    "tail_return":         "尾盘效应 (最后30min收益)",
-    "open_change":         "开盘跳空 (vs 昨日收盘)",
-    "intraday_trend":      "日内趋势 (开盘→收盘)",
-    "intraday_vol_ratio":  "日内量比",
+# ================================================================
+#  分钟频因子 (5分钟K线聚合为日频, 由 minute_factors.py 计算)
+#  非DSL表达式 — 需要分钟级数据, 通过 compute_minute_factors_batch() 获取
+# ================================================================
+
+MINUTE_FACTORS = {
+    "min_realized_vol":      "已实现波动率 (5min returns std × √(48×252))",
+    "min_realized_skew":     "已实现偏度 (5min returns skewness)",
+    "min_vwap_dev":          "收盘 vs VWAP 偏离度",
+    "min_tail_return":       "尾盘效应 (最后30min收益)",
+    "min_open_gap":          "开盘跳空 (vs 昨日收盘)",
+    "min_intraday_trend":    "日内趋势 (open→close)",
+    "min_vol_concentration": "成交集中度 (Gini系数, 高=主力集中交易)",
+    "min_large_order_flow":  "大单净流入代理 (高volume bar的净方向)",
+    "min_am_pm_ratio":       "上下午量比 (AM/PM volume)",
+    "min_close_strength":    "收盘强度 (close在日内range中的位置)",
 }
+
+# 保留旧名称兼容 (deprecated)
+INTRADAY_FACTORS = MINUTE_FACTORS
 
 
 # ================================================================
@@ -289,6 +301,23 @@ MICROSTRUCTURE_FACTORS = {
 
 
 # ================================================================
+#  市场相对因子 (Market-Relative Factors)
+#  需要指数数据, 由 relative_factors.py 计算 (非表达式因子)
+# ================================================================
+
+RELATIVE_FACTORS = {
+    "rel_mom_20d":  "stock 20d return - index 20d return (relative momentum)",
+    "rel_mom_60d":  "stock 60d return - index 60d return (relative momentum)",
+    "true_beta":    "CAPM beta (OLS slope of stock_ret vs index_ret, 60d)",
+    "idio_vol":     "idiosyncratic volatility (std of OLS residuals, 60d)",
+    "rel_strength": "stock return_20d / index return_20d (ratio)",
+    "max_dd_60d":   "maximum drawdown over trailing 60 days",
+    "downside_vol": "downside deviation (std of negative returns, 20d)",
+    "sortino_20d":  "mean(daily_ret) / downside_vol over 20 days",
+}
+
+
+# ================================================================
 #  Alpha158 补全因子 (Qlib 价量因子, 仅用 OHLCV)
 #  BETA/RSQR/RESI/IMAX/IMIN/IMXD/WVMA/CORD/SUMP/SUMN/SUMD/VMA/VSTD
 #  每个家族覆盖窗口 d ∈ {5, 10, 20, 30, 60}
@@ -368,6 +397,10 @@ def get_candlestick_factors() -> FactorLibrary:
 def get_alpha158_factors() -> FactorLibrary:
     """Alpha158 补全因子 (BETA/RSQR/RESI/IMAX/IMIN/IMXD/WVMA/CORD/SUMP/SUMN/SUMD/VMA/VSTD)。"""
     return FactorLibrary.from_config(ALPHA158_FACTORS)
+
+def get_relative_factor_names() -> list:
+    """Return names of market-relative factors (computed via relative_factors.py)."""
+    return list(RELATIVE_FACTORS.keys())
 
 def get_all_factors() -> FactorLibrary:
     """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构 + Alpha158补全)。"""

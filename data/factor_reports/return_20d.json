@@ -1,0 +1,102 @@
+{
+  "factor": "return_20d",
+  "expr": "Ref($close, 20) / $close - 1",
+  "period": {
+    "start": "2018-01-01",
+    "end": "2022-12-31"
+  },
+  "generated_at": "2026-08-02 08:40:07",
+  "n_stocks": 197,
+  "coverage": 1.0,
+  "n_dates": 1215,
+  "elapsed_s": 23.5,
+  "horizon_ic": {
+    "1": {
+      "ic_mean": 0.035745,
+      "ic_std": 0.170067,
+      "icir": 0.2102,
+      "pos_ratio": 0.5757,
+      "n_days": 1195,
+      "avg_stocks": 148
+    },
+    "5": {
+      "ic_mean": 0.045625,
+      "ic_std": 0.160492,
+      "icir": 0.2843,
+      "pos_ratio": 0.5975,
+      "n_days": 1195,
+      "avg_stocks": 148
+    },
+    "10": {
+      "ic_mean": 0.049596,
+      "ic_std": 0.162596,
+      "icir": 0.305,
+      "pos_ratio": 0.6033,
+      "n_days": 1195,
+      "avg_stocks": 148
+    },
+    "20": {
+      "ic_mean": 0.054477,
+      "ic_std": 0.153541,
+      "icir": 0.3548,
+      "pos_ratio": 0.6276,
+      "n_days": 1195,
+      "avg_stocks": 148
+    },
+    "60": {
+      "ic_mean": 0.045796,
+      "ic_std": 0.141404,
+      "icir": 0.3239,
+      "pos_ratio": 0.5916,
+      "n_days": 1195,
+      "avg_stocks": 148
+    }
+  },
+  "main_horizon": 20,
+  "ic_series_length": 1195,
+  "half_life_days": 20.4,
+  "rolling_ic_latest": 0.176878,
+  "rolling_ic_trend": "improving",
+  "quintile_returns": {
+    "Q1": {
+      "mean": 0.002008,
+      "std": 0.079684,
+      "sharpe": 0.0252
+    },
+    "Q2": {
+      "mean": 0.013032,
+      "std": 0.076662,
+      "sharpe": 0.17
+    },
+    "Q3": {
+      "mean": 0.015875,
+      "std": 0.0785,
+      "sharpe": 0.2022
+    },
+    "Q4": {
+      "mean": 0.015579,
+      "std": 0.081685,
+      "sharpe": 0.1907
+    },
+    "Q5": {
+      "mean": 0.013061,
+      "std": 0.086917,
+      "sharpe": 0.1503
+    },
+    "long_short": {
+      "mean": 0.011052,
+      "std": 0.059244,
+      "sharpe": 0.1866
+    }
+  },
+  "verdict": {
+    "verdict": "PASS",
+    "checks": {
+      "|ICIR| > 0.3": true,
+      "|IC_mean| > 0.02": true,
+      "half_life > 20d": true,
+      "rolling_ic_positive": true
+    },
+    "n_pass": 4
+  }
+}

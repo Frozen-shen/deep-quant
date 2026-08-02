@@ -241,12 +241,14 @@ class RegimeDetector:
     def adapt_factor_weights(self, factors: List[dict], today,
                              regime: "Regime" = None) -> List[dict]:
         """
-        根据市场状态调整因子权重 (核心优化 B)。
+        根据市场状态调整因子权重 (优化 B v3 — 软权重, 不做硬筛选)。
 
         策略:
-          - TREND_UP (牛市): 正IC因子(动量)权重 ×1.5, 负IC因子(防御)权重 ×0.7
-          - TREND_DOWN (熊市): 正IC因子权重 ×0.5, 负IC因子权重 ×1.3
-          - RANGE (震荡): 不调整
+          - TREND_UP (牛市): 正IC因子 ×2.0, 负IC因子 ×0.3
+          - TREND_DOWN (熊市): 负IC因子 ×1.5, 正IC因子 ×0.5
+          - RANGE (震荡): 全部保留, 不调整
+
+        不做硬筛选 (避免regime切换时全仓换血导致换手率爆炸)。
 
         Args:
           factors: [{"name": ..., "icir": ..., "weight_multiplier": ...}, ...]
@@ -266,17 +268,17 @@ class RegimeDetector:
             base_mult = f.get("weight_multiplier", 1.0)
 
             if regime == Regime.TREND_UP:
-                # 牛市: 加强动量(正IC), 弱化防御(负IC)
+                # 牛市: 大幅加强动量(正IC), 大幅弱化防御(负IC)
                 if icir > 0:
-                    new_f["weight_multiplier"] = base_mult * 1.5
+                    new_f["weight_multiplier"] = base_mult * 2.0
                 else:
-                    new_f["weight_multiplier"] = base_mult * 0.7
+                    new_f["weight_multiplier"] = base_mult * 0.3
             elif regime == Regime.TREND_DOWN:
                 # 熊市: 加强防御(负IC), 弱化动量(正IC)
                 if icir > 0:
                     new_f["weight_multiplier"] = base_mult * 0.5
                 else:
-                    new_f["weight_multiplier"] = base_mult * 1.3
+                    new_f["weight_multiplier"] = base_mult * 1.5
             # RANGE: 不调整
 
             adapted.append(new_f)
@@ -285,12 +287,12 @@ class RegimeDetector:
 
     def get_turnover_params(self, today, regime: "Regime" = None) -> dict:
         """
-        根据市场状态返回换手控制参数 (核心优化 A)。
+        根据市场状态返回换手控制参数 (优化 C: 适度建仓)。
 
         设计原则:
-          - n_drop 不能太小 (否则从0建仓到top_k需要太多周期)
-          - cost_threshold 不能太大 (否则无法换仓, 持仓僵化)
-          - hold_thresh 控制最短持有期, 防止频繁翻转
+          - n_drop=8: 允许较快建仓但不至于全仓换血
+          - hold_thresh 适中: 防止频繁翻转
+          - cost_threshold 低: 确保信号能执行
 
         Returns:
           {"hold_thresh": int, "n_drop": int, "cost_threshold": float,
@@ -300,14 +302,14 @@ class RegimeDetector:
             regime = self.detect(today)
 
         if regime == Regime.TREND_UP:
-            # 牛市: 允许更积极调仓, 追涨
-            return {"hold_thresh": 10, "n_drop": 10, "cost_threshold": 0.03,
-                    "sell_rank_buffer": 3}
+            # 牛市: 较快调仓
+            return {"hold_thresh": 8, "n_drop": 8, "cost_threshold": 0.02,
+                    "sell_rank_buffer": 2}
         elif regime == Regime.TREND_DOWN:
-            # 熊市: 减少换手, 但不是完全锁死
-            return {"hold_thresh": 15, "n_drop": 6, "cost_threshold": 0.06,
-                    "sell_rank_buffer": 4}
+            # 熊市: 适度保守
+            return {"hold_thresh": 12, "n_drop": 5, "cost_threshold": 0.04,
+                    "sell_rank_buffer": 3}
         else:
             # 震荡: 中等
-            return {"hold_thresh": 12, "n_drop": 8, "cost_threshold": 0.04,
-                    "sell_rank_buffer": 3}
+            return {"hold_thresh": 10, "n_drop": 6, "cost_threshold": 0.03,
+                    "sell_rank_buffer": 2}

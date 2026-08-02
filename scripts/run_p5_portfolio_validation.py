@@ -59,7 +59,18 @@ except GateViolation as e:
 
 IC_DIR = os.path.join(BASE_DIR, "data", "ic_validation")
 IC_INPUT = os.path.join(IC_DIR, "p3_full_ic.json")
+IC_FUND_INPUT = os.path.join(IC_DIR, "p6_fundamental_ic.json")
+IC_REL_INPUT = os.path.join(IC_DIR, "p7_relative_ic.json")
+IC_NB_INPUT = os.path.join(IC_DIR, "p8_northbound_ic.json")
+IC_MIN_INPUT = os.path.join(IC_DIR, "p9_minute_ic.json")
 REPORT_PATH = os.path.join(IC_DIR, "p5_portfolio_report.json")
+
+# 北向因子暂不参与组合 (覆盖率仅65%, z-score填0引入噪声, v4验证IR下降)
+# 后续可用 coverage-aware weighting 重新集成
+USE_NORTHBOUND = False
+
+# 分钟频因子 (需 data_store/minute/ 有数据)
+USE_MINUTE = True
 
 # 从 config.yaml 读取参数
 CORR_THRESHOLD = config["factors"]["corr_threshold"]  # 0.6
@@ -96,7 +107,7 @@ GO_CRITERIA = {
 # ═══════════════════════════════════════════════════════════
 
 def load_and_select_factors() -> List[dict]:
-    """加载 IC 结果并筛选 (优化 C: 阈值 0.2)。"""
+    """加载 IC 结果并筛选 (优化 C: 阈值 0.2, 含基本面因子)。"""
     if not os.path.exists(IC_INPUT):
         log.error("IC 结果文件不存在: %s", IC_INPUT)
         sys.exit(1)
@@ -105,7 +116,7 @@ def load_and_select_factors() -> List[dict]:
         data = json.load(f)
 
     results = data["results"]
-    log.info("加载 IC 结果: %d 个因子", len(results))
+    log.info("加载价量 IC 结果: %d 个因子", len(results))
 
     # 筛选 |ICIR| > 阈值
     selected = []
@@ -122,16 +133,104 @@ def load_and_select_factors() -> List[dict]:
                 "weight_multiplier": 1.0,
             })
 
+    # ═══ 加载基本面因子 IC (P6) ═══
+    n_fund = 0
+    if os.path.exists(IC_FUND_INPUT):
+        with open(IC_FUND_INPUT, "r", encoding="utf-8") as f:
+            fund_data = json.load(f)
+        for r in fund_data.get("results", []):
+            if abs(r["icir"]) >= MIN_ABS_ICIR:
+                selected.append({
+                    "name": r["factor"],
+                    "icir": r["icir"],
+                    "abs_icir": abs(r["icir"]),
+                    "ic_mean": r["ic_mean"],
+                    "n_days": r["n_days"],
+                    "pos_ratio": r["pos_ratio"],
+                    "category": "fundamental",
+                    "weight_multiplier": 1.0,
+                })
+                n_fund += 1
+        log.info("加载基本面 IC 结果: %d 个通过阈值", n_fund)
+    else:
+        log.warning("基本面 IC 文件不存在: %s (跳过)", IC_FUND_INPUT)
+
+    # ═══ 加载相对因子 IC (P7) ═══
+    n_rel = 0
+    if os.path.exists(IC_REL_INPUT):
+        with open(IC_REL_INPUT, "r", encoding="utf-8") as f:
+            rel_data = json.load(f)
+        for r in rel_data.get("results", []):
+            if abs(r["icir"]) >= MIN_ABS_ICIR:
+                selected.append({
+                    "name": r["factor"],
+                    "icir": r["icir"],
+                    "abs_icir": abs(r["icir"]),
+                    "ic_mean": r["ic_mean"],
+                    "n_days": r["n_days"],
+                    "pos_ratio": r["pos_ratio"],
+                    "category": "relative",
+                    "weight_multiplier": 1.0,
+                })
+                n_rel += 1
+        log.info("加载相对因子 IC 结果: %d 个通过阈值", n_rel)
+    else:
+        log.warning("相对因子 IC 文件不存在: %s (跳过)", IC_REL_INPUT)
+
+    # ═══ 加载北向资金因子 IC (P8) ═══
+    n_nb = 0
+    if USE_NORTHBOUND and os.path.exists(IC_NB_INPUT):
+        with open(IC_NB_INPUT, "r", encoding="utf-8") as f:
+            nb_data = json.load(f)
+        for r in nb_data.get("results", []):
+            if abs(r["icir"]) >= MIN_ABS_ICIR:
+                selected.append({
+                    "name": r["factor"],
+                    "icir": r["icir"],
+                    "abs_icir": abs(r["icir"]),
+                    "ic_mean": r["ic_mean"],
+                    "n_days": r["n_days"],
+                    "pos_ratio": r["pos_ratio"],
+                    "category": "northbound",
+                    "weight_multiplier": 1.0,
+                })
+                n_nb += 1
+        log.info("加载北向资金 IC 结果: %d 个通过阈值", n_nb)
+    else:
+        log.warning("北向资金 IC 文件不存在: %s (跳过)", IC_NB_INPUT)
+
+    # ═══ 加载分钟频因子 IC (P9) ═══
+    n_min = 0
+    if USE_MINUTE and os.path.exists(IC_MIN_INPUT):
+        with open(IC_MIN_INPUT, "r", encoding="utf-8") as f:
+            min_data = json.load(f)
+        for r in min_data.get("results", []):
+            if abs(r["icir"]) >= MIN_ABS_ICIR:
+                selected.append({
+                    "name": r["factor"],
+                    "icir": r["icir"],
+                    "abs_icir": abs(r["icir"]),
+                    "ic_mean": r["ic_mean"],
+                    "n_days": r["n_days"],
+                    "pos_ratio": r["pos_ratio"],
+                    "category": "minute",
+                    "weight_multiplier": 1.0,
+                })
+                n_min += 1
+        log.info("加载分钟频 IC 结果: %d 个通过阈值", n_min)
+    elif USE_MINUTE:
+        log.info("分钟频 IC 文件不存在: %s (跳过, 需先跑 IC 验证)", IC_MIN_INPUT)
+
     selected.sort(key=lambda x: -x["abs_icir"])
 
     # 统计正/负IC因子
     n_pos = sum(1 for f in selected if f["icir"] > 0)
     n_neg = sum(1 for f in selected if f["icir"] < 0)
-    log.info("筛选通过 (|ICIR| > %.1f): %d 个因子 (正IC: %d, 负IC: %d)",
-             MIN_ABS_ICIR, len(selected), n_pos, n_neg)
+    log.info("筛选通过 (|ICIR| > %.1f): %d 个因子 (正IC: %d, 负IC: %d, 基本面: %d, 相对: %d, 北向: %d, 分钟: %d)",
+             MIN_ABS_ICIR, len(selected), n_pos, n_neg, n_fund, n_rel, n_nb, n_min)
 
     for f in selected[:10]:
-        log.info("  %s: ICIR=%+.4f", f["name"], f["icir"])
+        log.info("  %s: ICIR=%+.4f [%s]", f["name"], f["icir"], f["category"])
     if len(selected) > 10:
         log.info("  ... 共 %d 个", len(selected))
 
@@ -144,13 +243,19 @@ def load_and_select_factors() -> List[dict]:
 
 def prune_correlated_factors(selected: List[dict], all_data: dict,
                              factor_cache) -> Tuple[List[dict], dict]:
-    """贪心剪枝: 按|ICIR|降序, 与已选因子相关>阈值的剔除。"""
+    """贪心剪枝: 按|ICIR|降序, 与已选因子相关>阈值的剔除。
+
+    向量化实现: 逐日构建 (n_stocks × n_factors) rank 矩阵,
+    然后用 numpy corrcoef 一次性算出因子间 Spearman 相关。
+    """
     if len(selected) <= 1:
         return selected, {}
 
     log.info("独立性检验 (|corr| > %.1f 剪枝)...", CORR_THRESHOLD)
 
     factor_names = [f["name"] for f in selected]
+    n = len(factor_names)
+    name_to_idx = {name: i for i, name in enumerate(factor_names)}
 
     # 采样日期 (development 期内每 10 天)
     rs = pd.Timestamp(BT_CONFIG["start"])
@@ -163,54 +268,61 @@ def prune_correlated_factors(selected: List[dict], all_data: dict,
     sample_dates = sorted(all_dates)[::10]
     log.info("  采样日: %d 天", len(sample_dates))
 
-    # 收集截面 rank
-    factor_ranks = {name: {} for name in factor_names}
+    # 向量化: 逐日收集截面数据, 计算 rank 后拼接
+    corr_sum = np.zeros((n, n))
+    corr_count = np.zeros((n, n), dtype=int)
+
     for today in sample_dates:
-        day_values = {name: {} for name in factor_names}
+        # 收集当日所有股票的因子值 → (n_stocks, n_factors) 矩阵
+        rows = []
         for sym in all_data:
             feats = factor_cache.get(sym, today)
             if feats is None:
                 continue
-            for name in factor_names:
-                val = feats.get(name, np.nan)
-                if not np.isnan(val):
-                    day_values[name][sym] = val
+            row = [feats.get(name, np.nan) for name in factor_names]
+            rows.append(row)
 
-        for name in factor_names:
-            vals = day_values[name]
-            if len(vals) < 30:
-                continue
-            syms = list(vals.keys())
-            arr = np.array([vals[s] for s in syms])
-            ranks = rankdata(arr)
-            factor_ranks[name][today] = dict(zip(syms, ranks))
+        if len(rows) < 30:
+            continue
 
-    # 计算 pairwise 相关
-    n = len(factor_names)
-    corr_matrix = np.zeros((n, n))
-    for i in range(n):
-        corr_matrix[i, i] = 1.0
-        for j in range(i + 1, n):
-            ni, nj = factor_names[i], factor_names[j]
-            common_dates = set(factor_ranks[ni].keys()) & set(factor_ranks[nj].keys())
-            if len(common_dates) < 5:
+        mat = np.array(rows)  # (n_stocks, n_factors)
+
+        # 逐列 rank (Spearman = Pearson on ranks)
+        ranked = np.zeros_like(mat)
+        valid_cols = []
+        for col_i in range(n):
+            col = mat[:, col_i]
+            valid = ~np.isnan(col)
+            if valid.sum() < 30:
                 continue
-            corrs = []
-            for d in common_dates:
-                ri = factor_ranks[ni][d]
-                rj = factor_ranks[nj][d]
-                common_syms = set(ri.keys()) & set(rj.keys())
-                if len(common_syms) < 30:
-                    continue
-                syms = list(common_syms)
-                a = np.array([ri[s] for s in syms])
-                b = np.array([rj[s] for s in syms])
-                c, _ = spearmanr(a, b)
-                if not np.isnan(c):
-                    corrs.append(c)
-            if corrs:
-                corr_matrix[i, j] = np.mean(corrs)
-                corr_matrix[j, i] = corr_matrix[i, j]
+            ranked[valid, col_i] = rankdata(col[valid])
+            ranked[~valid, col_i] = np.nan
+            valid_cols.append(col_i)
+
+        if len(valid_cols) < 2:
+            continue
+
+        # 用 pandas 快速计算相关矩阵 (自动处理 NaN pairwise)
+        sub = ranked[:, valid_cols]
+        # 填充 NaN 为列均值以使用 numpy corrcoef (快速)
+        col_means = np.nanmean(sub, axis=0)
+        for ci in range(sub.shape[1]):
+            nan_mask = np.isnan(sub[:, ci])
+            sub[nan_mask, ci] = col_means[ci]
+
+        c = np.corrcoef(sub.T)  # (n_valid, n_valid)
+        c = np.nan_to_num(c, 0.0)
+
+        # 映射回完整索引
+        for ii, gi in enumerate(valid_cols):
+            for jj, gj in enumerate(valid_cols):
+                corr_sum[gi, gj] += c[ii, jj]
+                corr_count[gi, gj] += 1
+
+    # 平均相关
+    with np.errstate(divide='ignore', invalid='ignore'):
+        corr_matrix = np.where(corr_count > 0, corr_sum / corr_count, 0.0)
+    np.fill_diagonal(corr_matrix, 1.0)
 
     # 贪心剪枝
     kept = []
@@ -238,7 +350,7 @@ def prune_correlated_factors(selected: List[dict], all_data: dict,
     for name, info in list(pruned_info.items())[:5]:
         log.info("    ✂ %s (与 %s 相关 %.3f)", name, info["pruned_by"], info["correlation"])
 
-    # 构建相关性 dict
+    # 构建相关性 dict (top-20 因子中 |corr|>0.3 的对)
     corr_dict = {}
     for i in range(min(n, 20)):
         for j in range(i + 1, min(n, 20)):
@@ -254,43 +366,112 @@ def prune_correlated_factors(selected: List[dict], all_data: dict,
 # ═══════════════════════════════════════════════════════════
 
 def compute_composite_scores(factors: List[dict], all_data: dict,
-                             factor_cache, today) -> Dict[str, float]:
-    """IC加权线性组合 → 截面 z-score → 复合得分。"""
-    factor_names = [f["name"] for f in factors]
+                             factor_cache, today,
+                             fund_panel: dict = None) -> Dict[str, float]:
+    """
+    IC加权线性组合 → 截面 z-score → 复合得分。
+
+    支持四类因子:
+      - price_volume: 从 factor_cache 获取 (日频)
+      - fundamental: 从 fund_panel 获取 (季频, point-in-time)
+      - relative: 从 relative_factors 获取 (需指数数据)
+      - northbound: 从 smart_money_fetcher 获取 (北向资金)
+
+    对缺失值采用宽容策略: 只要股票有 >= 50% 的因子有值就参与排名。
+    """
+    pv_factors = [f for f in factors if f["category"] == "price_volume"]
+    fund_factors = [f for f in factors if f["category"] == "fundamental"]
+    rel_factors = [f for f in factors if f["category"] == "relative"]
+    all_factor_names = [f["name"] for f in factors]
     weights = np.array([f["icir"] * f["weight_multiplier"] for f in factors])
     abs_weight_sum = np.sum(np.abs(weights))
     if abs_weight_sum < 1e-9:
         return {}
 
-    raw_values = {name: {} for name in factor_names}
+    # ── 收集价量因子值 ──
+    raw_values = {name: {} for name in all_factor_names}
+    pv_names = set(f["name"] for f in pv_factors)
+
     for sym in all_data:
         feats = factor_cache.get(sym, today)
         if feats is None:
             continue
-        for name in factor_names:
+        for name in pv_names:
             val = feats.get(name, np.nan)
             if not np.isnan(val):
                 raw_values[name][sym] = val
 
-    # 所有因子都有值的股票
-    valid_syms = None
-    for name in factor_names:
-        s = set(raw_values[name].keys())
-        valid_syms = s if valid_syms is None else (valid_syms & s)
+    # ── 收集基本面因子值 (point-in-time) ──
+    if fund_factors and fund_panel:
+        from fundamental_fetcher import compute_fundamental_factors
+        fund_values = compute_fundamental_factors(fund_panel, all_data, today)
+        for sym, fvals in fund_values.items():
+            for name in fvals:
+                if name in raw_values:
+                    raw_values[name][sym] = fvals[name]
 
-    if valid_syms is None or len(valid_syms) < BT_CONFIG["top_k"]:
+    # ── 收集相对因子值 (需指数数据) ──
+    if rel_factors:
+        from relative_factors import compute_relative_factors_batch
+        rel_values = compute_relative_factors_batch(all_data, today)
+        for sym, fvals in rel_values.items():
+            for name in fvals:
+                if name in raw_values:
+                    raw_values[name][sym] = fvals[name]
+
+    # ── 收集北向资金因子值 ──
+    nb_factors = [f for f in factors if f["category"] == "northbound"]
+    if nb_factors and USE_NORTHBOUND:
+        from smart_money_fetcher import load_smart_money_data, compute_northbound_factors
+        nb_data = load_smart_money_data()
+        if nb_data:
+            nb_values = compute_northbound_factors(nb_data, today)
+            for sym, fvals in nb_values.items():
+                for name in fvals:
+                    if name in raw_values:
+                        raw_values[name][sym] = fvals[name]
+
+    # ── 收集分钟频因子值 ──
+    min_factors = [f for f in factors if f["category"] == "minute"]
+    if min_factors and USE_MINUTE:
+        from minute_factors import load_minute_data, compute_minute_factors_batch
+        min_data = load_minute_data()
+        if min_data:
+            min_values = compute_minute_factors_batch(min_data, today)
+            for sym, fvals in min_values.items():
+                for name in fvals:
+                    if name in raw_values:
+                        raw_values[name][sym] = fvals[name]
+
+    # ── 宽容策略: 股票有 >= 50% 因子有值就参与 ──
+    # 统计每只股票有多少因子有值
+    sym_coverage = {}
+    for name in all_factor_names:
+        for sym in raw_values[name]:
+            sym_coverage[sym] = sym_coverage.get(sym, 0) + 1
+
+    min_coverage = max(1, len(all_factor_names) // 2)
+    valid_syms = sorted(s for s, c in sym_coverage.items() if c >= min_coverage)
+
+    if len(valid_syms) < BT_CONFIG["top_k"]:
         return {}
 
-    valid_syms = sorted(valid_syms)
     n = len(valid_syms)
     composite = np.zeros(n)
 
-    for fi, name in enumerate(factor_names):
-        vals = np.array([raw_values[name][s] for s in valid_syms])
-        mean, std = vals.mean(), vals.std()
+    for fi, name in enumerate(all_factor_names):
+        vals_dict = raw_values[name]
+        # 收集有值的股票
+        vals = np.array([vals_dict.get(s, np.nan) for s in valid_syms])
+        valid_mask = ~np.isnan(vals)
+        if valid_mask.sum() < 30:
+            continue
+        # 只用有值的股票计算 z-score
+        valid_vals = vals[valid_mask]
+        mean, std = valid_vals.mean(), valid_vals.std()
         if std < 1e-9:
             continue
-        z = (vals - mean) / std
+        z = np.where(valid_mask, (vals - mean) / std, 0.0)
         composite += weights[fi] * z
 
     composite /= abs_weight_sum
@@ -309,7 +490,8 @@ def load_benchmark() -> pd.DataFrame:
 
 
 def run_walkforward_backtest(factors: List[dict], all_data: dict,
-                             factor_cache, use_regime: bool = True) -> dict:
+                             factor_cache, use_regime: bool = True,
+                             fund_panel: dict = None) -> dict:
     """
     Walk-Forward 回测 (development 分区)。
 
@@ -405,7 +587,7 @@ def run_walkforward_backtest(factors: List[dict], all_data: dict,
                 adapted_factors = factors
                 regime = Regime.RANGE
 
-            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today)
+            scores = compute_composite_scores(adapted_factors, all_data, factor_cache, today, fund_panel=fund_panel)
             if scores and len(scores) >= BT_CONFIG["top_k"]:
                 tradeable = {}
                 for sym, sc in scores.items():
@@ -680,6 +862,18 @@ def main():
         if (i + batch_size) % 1000 == 0 or i + batch_size >= len(symbols):
             log.info("  %d/%d (%.0fs)", min(i+batch_size, len(symbols)), len(symbols), time.time()-t0)
 
+    # 加载基本面数据 (如果有)
+    fund_panel = None
+    has_fund_factors = any(f["category"] == "fundamental" for f in selected)
+    if has_fund_factors:
+        try:
+            from fundamental_fetcher import load_fundamental_panel
+            fund_panel = load_fundamental_panel()
+            log.info("基本面数据: %d 只", len(fund_panel) if fund_panel else 0)
+        except Exception as e:
+            log.warning("基本面数据加载失败: %s (跳过基本面因子)", e)
+            fund_panel = None
+
     # Part 2: 独立性剪枝
     kept, corr_info = prune_correlated_factors(selected, all_data, factor_cache)
 
@@ -690,7 +884,8 @@ def main():
         verdict, reasons = "SKIP", ["回测已跳过"]
     else:
         # Part 3: 回测
-        bt_result = run_walkforward_backtest(kept, all_data, factor_cache, use_regime=use_regime)
+        bt_result = run_walkforward_backtest(kept, all_data, factor_cache,
+                                            use_regime=use_regime, fund_panel=fund_panel)
 
         # Part 4: Bootstrap
         if bt_result:

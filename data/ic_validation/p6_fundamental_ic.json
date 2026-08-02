@@ -1,0 +1,157 @@
+{
+  "meta": {
+    "generated_at": "2026-08-01 22:08:23",
+    "description": "基本面因子 IC 验证 (P6)",
+    "research_period": "2018-01-01 ~ 2022-12-31",
+    "horizon": 20,
+    "sample_interval": 20,
+    "n_stocks": 2979,
+    "n_fundamental": 2992,
+    "elapsed_s": 732.8
+  },
+  "results": [
+    {
+      "factor": "fund_roe",
+      "icir": 0.0583,
+      "ic_mean": 0.00648,
+      "ic_std": 0.11118,
+      "n_days": 61,
+      "pos_ratio": 0.557,
+      "abs_ic_mean": 0.00648,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_profit_growth",
+      "icir": 0.2231,
+      "ic_mean": 0.02001,
+      "ic_std": 0.08969,
+      "n_days": 61,
+      "pos_ratio": 0.574,
+      "abs_ic_mean": 0.02001,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_revenue_growth",
+      "icir": 0.1717,
+      "ic_mean": 0.01571,
+      "ic_std": 0.09147,
+      "n_days": 61,
+      "pos_ratio": 0.475,
+      "abs_ic_mean": 0.01571,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_debt_ratio",
+      "icir": 0.0263,
+      "ic_mean": 0.00253,
+      "ic_std": 0.09594,
+      "n_days": 61,
+      "pos_ratio": 0.541,
+      "abs_ic_mean": 0.00253,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_net_margin",
+      "icir": 0.0346,
+      "ic_mean": 0.00315,
+      "ic_std": 0.09102,
+      "n_days": 61,
+      "pos_ratio": 0.475,
+      "abs_ic_mean": 0.00315,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_ocf_ps",
+      "icir": 0.2177,
+      "ic_mean": 0.01607,
+      "ic_std": 0.07381,
+      "n_days": 61,
+      "pos_ratio": 0.557,
+      "abs_ic_mean": 0.01607,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_pb",
+      "icir": -0.4666,
+      "ic_mean": -0.06416,
+      "ic_std": 0.1375,
+      "n_days": 61,
+      "pos_ratio": 0.393,
+      "abs_ic_mean": 0.06416,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_profit_growth_ded",
+      "icir": 0.2923,
+      "ic_mean": 0.02562,
+      "ic_std": 0.08763,
+      "n_days": 61,
+      "pos_ratio": 0.59,
+      "abs_ic_mean": 0.02562,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_ep",
+      "icir": 0.3252,
+      "ic_mean": 0.0338,
+      "ic_std": 0.10393,
+      "n_days": 61,
+      "pos_ratio": 0.639,
+      "abs_ic_mean": 0.0338,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_bp",
+      "icir": 0.4679,
+      "ic_mean": 0.06446,
+      "ic_std": 0.13777,
+      "n_days": 61,
+      "pos_ratio": 0.607,
+      "abs_ic_mean": 0.06446,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_sp",
+      "icir": 0.2092,
+      "ic_mean": 0.02513,
+      "ic_std": 0.12014,
+      "n_days": 61,
+      "pos_ratio": 0.623,
+      "abs_ic_mean": 0.02513,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_ocf_yield",
+      "icir": 0.2347,
+      "ic_mean": 0.01744,
+      "ic_std": 0.07432,
+      "n_days": 61,
+      "pos_ratio": 0.607,
+      "abs_ic_mean": 0.01744,
+      "horizon": 20,
+      "category": "fundamental"
+    },
+    {
+      "factor": "fund_accruals",
+      "icir": -0.1602,
+      "ic_mean": -0.00847,
+      "ic_std": 0.05286,
+      "n_days": 61,
+      "pos_ratio": 0.492,
+      "abs_ic_mean": 0.00847,
+      "horizon": 20,
+      "category": "fundamental"
+    }
+  ]
+}

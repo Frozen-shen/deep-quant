@@ -14,6 +14,9 @@ venv/
 # LLM Cache
 .llm_cache/
 
+# Generated outputs (charts, reports, logs)
+outputs/
+
 # Backtest Charts
 backtest_*.png
 test_wfo_equity.png
@@ -56,6 +59,9 @@ data/fundamental_cache/
 data/pead_cache/
 data/factor_cache/
 data/cache/
+data/flow/
+data/fundamental/
+data/smart_money/
 
 # Logs directory
 logs/
