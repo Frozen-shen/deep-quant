@@ -1,122 +1,39 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { Layout, Menu } from 'antd'
+import { Routes, Route, Link } from 'react-router-dom'
+import Overview from './pages/Overview'
+import Portfolio from './pages/Portfolio'
+import Placeholder from './pages/Placeholder'
 
-function App() {
-  const [count, setCount] = useState(0)
+const items = [
+  { key: '/', label: <Link to="/">总览</Link> },
+  { key: '/portfolio', label: <Link to="/portfolio">组合</Link> },
+  { key: '/signals', label: <Link to="/signals">信号</Link> },
+  { key: '/factors', label: <Link to="/factors">因子</Link> },
+  { key: '/experiments', label: <Link to="/experiments">实验</Link> },
+  { key: '/stocks', label: <Link to="/stocks">个股</Link> },
+  { key: '/trading', label: <Link to="/trading">交易监控</Link> },
+  { key: '/data', label: <Link to="/data">数据状态</Link> },
+]
 
+export default function App() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <Layout style={{ minHeight: '100vh' }}>
+      <Layout.Sider theme="dark">
+        <div style={{ color: '#fff', padding: 16, fontWeight: 600 }}>quant-starter</div>
+        <Menu theme="dark" mode="inline" items={items} defaultSelectedKeys={['/']} />
+      </Layout.Sider>
+      <Layout.Content style={{ padding: 24 }}>
+        <Routes>
+          <Route path="/" element={<Overview />} />
+          <Route path="/portfolio" element={<Portfolio />} />
+          <Route path="/signals" element={<Placeholder title="信号" />} />
+          <Route path="/factors" element={<Placeholder title="因子" />} />
+          <Route path="/experiments" element={<Placeholder title="实验" />} />
+          <Route path="/stocks" element={<Placeholder title="个股" />} />
+          <Route path="/trading" element={<Placeholder title="交易监控" />} />
+          <Route path="/data" element={<Placeholder title="数据状态" />} />
+        </Routes>
+      </Layout.Content>
+    </Layout>
   )
 }
-
-export default App
