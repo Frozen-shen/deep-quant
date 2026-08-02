@@ -2,6 +2,9 @@ import { Layout, Menu } from 'antd'
 import { Routes, Route, Link } from 'react-router-dom'
 import Overview from './pages/Overview'
 import Portfolio from './pages/Portfolio'
+import Signals from './pages/Signals'
+import Factors from './pages/Factors'
+import Experiments from './pages/Experiments'
 import Placeholder from './pages/Placeholder'
 
 const items = [
@@ -26,9 +29,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/portfolio" element={<Portfolio />} />
-          <Route path="/signals" element={<Placeholder title="信号" />} />
-          <Route path="/factors" element={<Placeholder title="因子" />} />
-          <Route path="/experiments" element={<Placeholder title="实验" />} />
+          <Route path="/signals" element={<Signals />} />
+          <Route path="/factors" element={<Factors />} />
+          <Route path="/experiments" element={<Experiments />} />
           <Route path="/stocks" element={<Placeholder title="个股" />} />
           <Route path="/trading" element={<Placeholder title="交易监控" />} />
           <Route path="/data" element={<Placeholder title="数据状态" />} />
