@@ -18,10 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from web.api.routers import equity, portfolio  # noqa: E402
+from web.api.routers import equity, portfolio, graduation  # noqa: E402
 
 app.include_router(equity.router)
 app.include_router(portfolio.router)
+app.include_router(graduation.router)
 
 
 @app.get("/api/health")
