@@ -25,7 +25,7 @@ from scipy.stats import spearmanr
 
 warnings.filterwarnings("ignore")
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 from logger import get_logger

@@ -19,7 +19,7 @@ os.environ["https_proxy"] = ""
 os.environ["NO_PROXY"] = "*"
 os.environ["no_proxy"] = "*"
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from flow_fetcher import cache_all_periods, show_status
 

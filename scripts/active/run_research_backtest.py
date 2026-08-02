@@ -3,6 +3,8 @@ P5: 全因子组合验证 + Walk-Forward回测
 
 将P1-P4验证通过的因子合并为统一alpha信号, 运行滚动回测并做统计检验。
 
+注: 本脚本已取代 scripts/run_p5_portfolio_validation.py (该脚本已归档至 scripts/archive/, 不再使用)。
+
 用法:
   py scripts/run_factor_portfolio.py              # 完整流程
   py scripts/run_factor_portfolio.py --skip-bt    # 跳过回测, 仅因子选择+独立性

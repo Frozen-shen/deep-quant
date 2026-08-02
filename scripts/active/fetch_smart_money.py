@@ -11,7 +11,7 @@ import os
 import sys
 import argparse
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from smart_money_fetcher import (
     batch_fetch_northbound,

@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 DATA_CACHE = BASE_DIR / "data_cache"
 UNADJ_DIR = DATA_CACHE / "unadjusted"
 

@@ -25,7 +25,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "minute")
