@@ -13,13 +13,17 @@ router = APIRouter(prefix="/api", tags=["signals"])
 def load_signals():
     if not config.SIGNALS_FILE.exists():
         return []
+    import json
     out = []
     with open(config.SIGNALS_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
-                import json
+            if not line:
+                continue
+            try:
                 out.append(json.loads(line))
+            except ValueError:
+                continue  # 坏行跳过，避免端点 500
     return out[-200:]
 
 

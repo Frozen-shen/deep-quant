@@ -84,7 +84,7 @@ def graduation_metrics():
     fill = None
     if config.SIGNALS_FILE.exists():
         n_sig = sum(1 for _ in open(config.SIGNALS_FILE, encoding="utf-8"))
-        fill = 1.0 if n_sig == 0 else None  # 成交数据源待接，先置 None
+        fill = None if n_sig == 0 else None  # 成交数据源待接，先置 None
 
     # 8. ic_decay（p3_full_ic 存在时给现状，衰减判定待 IC 监控累积）
     ic_status = "pending"

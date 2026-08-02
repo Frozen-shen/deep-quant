@@ -26,7 +26,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 CACHE_DIR = os.path.join(BASE_DIR, "data", "fundamental_cache")
@@ -269,6 +269,7 @@ def run_check(symbols: List[str]):
 
 
 def main():
+    global RATE_LIMIT
     parser = argparse.ArgumentParser(description="基本面数据批量拉取 v2")
     parser.add_argument("--force", action="store_true",
                         help="强制重新拉取所有 (覆盖已有缓存)")
@@ -282,7 +283,6 @@ def main():
                         help=f"请求间隔秒数 (默认{RATE_LIMIT})")
     args = parser.parse_args()
 
-    global RATE_LIMIT
     RATE_LIMIT = args.rate
 
     # 获取股票列表

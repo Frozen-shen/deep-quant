@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 REPORT_PATH = os.path.join(BASE_DIR, "data", "ic_validation", "p5_portfolio_report.json")

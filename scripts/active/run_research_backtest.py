@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr, rankdata
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
 # ════════════════════════════════════════════════════════════

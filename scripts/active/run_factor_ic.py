@@ -13,7 +13,7 @@ SUMP/SUMN/SUMD/VMA/VSTD) 计算多 horizon 的 Spearman 秩 IC, 验证其预测�
 输出: data/ic_validation/p3_alpha158_ic.json
 """
 import sys, os, json
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np, pandas as pd
 from scipy.stats import spearmanr
 from data_cache import get_cached_symbols, load_all
