@@ -7,7 +7,7 @@ import Factors from './pages/Factors'
 import Experiments from './pages/Experiments'
 import Stocks from './pages/Stocks'
 import DataStatus from './pages/DataStatus'
-import Placeholder from './pages/Placeholder'
+import Trading from './pages/Trading'
 
 const items = [
   { key: '/', label: <Link to="/">总览</Link> },
@@ -35,7 +35,7 @@ export default function App() {
           <Route path="/factors" element={<Factors />} />
           <Route path="/experiments" element={<Experiments />} />
           <Route path="/stocks" element={<Stocks />} />
-          <Route path="/trading" element={<Placeholder title="交易监控" />} />
+          <Route path="/trading" element={<Trading />} />
           <Route path="/data" element={<DataStatus />} />
         </Routes>
       </Layout.Content>

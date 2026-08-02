@@ -23,6 +23,7 @@ app.add_middleware(
 
 from web.api.routers import equity, portfolio, graduation  # noqa: E402
 from web.api.routers import signals, experiments, factors, universe, stocks  # noqa: E402
+from web.api.routers import broker  # noqa: E402
 
 app.include_router(equity.router)
 app.include_router(portfolio.router)
@@ -32,6 +33,7 @@ app.include_router(experiments.router)
 app.include_router(factors.router)
 app.include_router(universe.router)
 app.include_router(stocks.router)
+app.include_router(broker.router)
 
 
 @app.get("/api/health")
