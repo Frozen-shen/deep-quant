@@ -162,7 +162,7 @@ scripts/active/      ← 唯一合法脚本
 
 ---
 
-## 第五条：模块准入（防止平行代码库复发）
+## 第十条：模块准入（防止平行代码库复发）
 
 新增模块必须满足其一才能合并：
 - 被 `scripts/active/` 或 `scripts/daily_pipeline.py` 引用；或
