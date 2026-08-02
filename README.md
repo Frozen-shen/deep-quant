@@ -46,6 +46,11 @@ deep-quant/
 └── data_cache/              ← 股票数据缓存 (parquet)
 ```
 
+### 已归档（archive/）
+- `archive/src_quant/` — 早期平行代码库（2026-08-01 重写时弃用），保留作参考
+- `archive/configs/`、`archive/legacy/` — 死配置与孤死模块
+- `scripts/archive/` — 禁止运行，结果不可信（历史研究脚本）
+
 ## 快速开始
 
 ```bash

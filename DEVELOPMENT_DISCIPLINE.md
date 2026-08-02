@@ -159,3 +159,14 @@ logger.py            ← 结构化日志
 config.yaml          ← 唯一配置源
 scripts/active/      ← 唯一合法脚本
 ```
+
+---
+
+## 第五条：模块准入（防止平行代码库复发）
+
+新增模块必须满足其一才能合并：
+- 被 `scripts/active/` 或 `scripts/daily_pipeline.py` 引用；或
+- 被 `web/api/` 或 `web/` 前端引用；或
+- 有对应 `tests/` 测试覆盖。
+
+否则不得进入根目录（放 `archive/` 或独立研究目录）。

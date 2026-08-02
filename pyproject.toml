@@ -51,18 +51,11 @@ all = [
     "quant-starter[viz,dev]",
 ]
 
-[project.scripts]
-quant-backtest = "quant.cli:run_backtest"
-quant-data = "quant.cli:fetch_data"
-
 [project.urls]
 Repository = "https://github.com/user/quant-starter"
 
 [tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-quant = ["py.typed"]
+include = ["web*"]
 
 [tool.ruff]
 target-version = "py39"
