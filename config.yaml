@@ -83,3 +83,15 @@ universe:
   min_list_days: 250
   snapshot_mode: monthly
   data_version: v20260801
+
+# ── 券商执行 (QMT/miniQMT 仿真盘) ──
+# adapter: paper=内置模拟(默认), qmt=券商仿真环境(需完成下方配置)
+# 启用步骤: 1) 券商开通QMT权限 2) 安装登录QMT客户端 3) 填下方 qmt 段
+#          4) 确认 execution/broker/qmt.py 已实现真实连接(未实现前保持 paper)
+broker:
+  adapter: "paper"             # paper 或 qmt
+  qmt:
+    path: ""                   # xtquant 包所在目录, 如 C:\...\QMT安装目录\bin.x64\xtquant
+    account: ""                # 资金账号 (QMT 客户端登录账号)
+    session_id: 1              # 会话ID, 任意整数, 本机唯一即可
+    mode: "simulate"           # simulate=仿真盘(先用这个), real=实盘(风险自负)

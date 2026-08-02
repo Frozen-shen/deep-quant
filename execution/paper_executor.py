@@ -241,8 +241,67 @@ class PaperExecutor:
     #  状态加载
     # ════════════════════════════════════════
 
+    def _portfolio_path(self) -> str:
+        """模拟盘账户总账路径。"""
+        return os.path.join(BASE_DIR, "paper_trade", "portfolio.json")
+
+    def _read_portfolio_json(self) -> Optional[dict]:
+        """读取账户总账 (portfolio.json), 不存在或损坏返回 None。"""
+        path = self._portfolio_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _sync_portfolio_json(self, state: PaperState, date_str: str) -> None:
+        """执行后把最新状态同步回 portfolio.json 账户总账 (与 storage 双写)。"""
+        pf = self._read_portfolio_json() or {}
+        pf["cash"] = state.cash
+        pf["initial_capital"] = state.initial_capital
+        old_positions = pf.get("positions", {}) or {}
+        new_positions = {}
+        for sym, p in state.positions.items():
+            if p.get("qty", 0) > 0:
+                old = old_positions.get(sym, {})
+                new_positions[sym] = {
+                    "symbol": sym,
+                    "qty": p["qty"],
+                    "avg_cost": p["avg_cost"],
+                    "entry_date": old.get("entry_date", date_str),
+                    "market_value": round(p["qty"] * p["avg_cost"], 2),
+                }
+        pf["positions"] = new_positions
+        os.makedirs(os.path.dirname(self._portfolio_path()), exist_ok=True)
+        with open(self._portfolio_path(), "w", encoding="utf-8") as f:
+            json.dump(pf, f, ensure_ascii=False, indent=2)
+
     def load_state(self) -> PaperState:
-        """从数据库加载当前持仓和现金。"""
+        """从账户总账加载当前持仓和现金。
+
+        优先 portfolio.json (init_paper_account 维护的账户总账),
+        回退 storage DB (旧路径)。
+        """
+        pf = self._read_portfolio_json()
+        if pf is not None:
+            positions = {}
+            for sym, p in (pf.get("positions") or {}).items():
+                positions[sym] = {
+                    "qty": p.get("qty", 0),
+                    "avg_cost": p.get("avg_cost", 0.0),
+                    "market": p.get("market", self.market),
+                }
+            return PaperState(
+                cash=float(pf.get("cash", self.initial_capital)),
+                positions=positions,
+                initial_capital=float(pf.get("initial_capital", self.initial_capital)),
+                last_date="",
+                total_trades=0,
+            )
+
+        # ── 回退: storage DB (旧路径) ──
         positions_raw = storage.get_all_positions()
         positions = {}
         for p in positions_raw:
@@ -396,6 +455,9 @@ class PaperExecutor:
             storage.upsert_position(sym, self.market, 0, 0.0)
             storage.record_trade(sym, self.market, date_str, "SELL",
                                 qty, px, comm, "paper_signal")
+            # 同步内存状态
+            if sym in state.positions:
+                state.positions[sym]["qty"] = 0
 
             report.sell_filled.append(OrderResult(
                 sym, "SELL", "filled", qty=qty, price=px,
@@ -495,6 +557,19 @@ class PaperExecutor:
                 storage.record_trade(sym, self.market, date_str, "BUY",
                                     qty, px, comm, "paper_signal")
 
+                # 同步内存状态 (与 storage 的加权平均逻辑一致)
+                if sym in state.positions and state.positions[sym].get("qty", 0) > 0:
+                    old_qty = state.positions[sym]["qty"]
+                    old_cost = state.positions[sym]["avg_cost"]
+                    new_qty = old_qty + qty
+                    new_avg_cost = (old_qty * old_cost + qty * (px + comm / qty)) / new_qty
+                    state.positions[sym] = {"qty": new_qty, "avg_cost": new_avg_cost,
+                                            "market": self.market}
+                else:
+                    avg_cost = px + comm / qty if qty > 0 else px
+                    state.positions[sym] = {"qty": qty, "avg_cost": avg_cost,
+                                            "market": self.market}
+
                 report.buy_filled.append(OrderResult(
                     sym, "BUY", "filled", qty=qty, price=px,
                     commission=comm, amount=total_cost))
@@ -526,19 +601,24 @@ class PaperExecutor:
                             storage.upsert_position(sym, self.market, 0, 0.0)
                             storage.record_trade(sym, self.market, date_str, "SELL",
                                                 qty, px, comm, "position_limit_force_sell")
+                            if sym in state.positions:
+                                state.positions[sym]["qty"] = 0
             current_positions = storage.get_all_positions()
 
         report.cash_after = state.cash
 
         # ── 计算执行后权益 ──
         after_holdings = sum(
-            close_prices.get(s, 0) * storage.get_position(s)["qty"]
-            for s in close_prices
-            if storage.get_position(s) and storage.get_position(s)["qty"] > 0)
+            close_prices.get(s, 0) * p["qty"]
+            for s, p in state.positions.items()
+            if p.get("qty", 0) > 0)
         report.equity_after = state.cash + after_holdings
 
         # ── 保存执行报告 ──
         self._save_report(report)
+
+        # ── 同步账户总账 (portfolio.json 双写) ──
+        self._sync_portfolio_json(state, date_str)
 
         return report
 
