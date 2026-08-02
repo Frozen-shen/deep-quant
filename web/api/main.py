@@ -7,6 +7,9 @@ sys.path.insert(0, str(BASE_DIR))
 
 from fastapi import FastAPI  # noqa: E402
 
+from web.api import config  # noqa: E402
+import storage  # noqa: E402
+
 app = FastAPI(title="quant-starter Dashboard API", version="0.1.0")
 
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -33,4 +36,14 @@ app.include_router(stocks.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "data_sources": {"equity_log": False}}
+    return {
+        "status": "ok",
+        "data_sources": {
+            "equity_log": len(storage.get_equity_log(limit=1)) > 0,
+            "portfolio": config.PAPER_PORTFOLIO.exists(),
+            "signals": config.SIGNALS_FILE.exists(),
+            "experiments": config.EXPERIMENTS_DIR.exists() and any(config.EXPERIMENTS_DIR.glob("exp_*.json")),
+            "ic_results": (config.IC_DIR / "p3_full_ic.json").exists(),
+            "data_store": config.DATA_STORE.exists(),
+        },
+    }

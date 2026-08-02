@@ -5,6 +5,8 @@ import Portfolio from './pages/Portfolio'
 import Signals from './pages/Signals'
 import Factors from './pages/Factors'
 import Experiments from './pages/Experiments'
+import Stocks from './pages/Stocks'
+import DataStatus from './pages/DataStatus'
 import Placeholder from './pages/Placeholder'
 
 const items = [
@@ -32,9 +34,9 @@ export default function App() {
           <Route path="/signals" element={<Signals />} />
           <Route path="/factors" element={<Factors />} />
           <Route path="/experiments" element={<Experiments />} />
-          <Route path="/stocks" element={<Placeholder title="个股" />} />
+          <Route path="/stocks" element={<Stocks />} />
           <Route path="/trading" element={<Placeholder title="交易监控" />} />
-          <Route path="/data" element={<Placeholder title="数据状态" />} />
+          <Route path="/data" element={<DataStatus />} />
         </Routes>
       </Layout.Content>
     </Layout>
