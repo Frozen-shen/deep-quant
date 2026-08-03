@@ -28,35 +28,44 @@ def test_validate_minute_factors_empty():
     assert result == {}
 
 
-def test_validate_minute_factors_filters():
-    """ICIR 低于门槛的分钟因子被过滤。"""
+def test_validate_minute_factors_filters(monkeypatch):
+    """ICIR 达标的分钟因子保留, 噪声因子被过滤 (确定性信号)。"""
     from run_walkforward_backtest import validate_minute_factors
     import numpy as np
     import pandas as pd
-    # 构造: 一个强因子(min_a ICIR高) 一个弱因子(min_b ICIR低)
+    import minute_factors as mf
+
+    # 真实 MINUTE_FACTOR_NAMES 是 min_realized_vol 等 10 个名字, 不含测试用的
+    # min_a/min_b → 不 patch 则 minute_names 过滤为空, 验证主路径根本不会执行。
+    monkeypatch.setattr(mf, "MINUTE_FACTOR_NAMES", ["min_a", "min_b"])
+
+    rng = np.random.default_rng(42)
     cal = pd.date_range("2022-01-03", periods=600, freq="B")
     cal_idx = {d: i for i, d in enumerate(cal)}
     n_stocks = 100
     syms = [f"s{i}" for i in range(n_stocks)]
-    close = pd.DataFrame(
-        {s: np.random.default_rng(42).normal(100, 1, len(cal)).cumsum()
-         for s in syms}, index=pd.DatetimeIndex(cal))
-    # min_a: 与未来收益强相关 (构造 ICIR 高)
-    rng = np.random.default_rng(7)
-    future = np.zeros(len(cal))
-    # 简化: 直接构造因子面板, min_a 有信号, min_b 是噪声
+
+    # 价格: 随机游走
+    rets = rng.normal(0, 0.01, (len(cal), n_stocks))
+    close = pd.DataFrame(100 * np.exp(np.cumsum(rets, axis=0)),
+                         index=pd.DatetimeIndex(cal), columns=syms)
+
+    # 21日前瞻收益 (训练期内标签已实现, 无前视)
+    fwd = close.shift(-21) / close - 1
+
     panels = {}
-    for name, signal in [("min_a", True), ("min_b", False)]:
-        arr = np.full((len(cal), n_stocks), np.nan, dtype=np.float32)
-        for i in range(n_stocks):
-            if signal:
-                arr[:, i] = rng.normal(0, 1, len(cal))  # 真实信号
-            else:
-                arr[:, i] = rng.normal(0, 10, len(cal))  # 噪声
-        panels[name] = pd.DataFrame(arr, index=pd.DatetimeIndex(cal), columns=syms)
-    factors = ["min_a", "min_b"]
+    # min_a: 与前瞻收益负相关 → 高 |ICIR| (信号幅值远大于噪声, 且噪声足以
+    # 避免 IC 恒为 ±1 导致 sd=0 → icir 被归 0)
+    panels["min_a"] = pd.DataFrame(
+        (-fwd + rng.normal(0, 0.001, (len(cal), n_stocks))).to_numpy(dtype=np.float32),
+        index=pd.DatetimeIndex(cal), columns=syms)
+    # min_b: 纯噪声 → ICIR≈0 (compute_icir_weights 用 .loc 取日截面, 必须是 DataFrame)
+    panels["min_b"] = pd.DataFrame(
+        rng.normal(0, 1.0, (len(cal), n_stocks)).astype(np.float32),
+        index=pd.DatetimeIndex(cal), columns=syms)
+
     result = validate_minute_factors(
-        panels, close, cal, cal_idx, factors,
-        [("2022-01-03", "2023-12-29")], min_icir=0.05)
-    # 至少返回非空 (信号因子的 ICIR 会被算出; 是否过门槛取决于构造)
-    assert isinstance(result, dict)
+        panels, close, list(cal), cal_idx, ["min_a", "min_b"],
+        [("2022-01-03", "2023-12-29")], min_icir=0.3)
+    assert "min_a" in result, f"min_a 应通过验证, got {result}"
+    assert "min_b" not in result, f"min_b 噪声应被过滤, got {result}"
