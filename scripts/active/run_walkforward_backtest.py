@@ -120,9 +120,41 @@ def build_close_panel(all_data: dict, calendar: list) -> pd.DataFrame:
     return panel.reindex(pd.DatetimeIndex(calendar))
 
 
+def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
+    """
+    前置中性化: MAD 去极值 + z-score 标准化 (逐列/逐因子)。
+    处理 NaN (保留为 NaN, 不参与统计)。
+    """
+    out = df.copy().astype(np.float64)
+    for col in out.columns:
+        vals = out[col]
+        m = vals.notna()
+        if m.sum() < 10:
+            continue
+        x = vals[m].to_numpy()
+        med = np.median(x)
+        mad = np.median(np.abs(x - med))
+        if mad < 1e-12:
+            mad = np.std(x)
+        if mad < 1e-12:
+            continue
+        # MAD 去极值: |x - med| > k * 1.4826 * mad → 截断
+        limit = k * 1.4826 * mad
+        x = np.clip(x, med - limit, med + limit)
+        # z-score
+        mu, sd = np.mean(x), np.std(x)
+        if sd < 1e-12:
+            continue
+        z = (x - mu) / sd
+        out.loc[m, col] = z
+    return out
+
+
 def precompute_factor_panels(all_data: dict, factor_names: list,
                              needed_dates: list,
-                             include_fundamental: bool = False) -> dict:
+                             include_fundamental: bool = False,
+                             neutralize_enabled: bool = False,
+                             neutralize_k: float = 3.0) -> dict:
     """
     预计算因子并裁剪到所需日期, 构建 {factor: DataFrame(日期×股票)} 面板。
 
@@ -134,6 +166,9 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
     include_fundamental=True: 额外合并 fund_* 基本面因子 (PIT-safe)。
       基本面因子由本函数单独计算 (factor_scorer 无法输出非 DSL 的 fund_* 列),
       每只股票只读一次财报缓存, 用 searchsorted 做逐日期 PIT 最近可用查找。
+
+    neutralize_enabled=True: 返回前对每个因子面板统一做前置中性化
+      (MAD 去极值 + z-score, 逐因子独立), 下游 IC/打分全部消费中性化面板。
     """
     from factor_scorer import FactorScorer
     scorer = FactorScorer.from_preset("full_auto")
@@ -196,6 +231,14 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
         t1 = time.time()
         n_fund = _merge_fundamental_panels(panels, all_data, factor_names, idx)
         log.info("  基本面因子面板: %d 个 (%.0fs)", n_fund, time.time() - t1)
+
+    # ── 前置中性化 (MAD去极值 + z-score, 逐因子) ──
+    if neutralize_enabled:
+        t2 = time.time()
+        for fn in list(panels.keys()):
+            panels[fn] = neutralize_factor(panels[fn], k=neutralize_k)
+        log.info("  中性化完成: %d 因子 (MAD去极值+z-score, k=%.1f, %.0fs)",
+                 len(panels), neutralize_k, time.time() - t2)
 
     log.info("  面板就绪: %d 因子 × %d 日期", len(panels), len(needed_dates))
     return panels
@@ -327,7 +370,13 @@ def _merge_fundamental_panels(panels: dict, all_data: dict,
 
             # PIT 收盘价: 面板日期当日及之前最近收盘价
             px = all_data[sym]
-            pdates = pd.to_datetime(px["date"]).to_numpy(dtype="datetime64[ns]")
+            # T3 审查修复: searchsorted 要求价格日期升序 — 缓存数据乱序时
+            # 先排序, 防止静默产出错误的 PIT 价格 (只读副本, 不改动缓存)
+            px_dates = pd.to_datetime(px["date"])
+            if not px_dates.is_monotonic_increasing:
+                px = px.sort_values("date").reset_index(drop=True)
+                px_dates = pd.to_datetime(px["date"])
+            pdates = px_dates.to_numpy(dtype="datetime64[ns]")
             closes = px["close"].to_numpy(dtype=np.float64)
             ppos = np.searchsorted(pdates, sorted_dates, side="right") - 1
             pvalid = (ppos >= 0) & (closes[np.clip(ppos, 0, len(closes) - 1)] > 0)
@@ -1045,6 +1094,13 @@ def main():
 
     config = load_config(os.path.join(BASE_DIR, "config.yaml"))
 
+    # 前置中性化开关 (config.yaml neutralization 段)
+    _neut = config.get("neutralization", {}) or {}
+    neutralize_enabled = bool(_neut.get("enabled", False))
+    neutralize_k = float(_neut.get("winsorize_k", 3.0))
+    log.info("  前置中性化: %s (MAD去极值 k=%.1f)",
+             "开启" if neutralize_enabled else "关闭", neutralize_k)
+
     # 终极 TEST 锁 (方案C: 2025-01~2026-06 只跑一次)
     TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock_v4")
     if args.unlock_test and os.path.exists(TEST_LOCK_PATH):
@@ -1167,7 +1223,9 @@ def main():
     log.info("预计算因子面板...")
     factor_panels = precompute_factor_panels(
         all_data, factor_names, needed_dates,
-        include_fundamental=bool(args.folds))
+        include_fundamental=bool(args.folds),
+        neutralize_enabled=neutralize_enabled,
+        neutralize_k=neutralize_k)
     log.info("  面板就绪: %d 因子", len(factor_panels))
 
     # ── 5. 回测 (带日期守卫) ──
