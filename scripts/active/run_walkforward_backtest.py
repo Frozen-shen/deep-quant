@@ -125,13 +125,15 @@ def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
     前置中性化: MAD 去极值 + z-score 标准化 (逐列/逐因子)。
     处理 NaN (保留为 NaN, 不参与统计)。
     """
-    out = df.copy().astype(np.float64)
+    # 保持输入 dtype (float32): 全面板 astype(float64) 内存翻倍 (~9.4GB→~19GB) 会 OOM。
+    # 计算阶段逐列提升为 float64 (单列很小), 写回时显式降回 float32。
+    out = df.copy()
     for col in out.columns:
         vals = out[col]
         m = vals.notna()
         if m.sum() < 10:
             continue
-        x = vals[m].to_numpy()
+        x = vals[m].to_numpy(dtype=np.float64)
         med = np.median(x)
         mad = np.median(np.abs(x - med))
         if mad < 1e-12:
@@ -145,8 +147,9 @@ def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
         mu, sd = np.mean(x), np.std(x)
         if sd < 1e-12:
             continue
-        z = (x - mu) / sd
-        out.loc[m, col] = z
+        # pandas 2.x 下 float64 数组直接写入 float32 列会抛 LossySetitemError,
+        # 必须显式 .astype(np.float32) (数值差异 max ~5.7e-8, 可接受)
+        out.loc[m, col] = ((x - mu) / sd).astype(np.float32)
     return out
 
 
