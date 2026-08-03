@@ -70,6 +70,13 @@ minute_factors:
   enabled: true
   lookback: 20
 
+# ── 分钟因子叠加层 (方案B, 2026-08-04) ──
+minute_layer:
+  enabled: true        # 总开关: false 时行为与 v5 完全一致
+  lambda: 0.3          # 叠加权重 (综合分 = 主分 + λ×分钟分)
+  min_icir: 0.3        # 分钟因子保留的 ICIR 门槛
+  validate_folds: [4, 5]  # 独立验证使用的 fold 训练期
+
 # ── 标签 ──
 label:
   horizon_days: 20
