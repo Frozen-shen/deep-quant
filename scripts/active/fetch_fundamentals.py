@@ -36,6 +36,11 @@ DATA_STORE_DIR = os.path.join(BASE_DIR, "data_store")
 # 速率限制 (秒)
 RATE_LIMIT = 0.5
 
+# 财报起始年份 (新浪接口必须传: 默认 "1900" 不在年份列表 → 返回空)
+# 2018 起: 已有缓存覆盖 2015-2024, 缺失的主要是 2020+ 上市新股,
+# 拉 2018-2026 (9年) 平衡覆盖与速度 (每只 ~7s vs 12年 ~15s)
+START_YEAR = "2018"
+
 # 标准输出列 (存储格式)
 STANDARD_COLUMNS = [
     'report_date',      # 报告期 (日期)
@@ -88,24 +93,35 @@ def get_universe_symbols() -> List[str]:
     return sorted(symbols)
 
 
-def fetch_single(symbol: str) -> Optional[pd.DataFrame]:
+def fetch_single(symbol: str, retries: int = 3) -> Optional[pd.DataFrame]:
     """
-    拉取单只股票的季度财务指标。
+    拉取单只股票的季度财务指标 (带退避重试)。
 
     Returns:
       标准化后的 DataFrame, 或 None (失败)
     """
     import akshare as ak
     import warnings
+    import time as _time
     warnings.filterwarnings('ignore')
 
-    try:
-        df = ak.stock_financial_analysis_indicator(symbol=symbol)
-    except Exception as e:
-        return None
+    for attempt in range(retries):
+        try:
+            # 必须传 start_year: 新浪接口默认 "1900" 不在年份列表 → 返回空
+            df = ak.stock_financial_analysis_indicator(
+                symbol=symbol, start_year=START_YEAR)
+        except Exception:
+            if attempt < retries - 1:
+                _time.sleep(1.5 * (attempt + 1))  # 退避重试
+                continue
+            return None
 
-    if df is None or len(df) == 0:
-        return None
+        if df is None or len(df) == 0:
+            if attempt < retries - 1:
+                _time.sleep(1.5 * (attempt + 1))
+                continue
+            return None
+        break
 
     # 标准化列名
     df = df.rename(columns={k: v for k, v in COLUMN_MAP.items() if k in df.columns})
@@ -279,6 +295,8 @@ def main():
                         help="只检查完整性, 不拉取数据")
     parser.add_argument("--limit", type=int, default=None,
                         help="限制拉取数量 (测试用)")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="跳过前 N 只 (多进程分片并行用)")
     parser.add_argument("--rate", type=float, default=RATE_LIMIT,
                         help=f"请求间隔秒数 (默认{RATE_LIMIT})")
     args = parser.parse_args()
@@ -287,7 +305,10 @@ def main():
 
     # 获取股票列表
     symbols = get_universe_symbols()
-    print(f"[FetchFundamentals] 股票池: {len(symbols)} 只", flush=True)
+    if args.offset:
+        symbols = symbols[args.offset:]
+    print(f"[FetchFundamentals] 股票池: {len(symbols)} 只 "
+          f"(offset={args.offset})", flush=True)
 
     if not symbols:
         print("  错误: 未找到任何股票。请先运行 fetch_full_universe.py", flush=True)
