@@ -14,7 +14,7 @@
 import pandas as pd
 import numpy as np
 from factor_engine import FactorLibrary, parse_factor
-from factor_library import get_all_factors
+from factor_library import get_all_factors, FUNDAMENTAL_FACTORS
 
 
 # ================================================================
@@ -196,7 +196,8 @@ FACTOR_PRESETS = {
 }
 
 # ── 动态构建 full_auto 预设: 包含全部因子, 权重=1.0 (由LightGBM学习) ──
-def _build_full_auto_preset():
+def _build_full_auto_factors():
+    """全部 DSL 价量因子, 权重=1.0 (full_auto 与 full_auto_v5 共用)。"""
     from factor_library import get_all_factors
     lib = get_all_factors()
     names = list(lib.factors.keys()) if hasattr(lib, 'factors') else []
@@ -210,14 +211,25 @@ def _build_full_auto_preset():
                   EXPANDED_FACTORS, PHASE2_FACTORS, P2_ENHANCED_FACTORS, MICROSTRUCTURE_FACTORS]:
             merged.update(d)
         names = list(merged.keys())
+    return {name: 1.0 for name in names}
+
+def _build_full_auto_preset():
     return {
         "name": "全因子(LightGBM自动学习权重)",
-        "factors": {name: 1.0 for name in names},
+        "factors": _build_full_auto_factors(),
         "buy_threshold": 0.15,
         "sell_threshold": -0.10,
     }
 
 FACTOR_PRESETS["full_auto"] = _build_full_auto_preset()
+
+# ★ v5: 方案C — 全部价量因子 + 基本面因子 (fund_* 权重暂1.0, 由fold筛选决定实际使用)
+FACTOR_PRESETS["full_auto_v5"] = {
+    "name": "方案C v5: 全部价量因子 + 基本面因子 (fold筛选决定权重)",
+    "factors": {**_build_full_auto_factors(), **{k: 1.0 for k in FUNDAMENTAL_FACTORS}},
+    "buy_threshold": 0.15,
+    "sell_threshold": -0.10,
+}
 
 
 # ── 动态构建 alpha158_full 预设: Qlib Alpha158 价量因子全集, 权重=1.0 (由LightGBM/IC学习) ──
