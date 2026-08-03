@@ -121,7 +121,8 @@ def build_close_panel(all_data: dict, calendar: list) -> pd.DataFrame:
 
 
 def precompute_factor_panels(all_data: dict, factor_names: list,
-                             needed_dates: list) -> dict:
+                             needed_dates: list,
+                             include_fundamental: bool = False) -> dict:
     """
     预计算因子并裁剪到所需日期, 构建 {factor: DataFrame(日期×股票)} 面板。
 
@@ -129,6 +130,10 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
       - float32 存储 (因子值精度足够, 内存减半)
       - 单次全因子计算 (每只股票 compute_factors 只调用一次)
       - 面板构建完成后立即释放 per_stock 中间数据
+
+    include_fundamental=True: 额外合并 fund_* 基本面因子 (PIT-safe)。
+      基本面因子由本函数单独计算 (factor_scorer 无法输出非 DSL 的 fund_* 列),
+      每只股票只读一次财报缓存, 用 searchsorted 做逐日期 PIT 最近可用查找。
     """
     from factor_scorer import FactorScorer
     scorer = FactorScorer.from_preset("full_auto")
@@ -186,8 +191,177 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
         import gc
         gc.collect()
 
+    # ── 基本面因子合并 (PIT-safe, 由本函数单独计算, 不依赖 scorer) ──
+    if include_fundamental:
+        t1 = time.time()
+        n_fund = _merge_fundamental_panels(panels, all_data, factor_names, idx)
+        log.info("  基本面因子面板: %d 个 (%.0fs)", n_fund, time.time() - t1)
+
     log.info("  面板就绪: %d 因子 × %d 日期", len(panels), len(needed_dates))
     return panels
+
+
+# ═══════════════════════════════════════════════════════════
+#  基本面因子面板 (PIT-safe)
+# ═══════════════════════════════════════════════════════════
+
+# 价格类因子: fund_因子 -> (财报基数列, 变换模式)
+#   div_price = 基数值 / PIT价格 (bp/ep/ocf_yield), price_div = PIT价格 / 基数值 (pb)
+_FUND_PRICE_MAP = {
+    "fund_bp": ("bvps", "div_price"),
+    "fund_ep": ("eps_ttm", "div_price"),
+    "fund_pb": ("bvps", "price_div"),
+    "fund_ocf_yield": ("ocf_ps", "div_price"),
+}
+
+
+def _fund_report_factors(fin: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    从单只股票的财报序列 (data/fundamental.py fetch_financials 输出) 预计算
+    每期报告的 13 个基本面因子值 (不含价格类分母, 价格在合并时按日 PIT 对齐)。
+
+    Returns: DataFrame index=报告期(日期), columns=因子键(无 fund_ 前缀), 或 None。
+    """
+    if fin is None or len(fin) == 0 or "日期" not in fin.columns:
+        return None
+    f = fin.copy()
+    f["日期"] = pd.to_datetime(f["日期"])
+    f = f.sort_values("日期").reset_index(drop=True)
+
+    def col(name: str) -> pd.Series | None:
+        if name not in f.columns:
+            return None
+        return pd.to_numeric(f[name], errors="coerce")
+
+    roe = col("净资产收益率(%)")
+    eps = col("摊薄每股收益(元)")
+    bvps = col("每股净资产_调整前(元)")
+    ocf = col("每股经营性现金流(元)")
+    pg = col("净利润增长率(%)")
+    rg = col("主营业务收入增长率(%)")
+    dr = col("资产负债率(%)")
+    nm = col("销售净利率(%)")
+    ded = col("扣除非经常性损益后的净利润(元)")
+
+    out = pd.DataFrame(index=pd.DatetimeIndex(f["日期"]))
+    month = f["日期"].dt.month
+
+    # ROE (按报告期季度数年化, 与 fundamental_fetcher 口径一致)
+    if roe is not None:
+        mult = month.map({3: 4.0, 6: 2.0, 9: 4 / 3}).fillna(1.0)
+        out["roe"] = (roe * mult).to_numpy(dtype=np.float32)
+        out["roe_ttm"] = roe.rolling(4, min_periods=4).mean().to_numpy(dtype=np.float32)
+
+    # EPS TTM (最近4季度滚动加总; 摊薄EPS为年内累计口径)
+    if eps is not None:
+        out["eps_ttm"] = eps.rolling(4, min_periods=4).sum().to_numpy(dtype=np.float32)
+
+    # 扣非净利润同比增速 (同季度对比: groupby(quarter).shift(1) 取去年同季)
+    if ded is not None:
+        q = f["日期"].dt.quarter
+        prev = ded.groupby(q).shift(1)
+        g = (ded / prev - 1.0).where(prev > 0)
+        out["profit_growth_ded"] = g.to_numpy(dtype=np.float32)
+
+    for key, s in [("profit_growth", pg), ("revenue_growth", rg),
+                   ("debt_ratio", dr), ("net_margin", nm),
+                   ("ocf_ps", ocf), ("bvps", bvps)]:
+        if s is not None:
+            out[key] = s.to_numpy(dtype=np.float32)
+
+    # 应计利润 (每股口径: (EPS_TTM - OCF_PS) / BVPS, 与 fundamental_fetcher 一致)
+    if eps is not None and ocf is not None and bvps is not None:
+        out["accruals"] = ((out["eps_ttm"] - ocf.to_numpy(dtype=np.float32))
+                           / bvps.to_numpy(dtype=np.float32))
+    return out
+
+
+def _merge_fundamental_panels(panels: dict, all_data: dict,
+                              factor_names: list, idx: pd.DatetimeIndex) -> int:
+    """
+    将 fund_* 基本面因子按日期 PIT 合并进 panels (原地修改)。
+
+    PIT 规则 (与 data/fundamental.py 一致):
+      - 每只股票只读一次财报缓存 (fetch_financials)
+      - 报告期 + PIT_LAG_DAYS 之后才可用 (财报公布延迟缓冲, 禁止前视)
+      - 每个面板日期取 <= date-PIT_LAG_DAYS 的最新一期财报 (searchsorted)
+      - 价格类因子 (bp/ep/pb/ocf_yield) 使用面板日期当日及之前最近收盘价
+      - 财报缺失/异常 → 静默跳过该股票
+
+    Returns: 实际合并的 fund_* 因子数。
+    """
+    from data.fundamental import fetch_financials, PIT_LAG_DAYS
+    from factor_library import FUNDAMENTAL_FACTORS
+
+    fund_names = [fn for fn in factor_names if fn in FUNDAMENTAL_FACTORS]
+    if not fund_names:
+        return 0
+    fund_keys = {fn: fn.replace("fund_", "") for fn in fund_names}
+
+    dates_arr = idx.to_numpy(dtype="datetime64[ns]")
+    lag = np.timedelta64(PIT_LAG_DAYS, "D")
+
+    # searchsorted 要求日期升序; 面板日期非有序时先排序再还原
+    if np.all(dates_arr[1:] >= dates_arr[:-1]):
+        sorted_dates = dates_arr
+        inv = None
+    else:
+        order = np.argsort(dates_arr, kind="stable")
+        inv = np.empty_like(order)
+        inv[order] = np.arange(len(order))
+        sorted_dates = dates_arr[order]
+
+    cols = {fn: {} for fn in fund_names}
+    for sym in all_data:
+        try:
+            vals = _fund_report_factors(fetch_financials(sym))
+            if vals is None or len(vals) == 0:
+                continue
+            rdates = vals.index.to_numpy(dtype="datetime64[ns]")
+            # PIT 可用日期: 报告期 + 财报公布延迟缓冲
+            avail = rdates + lag
+            pos = np.searchsorted(avail, sorted_dates, side="right") - 1
+            valid = pos >= 0
+            if not valid.any():
+                continue
+
+            # PIT 收盘价: 面板日期当日及之前最近收盘价
+            px = all_data[sym]
+            pdates = pd.to_datetime(px["date"]).to_numpy(dtype="datetime64[ns]")
+            closes = px["close"].to_numpy(dtype=np.float64)
+            ppos = np.searchsorted(pdates, sorted_dates, side="right") - 1
+            pvalid = (ppos >= 0) & (closes[np.clip(ppos, 0, len(closes) - 1)] > 0)
+            price = closes[np.clip(ppos, 0, len(closes) - 1)]
+
+            v = vals.to_numpy(dtype=np.float64)  # (n_reports, n_keys)
+            rp = np.clip(pos, 0, len(v) - 1)
+            for fn in fund_names:
+                base_key, mode = _FUND_PRICE_MAP.get(
+                    fn, (fund_keys[fn], None))
+                if base_key not in vals.columns:
+                    continue
+                kpos = vals.columns.get_loc(base_key)
+                values = np.where(valid, v[rp, kpos], np.nan)
+                if mode == "div_price":
+                    m = pvalid & (price > 0)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        values = np.where(m, values / price, np.nan)
+                elif mode == "price_div":
+                    m = pvalid & (price > 0) & (values > 0)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        values = np.where(m, price / values, np.nan)
+                if inv is not None:
+                    values = values[inv]
+                cols[fn][sym] = values.astype(np.float32)
+        except Exception:
+            continue
+
+    n_added = 0
+    for fn in fund_names:
+        if cols[fn]:
+            panels[fn] = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            n_added += 1
+    return n_added
 
 
 # ═══════════════════════════════════════════════════════════
@@ -950,7 +1124,11 @@ def main():
 
     # ── 3. 确定所需日期 (调仓日 + IC窗口内月度观测日) ──
     from factor_scorer import FactorScorer
-    factor_names = sorted(FactorScorer.from_preset("full_auto").factor_weights.keys())
+    if args.folds:
+        # 方案C (fold): v5 预设 = 169 价量 + 13 基本面 (fund_*) 因子
+        factor_names = sorted(FactorScorer.from_preset("full_auto_v5").factor_weights.keys())
+    else:
+        factor_names = sorted(FactorScorer.from_preset("full_auto").factor_weights.keys())
 
     needed = set()
     if args.folds:
@@ -987,7 +1165,9 @@ def main():
 
     # ── 4. 预计算因子面板 ──
     log.info("预计算因子面板...")
-    factor_panels = precompute_factor_panels(all_data, factor_names, needed_dates)
+    factor_panels = precompute_factor_panels(
+        all_data, factor_names, needed_dates,
+        include_fundamental=bool(args.folds))
     log.info("  面板就绪: %d 因子", len(factor_panels))
 
     # ── 5. 回测 (带日期守卫) ──
