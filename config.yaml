@@ -23,6 +23,15 @@ blind_test:
   blind_start: "2027-01-01"
   protocol: "daily_pipeline自动运行, 禁止手动回测, 2028-01-01后评估"
 
+# ── 流通股本补拉 (fixA) ──
+# fetch_daily_data.py --fetch-shares 模式的参数。
+# 原理: 换手率 turn(%) = 日成交量(股) / 流通股本 * 100, 按年取中位数反推。
+shares_fetch:
+  start_date: "2015-01-01"    # 与 data_partition.full_start 一致
+  end_date: "2026-07-31"      # 与日线数据末端一致
+  rate_limit_sleep: 0.3       # baostock 请求间隔 (s)
+  batch_size: 100             # 每 N 只重连 baostock (防会话超时)
+
 # ── 执行参数 ──
 execution:
   initial_capital: 100000

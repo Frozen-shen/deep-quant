@@ -21,7 +21,16 @@
   python scripts/fetch_full_universe.py --check-only       # 仅统计, 不拉取
   python scripts/fetch_full_universe.py --limit 10         # 测试模式, 只拉 10 只
   python scripts/fetch_full_universe.py --force            # 强制重新拉取所有
+  python scripts/fetch_full_universe.py --fetch-shares     # 补拉 outstanding_share (流通股本)
+  python scripts/fetch_full_universe.py --fetch-shares --limit 10 --shares-start 2015-01-01
   python scripts/fetch_full_universe.py --proxy http://127.0.0.1:7897
+
+--fetch-shares 模式 (fixA):
+  为 data_store 中所有 parquet 补拉/更新 outstanding_share 列。
+  原理: 换手率 turn(%) = 日成交量(股) / 流通股本 * 100
+        => 流通股本 = volume / (turn / 100), 按年取中位数 (PIT-safe)。
+  断点续传: 已有 outstanding_share 列的股票跳过, --force 重拉。
+  参数: 优先命令行 --shares-start/--shares-end, 其次 config.yaml shares_fetch 段。
 """
 
 import os
@@ -48,6 +57,15 @@ MIN_LIST_DAYS = 60          # 最少上市交易日
 MIN_AVG_TURNOVER = 5_000_000  # 20日均成交额下限 (元)
 RATE_LIMIT_SLEEP = 0.35     # 请求间隔 (~3 req/s)
 PROGRESS_INTERVAL = 50      # 每 N 只打印进度
+
+# ── 流通股本补拉 (fixA) ──
+# 原理: 换手率 turn(%) = 日成交量(股) / 流通股本 * 100
+#       => 流通股本 = volume / (turn / 100), 按年取中位数 (PIT-safe)
+# 参数从 config.yaml 的 shares_fetch 段读取, 命令行可覆盖, 默认值仅作 fallback
+SHARES_START = "2015-01-01"   # 与 data_partition.full_start 一致
+SHARES_END = "2026-07-31"     # 与日线数据末端一致
+SHARES_RATE_LIMIT = 0.3       # baostock 请求间隔 (s)
+SHARES_BATCH_SIZE = 100       # 每 N 只重连 baostock (防会话超时)
 
 # ── 列名映射: akshare 中文 -> 英文 ───────────────────────────────────
 COLUMN_MAP = {
@@ -653,14 +671,274 @@ def _print_progress(i: int, total: int, code: str, status: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  流通股本补拉 (--fetch-shares, fixA)
+#  原理: 换手率 turn(%) = 日成交量(股) / 流通股本 * 100
+#        => 流通股本 = volume / (turn / 100), 按年取中位数 (稳健, PIT-safe)
+# ═══════════════════════════════════════════════════════════════════════
+
+def load_shares_config() -> dict:
+    """
+    从 config.yaml 的 shares_fetch 段读取补拉参数。
+
+    参数不散落为全局变量: 默认值仅作 fallback, 配置文件优先, 命令行可再覆盖。
+    """
+    defaults = {
+        "start_date": SHARES_START,
+        "end_date": SHARES_END,
+        "rate_limit_sleep": SHARES_RATE_LIMIT,
+        "batch_size": SHARES_BATCH_SIZE,
+    }
+    cfg_path = os.path.join(BASE_DIR, "config.yaml")
+    if os.path.exists(cfg_path):
+        try:
+            import yaml
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            sec = cfg.get("shares_fetch") or {}
+            for k in defaults:
+                v = sec.get(k)
+                if v is not None:
+                    defaults[k] = v
+        except Exception as e:
+            log(f"config.yaml 读取失败, 使用默认补拉参数: {e}")
+    return defaults
+
+
+def to_baostock_code(symbol: str) -> str:
+    """000001 -> sz.000001, 600009 -> sh.600009"""
+    if symbol.startswith("6"):
+        return f"sh.{symbol}"
+    return f"sz.{symbol}"
+
+
+def has_outstanding_share(code: str) -> bool:
+    """检查 data_store/{code}.parquet 是否已有 outstanding_share 列 (仅读 schema, 不读数据)"""
+    path = os.path.join(DATA_STORE, f"{code}.parquet")
+    if not os.path.exists(path):
+        return False
+    try:
+        import pyarrow.parquet as pq
+        return "outstanding_share" in pq.ParquetFile(path).schema.names
+    except Exception:
+        return False
+
+
+def fetch_outstanding_shares(code: str, start_date: str = SHARES_START,
+                             end_date: str = SHARES_END) -> Optional[dict]:
+    """
+    通过 baostock 按年反推流通股本。
+
+    单次全历史查询: query_history_k_data_plus(code, 'date,volume,turn', frequency='d')。
+    按年分组: 每年取所有 turn>0 交易日的 float_shares = volume/(turn/100) 的
+    中位数作为该年流通股本 (稳健, 抗异常值)。
+
+    返回 {year(int): float_shares(float)}; 失败或无有效数据返回 None。
+    """
+    import baostock as bs
+
+    rs = bs.query_history_k_data_plus(
+        to_baostock_code(code),
+        "date,volume,turn",
+        start_date=start_date, end_date=end_date,
+        frequency="d",
+    )
+    if rs is None or rs.error_code != "0":
+        err = getattr(rs, "error_msg", "unknown")
+        log(f"  {code} baostock 查询失败: {err}")
+        return None
+
+    rows = []
+    while rs.next():
+        rows.append(rs.get_row_data())
+    if not rows:
+        log(f"  {code} baostock 无数据")
+        return None
+
+    df = pd.DataFrame(rows, columns=rs.fields)
+    df["date"] = pd.to_datetime(df["date"])
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+    df["turn"] = pd.to_numeric(df["turn"], errors="coerce")
+
+    # 仅保留有效换手日 (turn>0, volume>0), 避免除零/脏数据
+    df = df[(df["turn"] > 0) & (df["volume"] > 0)].copy()
+    if df.empty:
+        log(f"  {code} 无有效换手数据")
+        return None
+
+    df["float_shares"] = df["volume"] / (df["turn"] / 100.0)
+    df["year"] = df["date"].dt.year
+    year_shares = df.groupby("year")["float_shares"].median().to_dict()
+    return year_shares
+
+
+def apply_shares_to_parquet(code: str, year_shares: dict) -> bool:
+    """
+    将 {year: float_shares} 映射写入 data_store/{code}.parquet 的
+    outstanding_share 列。
+
+    每行按该行 date 的年份取对应流通股本 (PIT-safe: 当年用当年值)。
+    列已存在则覆盖更新。返回是否成功。
+    """
+    path = os.path.join(DATA_STORE, f"{code}.parquet")
+    if not os.path.exists(path):
+        log(f"  {code} parquet 不存在, 跳过")
+        return False
+
+    df = pd.read_parquet(path)
+    if "date" not in df.columns:
+        log(f"  {code} 无 date 列, 跳过")
+        return False
+
+    df["date"] = pd.to_datetime(df["date"])
+    df["outstanding_share"] = df["date"].dt.year.map(year_shares)
+    df.to_parquet(path, index=False, engine="pyarrow")
+    return True
+
+
+def run_fetch_shares(limit: Optional[int] = None,
+                     force: bool = False,
+                     start_date: Optional[str] = None,
+                     end_date: Optional[str] = None) -> Optional[dict]:
+    """
+    --fetch-shares 模式主流程: 为 data_store 中所有 parquet 补拉/更新
+    outstanding_share 列 (断点续传: 已有该列的股票跳过, --force 重拉)。
+    """
+    import baostock as bs
+    from pathlib import Path
+
+    cfg = load_shares_config()
+    start_date = start_date or cfg["start_date"]
+    end_date = end_date or cfg["end_date"]
+    rate_limit = float(cfg["rate_limit_sleep"])
+    batch_size = int(cfg["batch_size"])
+
+    os.makedirs(DATA_STORE, exist_ok=True)
+
+    # ── 候选: data_store/*.parquet (6位数字代码) ──
+    candidates = sorted(
+        p.stem for p in Path(DATA_STORE).glob("*.parquet")
+        if len(p.stem) == 6 and p.stem.isdigit()
+    )
+    if limit:
+        candidates = candidates[:limit]
+        log(f"测试模式: 限制为前 {limit} 只")
+    total = len(candidates)
+    if total == 0:
+        log("data_store 无 parquet 文件, 退出")
+        return None
+
+    # ── 断点续传: 跳过已有 outstanding_share 列的股票 ──
+    todo = [c for c in candidates if force or not has_outstanding_share(c)]
+    skipped = total - len(todo)
+    log(f"流通股本补拉: 候选 {total} 只, 待处理 {len(todo)} 只, "
+        f"跳过 {skipped} 只 (已有 outstanding_share 列)"
+        + (" [--force 全量重拉]" if force else ""))
+
+    # ── baostock 登录 ──
+    lg = bs.login()
+    if lg.error_code != "0":
+        log(f"baostock 登录失败: {lg.error_msg}")
+        return None
+
+    done = 0
+    failed: List[str] = []
+    fetched_in_batch = 0   # 本次登录后实际请求数
+    t0 = time.time()
+
+    for i, code in enumerate(todo, 1):
+        # 批量重连: 每 batch_size 只 logout/login 一次 (防会话超时)
+        if fetched_in_batch > 0 and fetched_in_batch % batch_size == 0:
+            try:
+                bs.logout()
+            except Exception:
+                pass
+            time.sleep(1)
+            lg = bs.login()
+            if lg.error_code != "0":
+                log(f"baostock 重连失败 @{i}: {lg.error_msg}, 中断")
+                failed.extend(todo[i - 1:])
+                break
+            log(f"  [已重连 @{i}]")
+
+        try:
+            year_shares = fetch_outstanding_shares(code, start_date, end_date)
+            if not year_shares:
+                failed.append(code)
+            elif apply_shares_to_parquet(code, year_shares):
+                done += 1
+            else:
+                failed.append(code)
+        except Exception as e:
+            log(f"  {code} 异常: {e}")
+            failed.append(code)
+        fetched_in_batch += 1
+
+        # 限速 (跳过已完成的除外, 保持与主流程一致的节奏)
+        if done + len(failed) > 0:
+            time.sleep(rate_limit)
+
+        if i % PROGRESS_INTERVAL == 0 or i == total:
+            status = "完成" if code not in failed else "失败"
+            _print_progress(i, total, code, status, done, skipped, t0)
+
+    try:
+        bs.logout()
+    except Exception:
+        pass
+
+    # ── 汇总 ──
+    elapsed = time.time() - t0
+    log("=" * 60)
+    log(f"流通股本补拉完成! 耗时 {elapsed:.0f}s ({elapsed/60:.1f} 分钟)")
+    log(f"  更新:   {done}")
+    log(f"  跳过:   {skipped} (已有 outstanding_share 列)")
+    log(f"  失败:   {len(failed)}")
+    if failed:
+        log(f"  失败列表: {failed[:20]}{'...' if len(failed) > 20 else ''}")
+        fail_path = os.path.join(DATA_STORE, "_shares_failures.json")
+        with open(fail_path, "w", encoding="utf-8") as f:
+            json.dump({"failed": failed,
+                       "timestamp": datetime.now().isoformat()},
+                      f, ensure_ascii=False, indent=2)
+        log(f"失败列表已写入: {fail_path}")
+
+    # ── 更新 _meta.json fix_history ──
+    meta_path = os.path.join(DATA_STORE, "_meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta.setdefault("fix_history", []).append({
+                "date": datetime.now().isoformat(),
+                "action": "fetch_outstanding_shares",
+                "source": "baostock volume/turn (按年中位数)",
+                "start_date": start_date,
+                "end_date": end_date,
+                "updated": done,
+                "skipped": skipped,
+                "failed": len(failed),
+            })
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            log("_meta.json fix_history 已更新")
+        except Exception as e:
+            log(f"_meta.json 更新失败: {e}")
+
+    return {"done": done, "skipped": skipped, "failed": failed}
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  CLI
 # ═══════════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(
         description="全量 A 股日线数据拉取 (目标 3000+ 只)")
+    parser.add_argument("--fetch-shares", action="store_true",
+                        help="补拉流通股本 (outstanding_share) 列: 遍历 "
+                             "data_store 所有 parquet, baostock 按年反推")
     parser.add_argument("--force", action="store_true",
-                        help="强制重新拉取所有 (忽略已有缓存)")
+                        help="强制重新拉取所有 (忽略已有缓存/已有 outstanding_share 列)")
     parser.add_argument("--resume", action="store_true",
                         help="断点续传: 跳过已有 parquet 文件")
     parser.add_argument("--check-only", action="store_true",
@@ -671,11 +949,29 @@ def main():
                         help=f"起始日期 YYYYMMDD (默认: {DEFAULT_START})")
     parser.add_argument("--end", type=str, default=DEFAULT_END,
                         help=f"结束日期 YYYYMMDD (默认: {DEFAULT_END})")
+    parser.add_argument("--shares-start", type=str, default=None,
+                        help=f"--fetch-shares 模式起始日期 YYYY-MM-DD "
+                             f"(默认: config.yaml shares_fetch.start_date)")
+    parser.add_argument("--shares-end", type=str, default=None,
+                        help=f"--fetch-shares 模式结束日期 YYYY-MM-DD "
+                             f"(默认: config.yaml shares_fetch.end_date)")
     parser.add_argument("--proxy", type=str, default=None,
                         help="代理地址 (如 http://127.0.0.1:7897), "
                              "默认绕过系统代理")
 
     args = parser.parse_args()
+
+    # ── --fetch-shares 模式: 补拉流通股本, 与日线拉取互斥 ──
+    if args.fetch_shares:
+        meta = run_fetch_shares(
+            limit=args.limit,
+            force=args.force,
+            start_date=args.shares_start,
+            end_date=args.shares_end,
+        )
+        if meta and meta.get("failed"):
+            sys.exit(1)
+        sys.exit(0)
 
     # 配置代理
     setup_proxy(args.proxy)
