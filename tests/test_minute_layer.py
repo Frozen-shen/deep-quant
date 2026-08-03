@@ -14,3 +14,4 @@ def test_minute_layer_config():
     assert ml.get("enabled") is True
     assert ml.get("lambda") == 0.3
     assert ml.get("min_icir") == 0.3
+    assert ml.get("validate_folds") == [4, 5]
