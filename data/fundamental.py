@@ -11,10 +11,29 @@ from datetime import timedelta
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(BASE_DIR, "data", "fundamental_cache")
+LEGACY_CACHE_DIR = os.path.join(BASE_DIR, "data", "fundamental")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # PIT 延迟: 报告期结束到公告可用的天数
 PIT_LAG_DAYS = 45
+
+# 旧缓存 (data/fundamental/) 英文列名 → akshare 中文列名
+# 注意: 语义不符或 akshare 无对应中文列的字段宁可不映射, 也不传错值 —
+#   profit_growth_deducted: 旧缓存是扣非净利润同比增速(%), 而 akshare 的
+#       '扣除非经常性损益后的净利润(元)' 是绝对额(元); _fund_report_factors
+#       用该列做 ded/prev-1 同比计算, 直接映射会得到无意义结果 → 跳过
+#   revenue / net_profit / current_ratio / quick_ratio: akshare 无对应中文列 → 跳过
+_LEGACY_COL_MAP = {
+    "report_date": "日期",
+    "roe": "净资产收益率(%)",
+    "profit_growth": "净利润增长率(%)",
+    "revenue_growth": "主营业务收入增长率(%)",
+    "eps": "摊薄每股收益(元)",
+    "bvps": "每股净资产_调整前(元)",
+    "ocf_ps": "每股经营性现金流(元)",
+    "net_margin": "销售净利率(%)",
+    "debt_ratio": "资产负债率(%)",
+}
 
 
 def fetch_financials(symbol: str) -> pd.DataFrame:
@@ -26,6 +45,26 @@ def fetch_financials(symbol: str) -> pd.DataFrame:
     cache_path = os.path.join(CACHE_DIR, f"{symbol}.parquet")
     if os.path.exists(cache_path):
         return pd.read_parquet(cache_path)
+
+    # 回退: 旧缓存 data/fundamental/{symbol}.parquet (英文列名 → akshare 中文列名)
+    legacy_path = os.path.join(LEGACY_CACHE_DIR, f"{symbol}.parquet")
+    if os.path.exists(legacy_path):
+        try:
+            df = pd.read_parquet(legacy_path)
+            df = df.rename(columns=_LEGACY_COL_MAP)
+            # 仅保留已映射的中文列 (日期 + 映射字段), 丢弃语义不符/无对应的英文列
+            keep = [c for c in df.columns if c in set(_LEGACY_COL_MAP.values())]
+            df = df[keep]
+            if "日期" not in df.columns or len(df) == 0:
+                return None
+            # 转换结果回写 fundamental_cache, 避免每次回退重复转换
+            try:
+                df.to_parquet(cache_path, index=False)
+            except Exception:
+                pass
+            return df
+        except Exception:
+            return None
 
     # 缓存未命中 → 返回None (后台单独构建缓存, 避免回测时阻塞)
     return None
