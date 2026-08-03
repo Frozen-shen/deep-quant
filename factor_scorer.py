@@ -224,8 +224,9 @@ def _build_full_auto_preset():
 FACTOR_PRESETS["full_auto"] = _build_full_auto_preset()
 
 # ★ v5: 方案C — 全部价量因子 + 基本面因子 (fund_* 权重暂1.0, 由fold筛选决定实际使用)
-# 剔除 market_cap/liq_ratio: 依赖 outstanding_share 字段, 当前数据无此列 → 100% NaN
-_V5_EXCLUDE = {"market_cap", "liq_ratio"}
+# market_cap/liq_ratio 曾因缺 outstanding_share 字段被剔除;
+# 2026-08-03 已通过 baostock volume/turnover 反推补全 outstanding_share → 恢复
+_V5_EXCLUDE: set = set()
 
 def _build_full_auto_v5_factors():
     return {k: 1.0 for k in _build_full_auto_factors()
