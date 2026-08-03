@@ -608,6 +608,59 @@ def _merge_minute_panels(panels: dict, all_data: dict,
     return n_added
 
 
+def validate_minute_factors(factor_panels: dict, close_panel: pd.DataFrame,
+                            calendar: list, cal_idx: dict, factor_names: list,
+                            train_folds: list, min_icir: float = 0.3) -> dict:
+    """
+    方案B: 分钟因子独立验证层。
+
+    用 fold 4-5 训练期 (2022+) 独立估计 min_* 因子的 ICIR,
+    通过 |ICIR| >= min_icir 的因子作为叠加层权重 (各 fold 中位数)。
+    与主通道 (40 稳定因子) 完全隔离, 不参与主筛选。
+
+    Returns: {min_factor: validated_icir}
+    """
+    from minute_factors import MINUTE_FACTOR_NAMES
+    minute_names = [fn for fn in factor_names if fn in MINUTE_FACTOR_NAMES]
+    if not minute_names or not train_folds:
+        return {}
+
+    # 对每个 fold 训练期计算 ICIR
+    fold_icirs = {fn: [] for fn in minute_names}
+    for (ts, te) in train_folds:
+        # 用训练期末作为 t_date (固定窗口模式)
+        t_date = None
+        for d in calendar:
+            if pd.Timestamp(ts).date() <= d.date() <= pd.Timestamp(te).date():
+                t_date = d
+        if t_date is None:
+            continue
+        weights, ic_stats = compute_icir_weights(
+            factor_panels, close_panel, calendar, cal_idx,
+            t_date, minute_names, train_start=ts, train_end=te)
+        for fn in minute_names:
+            st = ic_stats.get(fn)
+            if st is not None:
+                fold_icirs[fn].append(st["icir"])
+            else:
+                fold_icirs[fn].append(0.0)
+
+    # 取中位数, 过门槛保留
+    result = {}
+    for fn in minute_names:
+        arr = np.array(fold_icirs[fn])
+        if len(arr) == 0:
+            continue
+        med = float(np.median(arr))
+        if abs(med) >= min_icir:
+            result[fn] = med
+    if result:
+        log.info("  分钟叠加层: %d/%d 因子通过验证 |ICIR|>=%.2f: %s",
+                 len(result), len(minute_names), min_icir,
+                 {k: round(v, 3) for k, v in result.items()})
+    return result
+
+
 # ═══════════════════════════════════════════════════════════
 #  动态 IC 权重
 # ═══════════════════════════════════════════════════════════
