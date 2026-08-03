@@ -91,6 +91,20 @@ universe:
   snapshot_mode: monthly
   data_version: v20260803
 
+# ── 中性化 (方案C v5) ──
+neutralization:
+  enabled: true
+  winsorize: "mad"          # mad=中位数绝对偏差去极值 / quantile=分位数
+  winsorize_k: 3            # MAD 倍数
+  industry_neutral: false   # 行业中性化 (需行业数据, 暂关)
+  size_neutral: false       # 市值中性化 (需市值数据, 暂关)
+
+# ── 组合后置约束 (方案C v5) ──
+portfolio_constraints:
+  max_single_pct: 0.05      # 单票仓位上限 5%
+  max_industry_pct: 0.25    # 行业上限 25%
+  max_turnover: 0.5         # 单期换手上限 50%
+
 # ── 券商执行 (QMT/miniQMT 仿真盘) ──
 # adapter: paper=内置模拟(默认), qmt=券商仿真环境(需完成下方配置)
 # 启用步骤: 1) 券商开通QMT权限 2) 安装登录QMT客户端 3) 填下方 qmt 段

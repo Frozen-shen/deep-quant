@@ -443,3 +443,21 @@ def get_all_factors() -> FactorLibrary:
     all_config.update(ALPHA158_FACTORS)
     all_config.update(MOMENTUM_GROWTH_FACTORS)
     return FactorLibrary.from_config(all_config)
+
+# ── 基本面因子 (方案C v5, PIT-safe, 由 data/fundamental.py 计算) ──
+# 注意: 这些因子不在 DSL 体系内, 由 walkforward 面板构建阶段按日期合并
+FUNDAMENTAL_FACTORS = {
+    "fund_bp":                 "账面市值比 (1/PB, 价值因子, ICIR +0.47)",
+    "fund_ep":                 "盈利收益率 (1/PE, 价值因子, ICIR +0.33)",
+    "fund_pb":                 "市净率 (价值因子, ICIR -0.47)",
+    "fund_roe":                "净资产收益率 (质量因子)",
+    "fund_roe_ttm":            "ROE TTM (质量因子)",
+    "fund_profit_growth":      "净利润增长率 (成长因子)",
+    "fund_profit_growth_ded":  "扣非净利润增长率 (成长因子, ICIR +0.29)",
+    "fund_revenue_growth":     "营收增长率 (成长因子)",
+    "fund_debt_ratio":         "资产负债率 (杠杆因子)",
+    "fund_net_margin":         "净利率 (质量因子)",
+    "fund_ocf_ps":             "每股经营现金流 (现金流因子)",
+    "fund_ocf_yield":          "经营现金流收益率 (现金流因子, ICIR +0.24)",
+    "fund_accruals":           "应计利润 (质量因子, ICIR -0.16)",
+}
