@@ -153,6 +153,30 @@ def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
     return out
 
 
+def apply_portfolio_constraints(scores: dict, constraints: dict) -> dict:
+    """
+    组合后置约束: 单票仓位上限 (等权分仓目标权重)。
+
+    输入: 候选股票 dict (仅键有意义, 值可为分数或 1.0)。
+    输出: 每只股票的目标仓位权重 — 等权 1/n 天然满足 max_single_pct
+          时返回等权; 等权超过上限时每只缩放到上限 (剩余仓位留现金)。
+
+    注意: SimpleBacktest.execute 按等权分配现金且不支持个股权重, 本函数
+    作为约束计算的基准实现 (测试钉住此语义); run_backtest 中的约束以
+    检查+日志落地, 实际买入等权受 ranker top_k 天然限制。
+    """
+    if not scores:
+        return scores
+    n = len(scores)
+    ew = 1.0 / n
+    max_single = float(constraints.get("max_single_pct", 0.05))
+    if ew <= max_single:
+        return {k: ew for k in scores}
+    log.warning("组合约束: 等权 %.1f%% > 单票上限 %.1f%%, %d 只均缩放到上限 "
+                "(剩余仓位留现金)", ew * 100, max_single * 100, n)
+    return {k: max_single for k in scores}
+
+
 def precompute_factor_panels(all_data: dict, factor_names: list,
                              needed_dates: list,
                              include_fundamental: bool = False,
@@ -679,7 +703,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  factor_names, bt_config, start, end, label="",
                  fixed_weights: dict | None = None,
                  universe_fn=get_universe,
-                 use_regime: bool = False):
+                 use_regime: bool = False,
+                 portfolio_constraints: dict | None = None):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -687,6 +712,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     universe_fn: universe 提供函数, 默认指数成分, 可传 get_liquid_universe。
     use_regime: 启用风格状态机 (方案C v5), 每个调仓日按 RegimeDetector
       双变量检测结果调整因子权重 (含动量崩溃保护)。
+    portfolio_constraints: 组合后置约束 dict (config.yaml portfolio_constraints
+      段: max_single_pct/max_industry_pct/max_turnover), None=不启用。
     """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -740,6 +767,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     turnover_history = []
     rebalance_count = 0
     pending = None
+    industry_warned = False
     prev_equity = float(bt_config["initial_capital"])
     pit_sizes = []
 
@@ -823,6 +851,45 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                     n_turn = (len(decision.get("sell", [])) +
                               len(decision.get("buy", []))) / (2 * bt_config["top_k"])
                     turnover_history.append(n_turn)
+
+                    # ── 组合后置约束 (方案C v5) ──
+                    if portfolio_constraints:
+                        # 单票约束: 等权分仓超上限 → 检查+日志 (目标权重由
+                        # apply_portfolio_constraints 给出; bt.execute 层等权
+                        # 分配现金, 不支持个股权重 → 不实际缩放)
+                        n_buy = len(decision.get("buy", []))
+                        if n_buy > 0:
+                            ew_pct = 1.0 / n_buy
+                            max_single = portfolio_constraints.get(
+                                "max_single_pct", 0.05)
+                            if ew_pct > max_single:
+                                log.info("  [%s] 单票等权 %.1f%% > 上限 %.1f%%, "
+                                         "目标权重缩放到 %.1f%%",
+                                         label, ew_pct * 100,
+                                         max_single * 100, max_single * 100)
+                        # 行业约束: 无行业数据 → 跳过 (每期只记一次 warning)
+                        if (portfolio_constraints.get("max_industry_pct")
+                                and not industry_warned):
+                            industry_warned = True
+                            log.warning("  [%s] 行业约束已配置 (max_industry_pct=%.0f%%) "
+                                        "但无行业数据, 跳过",
+                                        label,
+                                        portfolio_constraints["max_industry_pct"] * 100)
+                        # 换手约束: 超上限 → 跳过本轮调仓 (pending=None)。
+                        # 建仓期 (无持仓) 跳过检查: 分母 max(n_hold,1) 退化
+                        # 为 1 会把首次建仓 (30只) 误判为 1500% 换手而永久卡死
+                        n_hold = len(bt.positions)
+                        if n_hold > 0:
+                            max_turn = portfolio_constraints.get(
+                                "max_turnover", 0.5)
+                            turnover = ((len(decision.get("buy", [])) +
+                                         len(decision.get("sell", []))) /
+                                        (2 * max(n_hold, 1)))
+                            if turnover > max_turn:
+                                log.info("  [%s] 换手 %.0f%% > 上限 %.0f%%, "
+                                         "跳过本轮调仓",
+                                         label, turnover * 100, max_turn * 100)
+                                pending = None
 
             positions_history.append({
                 "date": str(today.date()),
@@ -959,7 +1026,8 @@ FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释�
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
-                      use_regime: bool = False) -> dict:
+                      use_regime: bool = False,
+                      portfolio_constraints: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1034,7 +1102,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         r = run_backtest(all_data, factor_panels, close_panel, calendar,
                          cal_idx, factor_names, bt_config, vs, ve,
                          label=f"VAL{fi+1}", fixed_weights=weights,
-                         universe_fn=universe_fn, use_regime=use_regime)
+                         universe_fn=universe_fn, use_regime=use_regime,
+                         portfolio_constraints=portfolio_constraints)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1085,7 +1154,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   factor_names, bt_config, stable_factors, stable_icir,
                   test_start, test_end,
                   universe_fn=get_universe,
-                  use_regime: bool = False) -> dict | None:
+                  use_regime: bool = False,
+                  portfolio_constraints: dict | None = None) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1123,7 +1193,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         cal_idx, factor_names, bt_config,
                         test_start, test_end, label="TEST",
                         fixed_weights=weights, universe_fn=universe_fn,
-                        use_regime=use_regime)
+                        use_regime=use_regime,
+                        portfolio_constraints=portfolio_constraints)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1157,6 +1228,17 @@ def main():
     neutralize_k = float(_neut.get("winsorize_k", 3.0))
     log.info("  前置中性化: %s (MAD去极值 k=%.1f)",
              "开启" if neutralize_enabled else "关闭", neutralize_k)
+
+    # 组合后置约束 (config.yaml portfolio_constraints 段: 存在即启用,
+    # None 表示禁用 → 回测走无约束路径)
+    portfolio_constraints = config.get("portfolio_constraints") or None
+    if portfolio_constraints:
+        log.info("  组合约束: 单票≤%.0f%% 行业≤%.0f%% 换手≤%.0f%%",
+                 portfolio_constraints.get("max_single_pct", 0.05) * 100,
+                 portfolio_constraints.get("max_industry_pct", 0.25) * 100,
+                 portfolio_constraints.get("max_turnover", 0.5) * 100)
+    else:
+        log.info("  组合约束: 未启用")
 
     # 终极 TEST 锁 (方案C: 2025-01~2026-06 只跑一次)
     TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock_v4")
@@ -1295,7 +1377,7 @@ def main():
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
-                use_regime=True)
+                use_regime=True, portfolio_constraints=portfolio_constraints)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -1308,7 +1390,7 @@ def main():
                 fold_out["stable_factors"],
                 fold_out["stable_factor_icir_median"],
                 "2025-01-01", "2026-06-30", universe_fn=universe_fn,
-                use_regime=True)
+                use_regime=True, portfolio_constraints=portfolio_constraints)
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
@@ -1327,7 +1409,8 @@ def main():
                 r = run_backtest(all_data, factor_panels, close_panel,
                                  calendar, cal_idx, factor_names,
                                  bt_config, s, e, label=label.upper(),
-                                 universe_fn=universe_fn)
+                                 universe_fn=universe_fn,
+                                 portfolio_constraints=portfolio_constraints)
                 if r:
                     results[label] = r
 
@@ -1351,6 +1434,9 @@ def main():
                                  if args.liquid else "CSI300+ZZ500 月度成分"),
                 "expanding_window": "早期数据不足252天时自动退化为扩展窗口",
                 "regime_rotation": bool(args.folds),  # 方案C v5: fold 模式启用风格状态机
+                "portfolio_constraints": (portfolio_constraints
+                                          if portfolio_constraints
+                                          else None),
                 **({"fold_min_hits": FOLD_MIN_HITS,
                     "fold_icir_min": FOLD_ICIR_MIN,
                     "folds": FOLDS,
