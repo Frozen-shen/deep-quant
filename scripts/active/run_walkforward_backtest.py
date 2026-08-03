@@ -850,11 +850,13 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
     return weights, ic_stats
 
 
-def score_stocks(factor_panels: dict, weights: dict, t_date) -> dict:
+def score_stocks(factor_panels: dict, weights: dict, t_date,
+                 minute_weights: dict | None = None,
+                 minute_lambda: float = 0.3) -> dict:
     """用动态 ICIR 权重对 t_date 当日截面打分 (z-score 加权)。
 
-    与 run_corrected_backtest.compute_composite_scores 逻辑一致:
-    覆盖率 >= 50%, 逐因子 z-score, ICIR 加权求和 / Σ|w|。
+    方案B: minute_weights 提供时, 综合分 = 主分 + λ×分钟因子加权分。
+    分钟因子分独立 z-score (不参与主因子归一化, 避免尺度污染)。
     """
     if not weights:
         return {}
@@ -896,6 +898,39 @@ def score_stocks(factor_panels: dict, weights: dict, t_date) -> dict:
         composite += w[fi] * z
     composite /= abs_w
 
+    # ── 方案B: 分钟因子叠加层 ──
+    if minute_weights:
+        m_names = list(minute_weights.keys())
+        m_w = np.array([minute_weights[n] for n in m_names])
+        m_abs = np.sum(np.abs(m_w))
+        if m_abs > 1e-9:
+            m_cols = {}
+            for n in m_names:
+                p = factor_panels.get(n)
+                if p is not None and t_date in p.index:
+                    m_cols[n] = p.loc[t_date]
+            if m_cols:
+                m_cross = pd.DataFrame(m_cols)
+                # 与主分相同的股票对齐
+                m_cross = m_cross.reindex(cross.index)
+                m_vals = m_cross.to_numpy()
+                m_comp = np.zeros(len(cross))
+                for fi in range(len(m_names)):
+                    col = m_vals[:, fi]
+                    m = ~np.isnan(col)
+                    if m.sum() < 10:
+                        continue
+                    mu = np.nanmean(col)
+                    sd = np.nanstd(col)
+                    if sd < 1e-9:
+                        continue
+                    z = np.where(m, (col - mu) / sd, 0.0)
+                    m_comp += m_w[fi] * z
+                m_comp /= m_abs
+                # 无分钟数据的股票 m_comp=0 → 仅主分生效 (自然降级)
+                m_comp = np.nan_to_num(m_comp, nan=0.0)
+                composite = composite + minute_lambda * m_comp
+
     return {s: float(v) for s, v in zip(cross.index, composite)
             if not np.isnan(v)}
 
@@ -925,7 +960,9 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  fixed_weights: dict | None = None,
                  universe_fn=get_universe,
                  use_regime: bool = False,
-                 portfolio_constraints: dict | None = None):
+                 portfolio_constraints: dict | None = None,
+                 minute_weights: dict | None = None,
+                 minute_lambda: float = 0.3):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -935,6 +972,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
       双变量检测结果调整因子权重 (含动量崩溃保护)。
     portfolio_constraints: 组合后置约束 dict (config.yaml portfolio_constraints
       段: max_single_pct/max_industry_pct/max_turnover), None=不启用。
+    minute_weights: 方案B 分钟叠加层权重 {min_factor: icir}, None=不叠加。
+    minute_lambda: 叠加权重 λ (综合分 = 主分 + λ×分钟分)。
     """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -1044,7 +1083,9 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
             })
 
             # 评分
-            scores = score_stocks(factor_panels, weights, today)
+            scores = score_stocks(factor_panels, weights, today,
+                                  minute_weights=minute_weights,
+                                  minute_lambda=minute_lambda)
             # PIT 过滤
             scores = {s: v for s, v in scores.items() if s in pit_stocks}
 
@@ -1248,7 +1289,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
                       use_regime: bool = False,
-                      portfolio_constraints: dict | None = None) -> dict:
+                      portfolio_constraints: dict | None = None,
+                      minute_layer: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1259,6 +1301,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
       - 每个因子在多少 fold 中 |ICIR| 达标 (fold_hits)
       - 保留 fold_hits >= FOLD_MIN_HITS 的稳定因子
       - 各 fold 验证期成绩汇总 → OOS 年化超额均值/IR
+
+    minute_layer: 方案B 分钟叠加配置 {enabled, weights, lambda},
+      仅 fold 4-5 验证期 (有分钟数据) 生效, fold 1-3 传 None。
     """
     log.info("=" * 60)
     log.info("  方案C Walk-Forward: %d folds (训练扩展, 验证固定权重)",
@@ -1266,6 +1311,16 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     log.info("  因子保留标准: |ICIR|>=%.2f 在 >=%d/%d folds 中达标",
              FOLD_ICIR_MIN, FOLD_MIN_HITS, len(FOLDS))
     log.info("=" * 60)
+
+    # ── 方案B: 分钟叠加层 (fold 4-5 验证期才有分钟数据) ──
+    ml_weights = None
+    ml_lambda = 0.3
+    if minute_layer and minute_layer.get("enabled"):
+        ml_weights = minute_layer.get("weights")  # validate_minute_factors 输出
+        ml_lambda = float(minute_layer.get("lambda", 0.3))
+        if ml_weights:
+            log.info("  分钟叠加层: %d 个因子, λ=%.2f (fold 4-5 验证期)",
+                     len(ml_weights), ml_lambda)
 
     fold_results = {}
     factor_hits = {fn: 0 for fn in factor_names}
@@ -1324,7 +1379,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          cal_idx, factor_names, bt_config, vs, ve,
                          label=f"VAL{fi+1}", fixed_weights=weights,
                          universe_fn=universe_fn, use_regime=use_regime,
-                         portfolio_constraints=portfolio_constraints)
+                         portfolio_constraints=portfolio_constraints,
+                         minute_weights=ml_weights if fi >= 3 else None,
+                         minute_lambda=ml_lambda)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1376,12 +1433,16 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   test_start, test_end,
                   universe_fn=get_universe,
                   use_regime: bool = False,
-                  portfolio_constraints: dict | None = None) -> dict | None:
+                  portfolio_constraints: dict | None = None,
+                  minute_layer: dict | None = None) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
     风格均衡 (方案C v4.1): 正/负 ICIR 因子权重分别归一化,
     避免单一风格 (如反转防御) 过度主导组合 → 牛市跑输基准。
+
+    minute_layer: 方案B 分钟叠加配置 dict, 含 minute_weights + lambda,
+      None 或 enabled=false 时行为与 v5 完全一致。
     """
     if not stable_factors:
         log.warning("无稳定因子, 跳过终极 TEST")
@@ -1410,12 +1471,23 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
     log.info("  终极 TEST (只跑一次): 稳定因子 %d 个, 权重=中位数ICIR(风格均衡)",
              len(weights))
     log.info("=" * 60)
+
+    # ── 方案B: 分钟叠加层 ──
+    ml_weights = None
+    ml_lambda = 0.3
+    if minute_layer and minute_layer.get("enabled"):
+        ml_weights = minute_layer.get("weights")  # validate_minute_factors 输出
+        ml_lambda = float(minute_layer.get("lambda", 0.3))
+        if ml_weights:
+            log.info("  分钟叠加层: %d 个因子, λ=%.2f", len(ml_weights), ml_lambda)
+
     return run_backtest(all_data, factor_panels, close_panel, calendar,
                         cal_idx, factor_names, bt_config,
                         test_start, test_end, label="TEST",
                         fixed_weights=weights, universe_fn=universe_fn,
                         use_regime=use_regime,
-                        portfolio_constraints=portfolio_constraints)
+                        portfolio_constraints=portfolio_constraints,
+                        minute_weights=ml_weights, minute_lambda=ml_lambda)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1610,10 +1682,30 @@ def main():
         if args.folds:
             # 方案C: 5-fold 分析 + 终极 TEST
             guard.check_range("2015-01-01", "2026-06-30")
+            # 方案B: 分钟因子独立验证 (fold 4-5 训练期)
+            ml_cfg = config.get("minute_layer", {})
+            ml_weights = None
+            if ml_cfg.get("enabled"):
+                # 训练期: fold 4 = 2015-2022, fold 5 = 2015-2023
+                # 但分钟数据 2022 起 → 实际用 2022-01~2023-12 / 2022-01~2024-12
+                train_folds = [
+                    ("2022-01-01", "2023-12-31"),
+                    ("2022-01-01", "2024-12-31"),
+                ]
+                ml_weights = validate_minute_factors(
+                    factor_panels, close_panel, calendar, cal_idx,
+                    factor_names, train_folds,
+                    min_icir=float(ml_cfg.get("min_icir", 0.3)))
+            minute_layer = {
+                "enabled": ml_cfg.get("enabled", True),
+                "weights": ml_weights,
+                "lambda": float(ml_cfg.get("lambda", 0.3)),
+            }
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
-                use_regime=True, portfolio_constraints=portfolio_constraints)
+                use_regime=True, portfolio_constraints=portfolio_constraints,
+                minute_layer=minute_layer)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -1626,7 +1718,8 @@ def main():
                 fold_out["stable_factors"],
                 fold_out["stable_factor_icir_median"],
                 "2025-01-01", "2026-06-30", universe_fn=universe_fn,
-                use_regime=True, portfolio_constraints=portfolio_constraints)
+                use_regime=True, portfolio_constraints=portfolio_constraints,
+                minute_layer=minute_layer)
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)

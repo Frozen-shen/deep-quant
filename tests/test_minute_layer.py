@@ -69,3 +69,52 @@ def test_validate_minute_factors_filters(monkeypatch):
         [("2022-01-03", "2023-12-29")], min_icir=0.3)
     assert "min_a" in result, f"min_a 应通过验证, got {result}"
     assert "min_b" not in result, f"min_b 噪声应被过滤, got {result}"
+
+
+# ── T3: score_stocks 叠加层 ──
+
+
+def test_score_stocks_minute_overlay():
+    """minute_weights 提供时, 综合分 = 主分 + λ×分钟分。"""
+    from run_walkforward_backtest import score_stocks
+    import numpy as np
+    import pandas as pd
+    cal = pd.date_range("2024-01-01", periods=5, freq="B")
+    # score_stocks 要求截面 >= 10 只股票 (简报 3 只会导致两路都返回 {} 空分,
+    # 断言退化为真空 — 故扩展到 10 只, 数据模式与简报一致)
+    syms = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+    t_date = cal[2]
+    # 主因子面板: 一个因子 (值 = i+j, 与简报 a/b/c 模式一致)
+    main_panel = pd.DataFrame(
+        {s: [i + j for j in range(5)] for i, s in enumerate(syms)},
+        index=cal)
+    # 分钟面板 (主面板的 1/100 → 同形 z-score)
+    min_panel = pd.DataFrame(
+        {s: [(i + j) / 100 for j in range(5)] for i, s in enumerate(syms)},
+        index=cal)
+    panels = {"f1": main_panel, "min_a": min_panel}
+    # 无分钟叠加
+    s_main = score_stocks(panels, {"f1": 1.0}, t_date)
+    # 有分钟叠加 (λ=0.5)
+    s_over = score_stocks(panels, {"f1": 1.0}, t_date,
+                          minute_weights={"min_a": 1.0}, minute_lambda=0.5)
+    assert set(s_main.keys()) == set(s_over.keys())
+    # 叠加后分数变化 (至少一只股票不同)
+    assert any(abs(s_over[k] - s_main[k]) > 1e-9 for k in s_main)
+
+
+def test_score_stocks_disabled():
+    """minute_weights=None 时行为不变 (回退 v5)。"""
+    from run_walkforward_backtest import score_stocks
+    import numpy as np
+    import pandas as pd
+    cal = pd.date_range("2024-01-01", periods=5, freq="B")
+    syms = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+    t_date = cal[2]
+    main_panel = pd.DataFrame(
+        {s: [i + j for j in range(5)] for i, s in enumerate(syms)},
+        index=cal)
+    panels = {"f1": main_panel}
+    s1 = score_stocks(panels, {"f1": 1.0}, t_date)
+    s2 = score_stocks(panels, {"f1": 1.0}, t_date, minute_weights=None, minute_lambda=0.3)
+    assert s1 == s2
