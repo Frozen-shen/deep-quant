@@ -65,6 +65,14 @@ MIN_IC_OBS = 6            # 因子最少月度IC观测数
 MIN_CROSS_SECTION = 30    # 单次截面IC最少股票数
 REBALANCE_DAYS = 20       # 调仓间隔 (交易日)
 
+# ── 分钟因子 (方案C v5, 数据 2022 起) ──
+MINUTE_DIR = os.path.join(BASE_DIR, "data_store", "minute_15m")
+MINUTE_DATA_START = "2022-01-01"  # 分钟数据起点 (该日期前无数据 → NaN 跳过)
+
+# 模块级懒加载缓存: sym -> (按日升序 DataFrame, 唯一日 datetime64 数组) 或 None。
+# 每只股票只读一次 parquet (2606 只 × 多次读取会爆内存/慢)。
+_minute_df_cache: dict = {}
+
 
 def _load_partitions() -> dict:
     """从 config.yaml 读取数据分区 (硬编码仅作 fallback)。"""
@@ -180,6 +188,8 @@ def apply_portfolio_constraints(scores: dict, constraints: dict) -> dict:
 def precompute_factor_panels(all_data: dict, factor_names: list,
                              needed_dates: list,
                              include_fundamental: bool = False,
+                             include_minute: bool = False,
+                             minute_lookback: int = 20,
                              neutralize_enabled: bool = False,
                              neutralize_k: float = 3.0) -> dict:
     """
@@ -193,6 +203,10 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
     include_fundamental=True: 额外合并 fund_* 基本面因子 (PIT-safe)。
       基本面因子由本函数单独计算 (factor_scorer 无法输出非 DSL 的 fund_* 列),
       每只股票只读一次财报缓存, 用 searchsorted 做逐日期 PIT 最近可用查找。
+
+    include_minute=True: 额外合并 min_* 分钟因子 (PIT-safe, 方案C v5)。
+      分钟数据自 2022-01 起 (fold 3-5 验证期可用), 按调仓日采样计算 +
+      前向填充, 详见 _merge_minute_panels。
 
     neutralize_enabled=True: 返回前对每个因子面板统一做前置中性化
       (MAD 去极值 + z-score, 逐因子独立), 下游 IC/打分全部消费中性化面板。
@@ -258,6 +272,13 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
         t1 = time.time()
         n_fund = _merge_fundamental_panels(panels, all_data, factor_names, idx)
         log.info("  基本面因子面板: %d 个 (%.0fs)", n_fund, time.time() - t1)
+
+    # ── 分钟因子合并 (PIT-safe, 方案C v5, 数据2022起) ──
+    if include_minute:
+        t1m = time.time()
+        n_min = _merge_minute_panels(panels, all_data, factor_names, idx,
+                                     lookback=minute_lookback)
+        log.info("  分钟因子面板: %d 个 (%.0fs)", n_min, time.time() - t1m)
 
     # ── 前置中性化 (MAD去极值 + z-score, 逐因子) ──
     if neutralize_enabled:
@@ -434,6 +455,144 @@ def _merge_fundamental_panels(panels: dict, all_data: dict,
 
     n_added = 0
     for fn in fund_names:
+        if cols[fn]:
+            panels[fn] = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            n_added += 1
+    return n_added
+
+
+# ═══════════════════════════════════════════════════════════
+#  分钟因子面板 (PIT-safe, 方案C v5)
+# ═══════════════════════════════════════════════════════════
+
+def _load_minute_df(sym: str):
+    """
+    懒加载单只股票的分钟数据 (data_store/minute_15m/{sym}.parquet)。
+
+    模块级缓存: 每只股票只读一次 parquet (2606 只 × 多次读取会爆内存/慢)。
+    返回 (按日升序 DataFrame, 唯一日 datetime64 数组) 或 None (无文件/异常)。
+    """
+    if sym in _minute_df_cache:
+        return _minute_df_cache[sym]
+    df = None
+    path = os.path.join(MINUTE_DIR, f"{sym}.parquet")
+    if os.path.exists(path):
+        try:
+            df = pd.read_parquet(path)
+            if "day" not in df.columns or len(df) == 0:
+                df = None
+        except Exception:
+            df = None
+    if df is not None:
+        # searchsorted 要求日期升序; 乱序缓存只排序一次
+        if not df["day"].is_monotonic_increasing:
+            df = df.sort_values("day").reset_index(drop=True)
+        days_arr = np.unique(df["day"].to_numpy(dtype="datetime64[ns]"))
+        _minute_df_cache[sym] = (df, days_arr)
+    else:
+        _minute_df_cache[sym] = None
+    return _minute_df_cache[sym]
+
+
+def _ffill(arr: np.ndarray) -> np.ndarray:
+    """前向填充 NaN (C 速度: maximum.accumulate 定位最近有效值)。"""
+    mask = ~np.isnan(arr)
+    if not mask.any():
+        return arr
+    last_valid = np.maximum.accumulate(np.where(mask, np.arange(len(arr)), -1))
+    out = arr.copy()
+    valid = last_valid >= 0
+    out[valid] = arr[last_valid[valid]]
+    return out
+
+
+def _merge_minute_panels(panels: dict, all_data: dict,
+                         factor_names: list, idx: pd.DatetimeIndex,
+                         lookback: int = 20) -> int:
+    """
+    将 min_* 分钟因子按调仓日采样合并进 panels (PIT-safe, 原地修改)。
+
+    PIT 规则 (与 _merge_fundamental_panels 同风格):
+      - compute_minute_factors 的 as_of_date 参数天然是截止日 → 无前视
+      - 分钟数据仅 2022-01 起 → 该日期前的面板日期保持 NaN (无数据)
+      - 无分钟数据 / 数据不足 / 异常 → 静默跳过该股票
+
+    性能 (方案C): 分钟因子是 lookback 日均值的慢变量, 按 REBALANCE_DAYS
+      交易日采样计算 (每月一次, ~55 次/股 而非全面板逐日 ~1100 次/股),
+      其余面板日期由最近一次采样值前向填充 (ffill, PIT-safe)。
+
+    Returns: 实际合并的 min_* 因子数。
+    """
+    from minute_factors import MINUTE_FACTOR_NAMES, compute_minute_factors
+
+    minute_names = [fn for fn in factor_names if fn in MINUTE_FACTOR_NAMES]
+    if not minute_names:
+        return 0
+    if not os.path.isdir(MINUTE_DIR):
+        log.warning("  分钟因子: 数据目录缺失, 跳过: %s", MINUTE_DIR)
+        return 0
+
+    asof_arr = idx.to_numpy(dtype="datetime64[ns]")
+    # searchsorted/ffill 要求日期升序; 面板日期非有序时先排序再还原 (与
+    # _merge_fundamental_panels 同模式, 防止静默错位)
+    if np.all(asof_arr[1:] >= asof_arr[:-1]):
+        sorted_arr = asof_arr
+        inv = None
+    else:
+        order = np.argsort(asof_arr, kind="stable")
+        inv = np.empty_like(order)
+        inv[order] = np.arange(len(order))
+        sorted_arr = asof_arr[order]
+
+    min_start = np.datetime64(MINUTE_DATA_START, "ns")
+    grid = np.array([d for d in sorted_arr if d >= min_start])
+    if len(grid) == 0:
+        return 0
+    sample_dates = grid[::REBALANCE_DAYS]
+    sample_pos = np.searchsorted(sorted_arr, sample_dates, side="left")
+
+    t0 = time.time()
+    cols = {fn: {} for fn in minute_names}
+    n_ok = 0
+    for i, sym in enumerate(all_data):
+        try:
+            loaded = _load_minute_df(sym)
+            if loaded is None:
+                continue
+            mdf, days_arr = loaded
+            dvals = mdf["day"].to_numpy(dtype="datetime64[ns]")
+            per_factor = {fn: [] for fn in minute_names}
+            for asof in sample_dates:
+                # PIT 窗口: 最近 lookback 个交易日 (<= asof) — 与传全量 df 结果一致
+                p = int(np.searchsorted(days_arr, asof, side="right"))
+                if p == 0:
+                    # 该股分钟数据尚未开始 (如新股), 无历史 → NaN
+                    for fn in minute_names:
+                        per_factor[fn].append(np.nan)
+                    continue
+                r1 = int(np.searchsorted(dvals, asof, side="right"))
+                r0 = int(np.searchsorted(
+                    dvals, days_arr[max(0, p - lookback)], side="left"))
+                w = mdf.iloc[r0:r1]
+                res = compute_minute_factors(w, pd.Timestamp(asof), lookback)
+                for fn in minute_names:
+                    per_factor[fn].append(res.get(fn, np.nan))
+            for fn in minute_names:
+                arr = np.full(len(sorted_arr), np.nan, dtype=np.float32)
+                arr[sample_pos] = np.asarray(per_factor[fn], dtype=np.float32)
+                arr = _ffill(arr)
+                if inv is not None:
+                    arr = arr[inv]
+                cols[fn][sym] = arr
+            n_ok += 1
+        except Exception:
+            continue
+        if (i + 1) % 500 == 0 or i == len(all_data) - 1:
+            log.info("  分钟因子: %d/%d 只, 有效 %d (%.0fs)",
+                     i + 1, len(all_data), n_ok, time.time() - t0)
+
+    n_added = 0
+    for fn in minute_names:
         if cols[fn]:
             panels[fn] = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
             n_added += 1
@@ -1229,6 +1388,14 @@ def main():
     log.info("  前置中性化: %s (MAD去极值 k=%.1f)",
              "开启" if neutralize_enabled else "关闭", neutralize_k)
 
+    # 分钟因子开关 (config.yaml minute_factors 段, 方案C v5)
+    _min_cfg = config.get("minute_factors", {}) or {}
+    minute_enabled = bool(_min_cfg.get("enabled", False))
+    minute_lookback = int(_min_cfg.get("lookback", 20))
+    log.info("  分钟因子: %s (lookback=%d, 数据%s起, 仅fold模式可用)",
+             "开启" if minute_enabled else "关闭",
+             minute_lookback, MINUTE_DATA_START)
+
     # 组合后置约束 (config.yaml portfolio_constraints 段: 存在即启用,
     # None 表示禁用 → 回测走无约束路径)
     portfolio_constraints = config.get("portfolio_constraints") or None
@@ -1322,6 +1489,11 @@ def main():
     if args.folds:
         # 方案C (fold): v5 预设 = 169 价量 + 13 基本面 (fund_*) 因子
         factor_names = sorted(FactorScorer.from_preset("full_auto_v5").factor_weights.keys())
+        if minute_enabled:
+            # min_* 分钟因子不在 FACTOR_PRESETS 中 (数据2022起, 仅fold模式),
+            # 手动并入 factor_names — 无数据期的 fold 由 IC 截面检查自动跳过
+            from minute_factors import get_minute_factor_names
+            factor_names = sorted(set(factor_names) | set(get_minute_factor_names()))
     else:
         factor_names = sorted(FactorScorer.from_preset("full_auto").factor_weights.keys())
 
@@ -1363,6 +1535,8 @@ def main():
     factor_panels = precompute_factor_panels(
         all_data, factor_names, needed_dates,
         include_fundamental=bool(args.folds),
+        include_minute=bool(args.folds) and minute_enabled,
+        minute_lookback=minute_lookback,
         neutralize_enabled=neutralize_enabled,
         neutralize_k=neutralize_k)
     log.info("  面板就绪: %d 因子", len(factor_panels))
@@ -1437,6 +1611,12 @@ def main():
                 "portfolio_constraints": (portfolio_constraints
                                           if portfolio_constraints
                                           else None),
+                "minute_factors": ({"enabled": minute_enabled,
+                                    "lookback": minute_lookback,
+                                    "data_start": MINUTE_DATA_START,
+                                    "scope": "仅fold模式; 训练期含2022+的fold(4-5)"
+                                             "可用, 其余fold IC截面不足自动跳过"}
+                                   if args.folds and minute_enabled else False),
                 **({"fold_min_hits": FOLD_MIN_HITS,
                     "fold_icir_min": FOLD_ICIR_MIN,
                     "folds": FOLDS,

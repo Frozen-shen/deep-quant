@@ -65,6 +65,11 @@ factors:
   use_fundamental: false       # 基本面数据就绪后改为 true
   corr_threshold: 0.6          # 独立性剪枝阈值 (从0.4放宽到0.6)
 
+# ── 分钟因子 (方案C v5, 数据2022起, fold 3-5 可用) ──
+minute_factors:
+  enabled: true
+  lookback: 20
+
 # ── 标签 ──
 label:
   horizon_days: 20
