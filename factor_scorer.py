@@ -224,9 +224,16 @@ def _build_full_auto_preset():
 FACTOR_PRESETS["full_auto"] = _build_full_auto_preset()
 
 # ★ v5: 方案C — 全部价量因子 + 基本面因子 (fund_* 权重暂1.0, 由fold筛选决定实际使用)
+# 剔除 market_cap/liq_ratio: 依赖 outstanding_share 字段, 当前数据无此列 → 100% NaN
+_V5_EXCLUDE = {"market_cap", "liq_ratio"}
+
+def _build_full_auto_v5_factors():
+    return {k: 1.0 for k in _build_full_auto_factors()
+            if k not in _V5_EXCLUDE}
+
 FACTOR_PRESETS["full_auto_v5"] = {
     "name": "方案C v5: 全部价量因子 + 基本面因子 (fold筛选决定权重)",
-    "factors": {**_build_full_auto_factors(), **{k: 1.0 for k in FUNDAMENTAL_FACTORS}},
+    "factors": {**_build_full_auto_v5_factors(), **{k: 1.0 for k in FUNDAMENTAL_FACTORS}},
     "buy_threshold": 0.15,
     "sell_threshold": -0.10,
 }

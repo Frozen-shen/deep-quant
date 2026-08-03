@@ -183,6 +183,14 @@ def build_liquid_universe_cache(start: str = "2015-01-01",
         est = np.where(np.isnan(amount), volume * close * 100.0, amount)
         valid_close = ~np.isnan(close)
 
+        # 股票实际数据首日 (用于区分"数据起点截断" vs "真实上市日")
+        first_date = dates[0]
+        # 数据起点截断: 股票首日落在全局起点后 ~20 个自然日内 →
+        # 该股票真实上市早于数据起点, 数据被截断 → 不受 250 天限制
+        cutoff_ts = pd.Timestamp(start[:10])
+        first_ts = pd.Timestamp(first_date[:10])
+        data_started_at_cutoff = ((first_ts - cutoff_ts).days <= 20)
+
         # 对每个月末 T 判断是否入选 (只使用 <=T 的数据 → 天然 PIT)
         for mi, mkey in enumerate(monthly_stocks):
             me = month_ends[mi]
@@ -190,7 +198,11 @@ def build_liquid_universe_cache(start: str = "2015-01-01",
             if pos == 0:
                 continue
             # 1. 上市天数 = 截至该月末的可交易行数
-            if pos < min_list_days:
+            #    数据起点截断的股票 (首日==全局起点) 不受 250 天限制,
+            #    否则 2015 起点附近月份会错误地全部为 0
+            if data_started_at_cutoff:
+                pass  # 起点截断: 上市天数视为满足 (真实上市更早)
+            elif pos < min_list_days:
                 continue
             # 2. 流动性: 最后 LOOKBACK 个交易日的成交额均值
             lo = max(0, pos - LIQUID_LOOKBACK)
