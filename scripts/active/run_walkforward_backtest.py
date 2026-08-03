@@ -454,9 +454,13 @@ def _merge_fundamental_panels(panels: dict, all_data: dict,
             continue
 
     n_added = 0
+    # 对齐到全市场股票列 (与分钟面板同处理): 基本面面板只含有数据的股票,
+    # reindex 到全部股票 (缺失填 NaN), 保证 column_stack 列数一致。
+    all_syms = sorted(all_data.keys())
     for fn in fund_names:
         if cols[fn]:
-            panels[fn] = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            df = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            panels[fn] = df.reindex(columns=all_syms)
             n_added += 1
     return n_added
 
@@ -592,9 +596,14 @@ def _merge_minute_panels(panels: dict, all_data: dict,
                      i + 1, len(all_data), n_ok, time.time() - t0)
 
     n_added = 0
+    # 对齐到全市场股票列: 分钟面板只含有数据的股票,
+    # 必须 reindex 到全部股票 (缺失填 NaN), 否则 compute_icir_weights
+    # 的 column_stack 会因列数不一致崩溃 (5005 vs 3005)。
+    all_syms = sorted(all_data.keys())
     for fn in minute_names:
         if cols[fn]:
-            panels[fn] = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            df = pd.DataFrame(cols[fn], index=idx, dtype=np.float32)
+            panels[fn] = df.reindex(columns=all_syms)
             n_added += 1
     return n_added
 
