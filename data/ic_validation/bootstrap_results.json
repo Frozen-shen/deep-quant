@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "generated_at": "2026-08-03 12:56:07",
+    "description": "Circular Block Bootstrap 置信区间分析",
+    "n_bootstrap": 10000,
+    "block_length": 20,
+    "seed": 42,
+    "input_file": "C:\\Users\\Frozen\\ZCodeProject\\quant-starter\\data\\ic_validation\\corrected_backtest.json"
+  },
+  "results": {
+    "test": {
+      "n_days": 359,
+      "n_bootstrap": 10000,
+      "block_length": 20,
+      "original": {
+        "annual_return_pct": 12.6,
+        "ir": -0.4,
+        "max_drawdown_pct": -20.3
+      },
+      "bootstrap_annual_return_pct": {
+        "99%_CI": [
+          -33.8283,
+          88.6749
+        ],
+        "95%_CI": [
+          -24.9394,
+          65.9921
+        ],
+        "90%_CI": [
+          -19.4197,
+          56.8
+        ]
+      },
+      "bootstrap_sharpe": {
+        "99%_CI": [
+          -1.6815,
+          2.5035
+        ],
+        "95%_CI": [
+          -1.115,
+          2.0351
+        ],
+        "90%_CI": [
+          -0.8233,
+          1.804
+        ]
+      },
+      "bootstrap_max_drawdown_pct": {
+        "99%_CI": [
+          -52.8774,
+          -9.9187
+        ],
+        "95%_CI": [
+          -44.9703,
+          -11.8021
+        ],
+        "90%_CI": [
+          -41.078,
+          -13.1772
+        ]
+      },
+      "bootstrap_ir": {
+        "99%_CI": [
+          -1.4956,
+          0.6034
+        ],
+        "95%_CI": [
+          -1.214,
+          0.3486
+        ],
+        "90%_CI": [
+          -1.072,
+          0.2346
+        ]
+      },
+      "annual_excludes_zero_95pct": false,
+      "ir_excludes_zero_95pct": false
+    }
+  }
+}

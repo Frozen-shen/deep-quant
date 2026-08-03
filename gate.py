@@ -6,12 +6,20 @@ gate.py — 量化开发硬门禁
     config = load_config()
     check(partition="research", script_name=__file__, config=config)
 
+日期范围守卫 (v2 新增):
+    from gate import check_date_range, DateRangeGuard
+    check_date_range("2023-01-01", "2024-06-30", config=config)  # 静态检查
+    with DateRangeGuard(config) as guard:                         # 运行时监控
+        guard.check("2024-07-01")  # 访问日期时调用
+
 不通过 → 抛出 GateViolation，脚本终止。
 """
 
 import re
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
+from typing import Optional, Union
 
 import yaml
 
@@ -149,3 +157,108 @@ def check(partition, script_name, config, raw_yaml=None):
         for i, v in enumerate(violations, 1):
             msg_lines.append(f"  {i}. {v}")
         raise GateViolation("\n".join(msg_lines))
+
+
+# ═══════════════════════════════════════════════════════════
+# v2: 日期范围动态监控 (修复盲测偷看漏洞)
+# ═══════════════════════════════════════════════════════════
+
+def _parse_date(d) -> "datetime":
+    """统一日期解析。"""
+    if isinstance(d, datetime):
+        return d
+    if hasattr(d, "to_pydatetime"):
+        return d.to_pydatetime()
+    return datetime.fromisoformat(str(d)[:10])
+
+
+def check_date_range(start, end, config, script_name="unknown"):
+    """静态检查: 声明的日期范围是否与盲测期重叠。
+
+    在脚本开头调用，确保不会无意中访问盲测期数据。
+
+    Args:
+        start: 起始日期
+        end: 结束日期
+        config: 配置字典
+        script_name: 脚本名 (用于错误信息)
+
+    Raises:
+        GateViolation: 如果日期范围与盲测期重叠
+    """
+    blind_cfg = config.get("data_partition", {}).get("blind", {})
+    if not blind_cfg:
+        return  # 无盲测期定义，跳过
+
+    blind_start = _parse_date(blind_cfg["start"])
+    blind_end = _parse_date(blind_cfg["end"])
+    s = _parse_date(start)
+    e = _parse_date(end)
+
+    # 检查重叠: [s, e] ∩ [blind_start, blind_end] ≠ ∅
+    if s <= blind_end and e >= blind_start:
+        raise GateViolation(
+            f"🚫 日期范围守卫 ({script_name}):\n"
+            f"  请求范围: {start} ~ {end}\n"
+            f"  盲测期:   {blind_cfg['start']} ~ {blind_cfg['end']}\n"
+            f"  两者重叠！盲测期数据禁止用于回测。\n"
+            f"  如确需访问，请联系管理员解除盲测锁定。"
+        )
+
+
+class DateRangeGuard:
+    """运行时日期访问守卫 (上下文管理器)。
+
+    用法:
+        with DateRangeGuard(config) as guard:
+            for date in trading_dates:
+                guard.check(date)  # 每次访问日期时调用
+                ...
+
+    如果任何日期落入盲测期，立即抛出 GateViolation。
+    """
+
+    def __init__(self, config, script_name="unknown"):
+        self.config = config
+        self.script_name = script_name
+        blind_cfg = config.get("data_partition", {}).get("blind", {})
+        if blind_cfg:
+            self.blind_start = _parse_date(blind_cfg["start"])
+            self.blind_end = _parse_date(blind_cfg["end"])
+        else:
+            self.blind_start = None
+            self.blind_end = None
+        self._accessed_dates = []
+        self._violations = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # 退出时汇总报告
+        if self._violations:
+            raise GateViolation(
+                f"🚫 日期范围守卫 ({self.script_name}):\n"
+                f"  共 {len(self._violations)} 次盲测期访问违规:\n"
+                + "\n".join(f"    - {v}" for v in self._violations[:10])
+                + (f"\n    ... 及其他 {len(self._violations)-10} 次"
+                   if len(self._violations) > 10 else "")
+            )
+        return False
+
+    def check(self, date):
+        """检查单个日期是否在盲测期内。"""
+        if self.blind_start is None:
+            return
+        d = _parse_date(date)
+        self._accessed_dates.append(d)
+        if self.blind_start <= d <= self.blind_end:
+            self._violations.append(str(date))
+
+    def check_range(self, start, end):
+        """检查一个日期范围。"""
+        check_date_range(start, end, self.config, self.script_name)
+
+    @property
+    def n_accessed(self):
+        return len(self._accessed_dates)

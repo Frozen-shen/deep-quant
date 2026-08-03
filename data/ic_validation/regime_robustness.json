@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "generated_at": "2026-08-03 01:05:34",
+    "description": "Regime参数敏感性测试 (简化回测, 无PIT)",
+    "period": "2023-01-01 ~ 2024-06-30",
+    "n_factors": 51,
+    "n_stocks": 2980,
+    "total_runtime_s": 1588.3
+  },
+  "results": [
+    {
+      "label": "Original",
+      "params": {
+        "up_pos": 2.0,
+        "up_neg": 0.3,
+        "down_pos": 0.5,
+        "down_neg": 1.5,
+        "turn_scale": 1.0
+      },
+      "annual_return": 4.18,
+      "benchmark_annual": -17.36,
+      "excess_annual": 21.53,
+      "sharpe": 0.178,
+      "ir": 0.82,
+      "max_drawdown": -19.56,
+      "n_rebalances": 18,
+      "avg_turnover": 8.5
+    },
+    {
+      "label": "Perturbed+20%",
+      "params": {
+        "up_pos": 2.4,
+        "up_neg": 0.36,
+        "down_pos": 0.6,
+        "down_neg": 1.8,
+        "turn_scale": 1.2
+      },
+      "annual_return": -17.73,
+      "benchmark_annual": -17.36,
+      "excess_annual": -0.37,
+      "sharpe": -0.946,
+      "ir": -0.02,
+      "max_drawdown": -38.56,
+      "n_rebalances": 18,
+      "avg_turnover": 11.0
+    },
+    {
+      "label": "Perturbed-20%",
+      "params": {
+        "up_pos": 1.6,
+        "up_neg": 0.24,
+        "down_pos": 0.4,
+        "down_neg": 1.2,
+        "turn_scale": 0.8
+      },
+      "annual_return": -22.58,
+      "benchmark_annual": -17.36,
+      "excess_annual": -5.23,
+      "sharpe": -1.38,
+      "ir": -0.244,
+      "max_drawdown": -38.25,
+      "n_rebalances": 18,
+      "avg_turnover": 6.7
+    },
+    {
+      "label": "Conservative",
+      "params": {
+        "up_pos": 1.3,
+        "up_neg": 0.7,
+        "down_pos": 0.7,
+        "down_neg": 1.3,
+        "turn_scale": 1.0
+      },
+      "annual_return": 8.68,
+      "benchmark_annual": -17.36,
+      "excess_annual": 26.03,
+      "sharpe": 0.427,
+      "ir": 0.981,
+      "max_drawdown": -19.41,
+      "n_rebalances": 18,
+      "avg_turnover": 8.9
+    },
+    {
+      "label": "Aggressive",
+      "params": {
+        "up_pos": 3.0,
+        "up_neg": 0.1,
+        "down_pos": 0.3,
+        "down_neg": 2.0,
+        "turn_scale": 1.0
+      },
+      "annual_return": -3.21,
+      "benchmark_annual": -17.36,
+      "excess_annual": 14.15,
+      "sharpe": -0.202,
+      "ir": 0.524,
+      "max_drawdown": -25.48,
+      "n_rebalances": 18,
+      "avg_turnover": 8.7
+    }
+  ]
+}

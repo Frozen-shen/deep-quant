@@ -103,10 +103,15 @@ def build_fallback_config() -> dict:
 # ════════════════════════════════════════════════════════════
 
 def compute_composite_scores_live(factors: List[dict], all_data: dict,
-                                  factor_cache, today) -> Dict[str, float]:
+                                  factor_cache, today,
+                                  minute_data: dict = None,
+                                  fund_panel: dict = None) -> Dict[str, float]:
     """
-    IC加权线性组合 (与回测逻辑一致):
+    IC加权线性组合 (与回测 DecisionEngine 逻辑一致):
       composite_i = sum(ICIR_j * z_score(factor_j_i)) / sum(|ICIR_j|)
+
+    支持四类因子: price_volume, fundamental, relative, minute
+    使用 50% 覆盖率门槛 (与 DecisionEngine 一致)。
     """
     factor_names = [f["name"] for f in factors]
     weights = np.array([f["icir"] * f.get("weight_multiplier", 1.0) for f in factors])
@@ -114,40 +119,86 @@ def compute_composite_scores_live(factors: List[dict], all_data: dict,
     if abs_weight_sum < 1e-9:
         return {}
 
-    # 收集当日因子值
+    # 收集各类因子原始值
     raw_values = {name: {} for name in factor_names}
-    for sym in all_data:
-        feats = factor_cache.get(sym, today)
-        if feats is None:
-            continue
-        for name in factor_names:
-            if name in feats and not np.isnan(feats[name]):
-                raw_values[name][sym] = feats[name]
 
-    # 找所有因子都有值的股票
-    valid_syms = None
+    # ── 价量因子 (from FactorCache) ──
+    pv_factors = [f for f in factors if f.get("category") == "price_volume"]
+    if pv_factors and factor_cache:
+        for sym in all_data:
+            feats = factor_cache.get(sym, today)
+            if feats is None:
+                continue
+            for f in pv_factors:
+                name = f["name"]
+                if name in feats and not np.isnan(feats[name]):
+                    raw_values[name][sym] = feats[name]
+
+    # ── 基本面因子 ──
+    fund_factors = [f for f in factors if f.get("category") == "fundamental"]
+    if fund_factors and fund_panel:
+        try:
+            from fundamental_fetcher import compute_fundamental_factors
+            fund_values = compute_fundamental_factors(fund_panel, all_data, today)
+            for sym, fvals in fund_values.items():
+                for name, val in fvals.items():
+                    if name in raw_values and not np.isnan(val):
+                        raw_values[name][sym] = val
+        except Exception as e:
+            print(f"  [WARN] 基本面因子计算失败: {e}", flush=True)
+
+    # ── 相对因子 ──
+    rel_factors = [f for f in factors if f.get("category") == "relative"]
+    if rel_factors:
+        try:
+            from relative_factors import compute_relative_factors_batch
+            rel_values = compute_relative_factors_batch(all_data, today)
+            for sym, fvals in rel_values.items():
+                for name, val in fvals.items():
+                    if name in raw_values and not np.isnan(val):
+                        raw_values[name][sym] = val
+        except Exception as e:
+            print(f"  [WARN] 相对因子计算失败: {e}", flush=True)
+
+    # ── 分钟频因子 ──
+    min_factors = [f for f in factors if f.get("category") == "minute"]
+    if min_factors and minute_data:
+        try:
+            from minute_factors import compute_minute_factors_batch
+            min_values = compute_minute_factors_batch(
+                minute_data, today, lookback=20)
+            for sym, fvals in min_values.items():
+                for name, val in fvals.items():
+                    if name in raw_values and not np.isnan(val):
+                        raw_values[name][sym] = val
+        except Exception as e:
+            print(f"  [WARN] 分钟因子计算失败: {e}", flush=True)
+
+    # 覆盖率过滤: 至少 50% 因子有值 (与 DecisionEngine 一致)
+    n_factors = len(factor_names)
+    sym_coverage = {}
     for name in factor_names:
-        syms_set = set(raw_values[name].keys())
-        if valid_syms is None:
-            valid_syms = syms_set
-        else:
-            valid_syms = valid_syms & syms_set
+        for sym in raw_values[name]:
+            sym_coverage[sym] = sym_coverage.get(sym, 0) + 1
+    valid_syms = sorted(
+        s for s, c in sym_coverage.items() if c >= n_factors * 0.5)
 
-    if valid_syms is None or len(valid_syms) < 10:
+    if len(valid_syms) < 10:
         return {}
 
-    valid_syms = sorted(valid_syms)
-    n = len(valid_syms)
-
     # 截面 z-score + IC加权
+    n = len(valid_syms)
     composite = np.zeros(n)
     for fi, name in enumerate(factor_names):
-        vals = np.array([raw_values[name][s] for s in valid_syms])
-        mean = vals.mean()
-        std = vals.std()
+        vals = np.array([raw_values[name].get(s, np.nan) for s in valid_syms])
+        valid_mask = ~np.isnan(vals)
+        if valid_mask.sum() < 10:
+            continue
+        mean = np.nanmean(vals)
+        std = np.nanstd(vals)
         if std < 1e-9:
             continue
-        z = (vals - mean) / std
+        z = np.where(valid_mask, (vals - mean) / std, 0.0)
         composite += weights[fi] * z
 
     composite /= abs_weight_sum
@@ -223,34 +274,83 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
 
     print(f"  信号日期: {today.date()}", flush=True)
 
-    # ── 3. 加载数据 + 预计算因子 ──
+    # ── 3. PIT Universe 过滤 ──
     print("  加载数据...", flush=True)
     from data_cache import load_all
     syms = get_cached_symbols()
+
+    # PIT universe: 只保留信号日当天存在的股票 (消除幸存者偏差)
+    try:
+        from data.pit_universe import get_universe
+        pit_syms = set(get_universe(str(today.date())))
+        if pit_syms:
+            syms = [s for s in syms if s in pit_syms]
+            print(f"  PIT universe: {len(syms)} 只 (过滤幸存者偏差)", flush=True)
+    except Exception as e:
+        print(f"  [WARN] PIT universe 不可用, 使用全量: {e}", flush=True)
+
     all_data = load_all(syms)
     all_data = {s: df for s, df in all_data.items() if df is not None and len(df) >= 100}
     print(f"  有效数据: {len(all_data)} 只", flush=True)
 
+    # ── 3b. 预计算价量因子 ──
     print("  预计算因子...", flush=True)
     from factor_scorer import FactorScorer
     from factor_cache import FactorCache
 
     scorer = FactorScorer.from_preset("full_auto")
-    factor_names = sorted(scorer.factor_weights.keys())
-    factor_cache = FactorCache(scorer, factor_names)
+    pv_names = sorted(scorer.factor_weights.keys())
+    factor_cache = FactorCache(scorer, pv_names)
     factor_cache.precompute(all_data)
-    print(f"  因子预计算完成: {len(factor_names)} 个", flush=True)
+    print(f"  价量因子预计算完成: {len(pv_names)} 个", flush=True)
 
-    # 过滤可计算因子
-    computable = set(factor_names)
+    # 保留所有可计算因子 (价量 + 基本面 + 相对 + 分钟)
+    computable = set(pv_names)
+    computable.update(f["name"] for f in factors
+                     if f.get("category") in ("fundamental", "relative", "minute"))
     factors = [f for f in factors if f["name"] in computable]
     if not factors:
         print("  [ERROR] 无可计算因子", flush=True)
         return None
 
-    # ── 4. 计算复合评分 ──
+    # ── 3c. 加载分钟数据 (如有分钟因子) ──
+    minute_data = {}
+    has_minute = any(f.get("category") == "minute" for f in factors)
+    if has_minute:
+        try:
+            from minute_factors import load_minute_data
+            minute_data = load_minute_data(use_cache=True)
+            print(f"  分钟数据: {len(minute_data)} 只", flush=True)
+        except Exception as e:
+            print(f"  [WARN] 分钟数据加载失败: {e}", flush=True)
+
+    # ── 3d. 加载基本面数据 (如有基本面因子) ──
+    fund_panel = {}
+    has_fund = any(f.get("category") == "fundamental" for f in factors)
+    if has_fund:
+        try:
+            from fundamental_fetcher import load_fundamental_panel
+            fund_panel = load_fundamental_panel()
+            print(f"  基本面数据: {len(fund_panel)} 只", flush=True)
+        except Exception as e:
+            print(f"  [WARN] 基本面数据加载失败: {e}", flush=True)
+
+    # ── 3e. Regime 自适应权重调整 ──
+    try:
+        from regime_detector import RegimeDetector
+        index_path = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
+        detector = RegimeDetector.from_benchmark_parquet(index_path)
+        regime = detector.detect(today)
+        factors = detector.adapt_factor_weights(factors, today, regime=regime)
+        print(f"  Regime: {regime.value} (权重已自适应调整)", flush=True)
+    except Exception as e:
+        print(f"  [WARN] Regime 检测不可用: {e}", flush=True)
+
+    # ── 4. 计算复合评分 (四类因子) ──
     print("  计算复合评分...", flush=True)
-    scores = compute_composite_scores_live(factors, all_data, factor_cache, today)
+    scores = compute_composite_scores_live(
+        factors, all_data, factor_cache, today,
+        minute_data=minute_data, fund_panel=fund_panel)
 
     if not scores:
         print("  [ERROR] 无法计算评分 (数据不足?)", flush=True)

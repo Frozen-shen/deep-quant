@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-08-02 23:01:15",
+  "description": "FIX-4: Bonferroni 校正 + 统计显著性分析",
+  "n_trials_development": 9,
+  "bonferroni_alpha": 0.005555555555555556,
+  "results": {
+    "development": {
+      "ir": 1.53,
+      "n_days": 359,
+      "t_stat": 1.826,
+      "p_value": 0.034,
+      "significant_after_bonferroni": false,
+      "critical_t": 2.544
+    },
+    "test": {
+      "ir": 0.81,
+      "n_days": 242,
+      "t_stat": 0.794,
+      "p_value": 0.214,
+      "significant_at_005": false,
+      "critical_t": 1.646
+    }
+  },
+  "conclusion": "两个期间均不显著。Development不显著因Bonferroni校正; TEST不显著因样本期太短。策略可能有效但无法统计证实。",
+  "power_analysis": {
+    "assumed_true_ir": 0.8,
+    "days_for_80pct_power": 2434,
+    "years_for_80pct_power": 9.7,
+    "note": "IR=0.8需要~10年数据才能在统计上证实。这是量化金融的固有困难。"
+  },
+  "recommendation": "不宣称alpha存在。启动模拟盘跟踪, 积累样本量。6个月后重新评估。"
+}

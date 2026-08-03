@@ -1,0 +1,91 @@
+[
+  {
+    "timestamp": "2026-08-02T22:17:23.566342",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "volatility_10d",
+        "n_days": 14,
+        "ic_mean": -0.20393,
+        "ic_std": 0.277437,
+        "icir": -0.735,
+        "pos_ratio": 0.3571
+      },
+      {
+        "factor": "vol_price_sync",
+        "n_days": 14,
+        "ic_mean": -0.07118,
+        "ic_std": 0.097019,
+        "icir": -0.7337,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 14,
+        "ic_mean": -0.222409,
+        "ic_std": 0.306204,
+        "icir": -0.7263,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 14,
+        "ic_mean": -0.226504,
+        "ic_std": 0.314429,
+        "icir": -0.7204,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 14,
+        "ic_mean": -0.214498,
+        "ic_std": 0.303781,
+        "icir": -0.7061,
+        "pos_ratio": 0.3571
+      },
+      {
+        "factor": "klen",
+        "n_days": 14,
+        "ic_mean": -0.179267,
+        "ic_std": 0.260586,
+        "icir": -0.6879,
+        "pos_ratio": 0.4286
+      },
+      {
+        "factor": "sharpe_20d",
+        "n_days": 14,
+        "ic_mean": 0.114905,
+        "ic_std": 0.257263,
+        "icir": 0.4466,
+        "pos_ratio": 0.5
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 14,
+        "ic_mean": -0.087222,
+        "ic_std": 0.207079,
+        "icir": -0.4212,
+        "pos_ratio": 0.4286
+      },
+      {
+        "factor": "ma3_ma20_spread",
+        "n_days": 14,
+        "ic_mean": -0.07061,
+        "ic_std": 0.213432,
+        "icir": -0.3308,
+        "pos_ratio": 0.5714
+      },
+      {
+        "factor": "ma5_ma20_spread",
+        "n_days": 14,
+        "ic_mean": -0.073497,
+        "ic_std": 0.222889,
+        "icir": -0.3297,
+        "pos_ratio": 0.5714
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [],
+    "weeks_decaying": 0
+  }
+]

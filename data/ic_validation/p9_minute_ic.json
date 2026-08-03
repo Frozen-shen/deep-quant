@@ -1,92 +1,94 @@
 {
   "meta": {
-    "generated_at": "2026-08-02 14:14:29",
-    "description": "分钟频因子 IC 验证 (Preliminary — 样本量有限)",
-    "n_stocks": 3016,
-    "n_sample_dates": 9,
+    "generated_at": "2026-08-02 20:57:53",
+    "description": "分钟频因子 IC 验证 (Baostock 15min, 全量历史)",
+    "n_stocks": 2605,
+    "n_sample_dates": 217,
     "forward_days": 20,
-    "data_range": "2026-04-30 ~ 2026-07-31"
+    "lookback_days": 20,
+    "data_range": "2022-01-10 ~ 2026-07-31",
+    "source": "baostock_15min"
   },
   "results": [
     {
-      "factor": "min_realized_skew",
-      "icir": -18.0581,
-      "ic_mean": -0.260117,
-      "ic_std": 0.014404,
-      "n_days": 3,
-      "pos_ratio": 0.0
-    },
-    {
-      "factor": "min_am_pm_ratio",
-      "icir": -13.238,
-      "ic_mean": -0.228515,
-      "ic_std": 0.017262,
-      "n_days": 3,
-      "pos_ratio": 0.0
-    },
-    {
-      "factor": "min_realized_vol",
-      "icir": -5.3929,
-      "ic_mean": -0.608209,
-      "ic_std": 0.112779,
-      "n_days": 3,
-      "pos_ratio": 0.0
-    },
-    {
-      "factor": "min_vol_concentration",
-      "icir": -2.2568,
-      "ic_mean": -0.079195,
-      "ic_std": 0.035091,
-      "n_days": 3,
-      "pos_ratio": 0.0
-    },
-    {
       "factor": "min_intraday_trend",
-      "icir": -2.1834,
-      "ic_mean": -0.31882,
-      "ic_std": 0.146017,
-      "n_days": 3,
-      "pos_ratio": 0.0
+      "icir": -0.722,
+      "ic_mean": -0.1028,
+      "ic_std": 0.142388,
+      "n_days": 217,
+      "pos_ratio": 0.2535
+    },
+    {
+      "factor": "min_realized_skew",
+      "icir": -0.6807,
+      "ic_mean": -0.0737,
+      "ic_std": 0.108278,
+      "n_days": 217,
+      "pos_ratio": 0.2304
     },
     {
       "factor": "min_large_order_flow",
-      "icir": -2.0788,
-      "ic_mean": -0.303325,
-      "ic_std": 0.145912,
-      "n_days": 3,
-      "pos_ratio": 0.0
+      "icir": -0.6175,
+      "ic_mean": -0.062304,
+      "ic_std": 0.100891,
+      "n_days": 217,
+      "pos_ratio": 0.2673
     },
     {
-      "factor": "min_close_strength",
-      "icir": -1.2265,
-      "ic_mean": -0.198112,
-      "ic_std": 0.161523,
-      "n_days": 3,
-      "pos_ratio": 0.0
-    },
-    {
-      "factor": "min_vwap_dev",
-      "icir": -1.0822,
-      "ic_mean": -0.13281,
-      "ic_std": 0.122726,
-      "n_days": 3,
-      "pos_ratio": 0.3333
-    },
-    {
-      "factor": "min_tail_return",
-      "icir": -0.8963,
-      "ic_mean": -0.103378,
-      "ic_std": 0.11534,
-      "n_days": 3,
-      "pos_ratio": 0.3333
+      "factor": "min_am_pm_ratio",
+      "icir": -0.5989,
+      "ic_mean": -0.07641,
+      "ic_std": 0.127583,
+      "n_days": 217,
+      "pos_ratio": 0.2857
     },
     {
       "factor": "min_open_gap",
-      "icir": 0.1541,
-      "ic_mean": 0.01906,
-      "ic_std": 0.123721,
-      "n_days": 3,
-      "pos_ratio": 0.3333
+      "icir": 0.5061,
+      "ic_mean": 0.040433,
+      "ic_std": 0.079897,
+      "n_days": 217,
+      "pos_ratio": 0.7465
+    },
+    {
+      "factor": "min_realized_vol",
+      "icir": -0.4919,
+      "ic_mean": -0.100286,
+      "ic_std": 0.20386,
+      "n_days": 217,
+      "pos_ratio": 0.3088
+    },
+    {
+      "factor": "min_vol_concentration",
+      "icir": -0.4859,
+      "ic_mean": -0.060365,
+      "ic_std": 0.124227,
+      "n_days": 217,
+      "pos_ratio": 0.2857
+    },
+    {
+      "factor": "min_vwap_dev",
+      "icir": -0.3636,
+      "ic_mean": -0.037861,
+      "ic_std": 0.104121,
+      "n_days": 217,
+      "pos_ratio": 0.3548
+    },
+    {
+      "factor": "min_tail_return",
+      "icir": -0.3371,
+      "ic_mean": -0.021695,
+      "ic_std": 0.064353,
+      "n_days": 217,
+      "pos_ratio": 0.3456
+    },
+    {
+      "factor": "min_close_strength",
+      "icir": -0.2381,
+      "ic_mean": -0.02891,
+      "ic_std": 0.121438,
+      "n_days": 217,
+      "pos_ratio": 0.4332
     }
   ]
 }

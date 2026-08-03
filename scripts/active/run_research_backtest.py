@@ -50,10 +50,10 @@ THRESHOLDS = {
     "money_flow": {"skip": True, "label": "资金流因子 (历史不足, 跳过)"},
 }
 
-# 回测参数
+# 回测参数 (方案C v4: 仅限 research 期 2015-01~2024-12, 终极TEST/BLIND 禁入)
 BT_CONFIG = {
     "start": "2019-01-01",       # 回测起始 (2018用于因子warmup)
-    "end": "2026-06-30",         # 回测结束
+    "end": "2024-12-31",         # 回测结束 (research 期内, 禁止触碰 TEST/BLIND)
     "rebalance_days": 20,        # 每20个交易日调仓
     "top_k": 30,                 # 持仓数量
     "ic_lookback_months": 12,    # IC估计回溯窗口
@@ -64,12 +64,11 @@ BT_CONFIG = {
     "commission_sell": 0.00075,  # 万2.5 + 千0.5印花税
 }
 
-# 市场阶段划分
+# 市场阶段划分 (仅 research 期)
 REGIMES = [
     {"name": "bull_2019_2020", "start": "2019-01-01", "end": "2020-12-31"},
     {"name": "bear_2021_2022", "start": "2021-01-01", "end": "2022-12-31"},
     {"name": "recovery_2023_2024", "start": "2023-01-01", "end": "2024-12-31"},
-    {"name": "recent_2025_2026", "start": "2025-01-01", "end": "2026-06-30"},
 ]
 
 # 事件因子低功效折扣
@@ -1050,6 +1049,19 @@ def main():
     parser.add_argument("--skip-bt", action="store_true", help="跳过回测")
     parser.add_argument("--fast", action="store_true", help="快速模式")
     args = parser.parse_args()
+
+    # ── gate 纪律: 只允许 research 期 (2015-01~2024-12), 禁止触碰 TEST/BLIND ──
+    from gate import load_config, check_date_range, DateRangeGuard, GateViolation
+    import os as _os
+    _cfg = load_config(_os.path.join(_os.path.dirname(_os.path.dirname(
+        _os.path.dirname(_os.path.abspath(__file__)))), "config.yaml"))
+    _dp = _cfg["data_partition"]
+    try:
+        check_date_range(_dp["research"]["start"], _dp["research"]["end"],
+                         _cfg, script_name="run_research_backtest")
+    except GateViolation as ex:
+        print(f"[GATE] {ex}", flush=True)
+        return
 
     t0 = time.time()
     print("=" * 70, flush=True)

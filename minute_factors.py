@@ -1,12 +1,12 @@
 """
 minute_factors.py — 分钟频因子计算模块
 
-从 5 分钟 K 线聚合为日频因子值，每只股票每天输出一组浮点数。
+从分钟 K 线聚合为日频因子值，每只股票每天输出一组浮点数。
 
-数据源: Sina (ak.stock_zh_a_minute)
-  列: day, open, high, low, close, volume, amount
-  频率: 5 分钟 (48 根/天)
-  历史深度: ~40 个交易日 (滚动)
+数据源: Baostock 15分钟线 (2022-2026, 全市场)
+  列: datetime, day, open, high, low, close, volume, amount
+  频率: 15 分钟 (16 根/天) 或 5 分钟 (48 根/天), 自动检测
+  历史深度: 1108 个交易日
 
 因子列表 (10个):
   min_realized_vol      — 已实现波动率 (年化)
@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "minute")
+MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "minute_15m")
 
 # 模块级缓存 (回测循环中避免重复IO)
 _minute_cache: Optional[Dict[str, pd.DataFrame]] = None
@@ -126,16 +126,19 @@ def _gini_coefficient(arr: np.ndarray) -> float:
 
 def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> dict:
     """
-    从单日的 5 分钟 K 线计算所有因子。
+    从单日的分钟 K 线计算所有因子。
+
+    支持 5min (48根/天) 和 15min (16根/天) 数据。
+    自动根据 bar 数量调整年化系数和窗口参数。
 
     Args:
-      day_bars: 当日所有 5min bars (48根), 列: open, high, low, close, volume, amount
+      day_bars: 当日所有 bars, 列: open, high, low, close, volume, amount
       prev_close: 前一交易日收盘价 (用于 open_gap)
 
     Returns:
       {factor_name: float_value}
     """
-    if len(day_bars) < 10:
+    if len(day_bars) < 4:
         return {}
 
     close = day_bars["close"].values.astype(float)
@@ -145,23 +148,25 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
     volume = day_bars["volume"].values.astype(float)
 
     n_bars = len(close)
+    # 自动检测频率: 15min→16根, 5min→48根
+    bars_per_day = 16 if n_bars <= 24 else 48
+    annualize_factor = np.sqrt(bars_per_day * 252)
     results = {}
 
     # ── 1. 已实现波动率 (年化) ──
-    # 5min returns → std → 年化 (×√(48×252))
-    returns_5min = np.diff(close) / close[:-1]
-    returns_5min = returns_5min[np.isfinite(returns_5min)]
-    if len(returns_5min) > 5:
-        results["min_realized_vol"] = float(np.std(returns_5min) * np.sqrt(48 * 252))
+    returns_intra = np.diff(close) / close[:-1]
+    returns_intra = returns_intra[np.isfinite(returns_intra)]
+    if len(returns_intra) > 3:
+        results["min_realized_vol"] = float(np.std(returns_intra) * annualize_factor)
     else:
         results["min_realized_vol"] = np.nan
 
     # ── 2. 已实现偏度 ──
-    if len(returns_5min) > 10:
-        mean_r = np.mean(returns_5min)
-        std_r = np.std(returns_5min)
+    if len(returns_intra) > 5:
+        mean_r = np.mean(returns_intra)
+        std_r = np.std(returns_intra)
         if std_r > 1e-9:
-            skew = np.mean(((returns_5min - mean_r) / std_r) ** 3)
+            skew = np.mean(((returns_intra - mean_r) / std_r) ** 3)
             results["min_realized_skew"] = float(skew)
         else:
             results["min_realized_skew"] = 0.0
@@ -169,7 +174,6 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
         results["min_realized_skew"] = np.nan
 
     # ── 3. VWAP 偏离 ──
-    # VWAP = Σ(close × volume) / Σ(volume)
     total_vol = volume.sum()
     if total_vol > 0:
         vwap = np.sum(close * volume) / total_vol
@@ -178,9 +182,10 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
     else:
         results["min_vwap_dev"] = np.nan
 
-    # ── 4. 尾盘效应 (最后6根bar = 30min) ──
-    tail_n = min(6, n_bars // 4)  # 至少用 1/4 的数据
-    if tail_n >= 2 and n_bars > tail_n:
+    # ── 4. 尾盘效应 (最后30min: 15min→2根, 5min→6根) ──
+    tail_n = 2 if bars_per_day == 16 else 6
+    tail_n = min(tail_n, n_bars // 4)
+    if tail_n >= 1 and n_bars > tail_n:
         tail_start_price = close[-(tail_n + 1)]
         tail_end_price = close[-1]
         results["min_tail_return"] = float((tail_end_price - tail_start_price) / tail_start_price) \
@@ -207,17 +212,12 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
         results["min_vol_concentration"] = np.nan
 
     # ── 8. 大单净流入代理 ──
-    # 成交量 > 2×均值的bar视为"大单"，按涨跌方向加总
     mean_vol = volume.mean()
     if mean_vol > 0:
         large_mask = volume > (2 * mean_vol)
         if large_mask.sum() > 0:
-            bar_returns = np.diff(close) / close[:-1]
-            # 对齐: large_mask 有 n_bars 个, bar_returns 有 n_bars-1 个
-            # 用 bar 的 close vs open 判断方向
             bar_direction = np.sign(close - open_)
             large_flow = np.sum(volume[large_mask] * bar_direction[large_mask])
-            # 归一化: 除以总成交量
             results["min_large_order_flow"] = float(large_flow / total_vol) if total_vol > 0 else 0.0
         else:
             results["min_large_order_flow"] = 0.0
@@ -225,8 +225,8 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
         results["min_large_order_flow"] = np.nan
 
     # ── 9. 上下午量比 ──
-    # A股: 上午 9:30-11:30 (24根5min bar), 下午 13:00-15:00 (24根)
-    # 近似: 前半 vs 后半
+    # A股: 上午 9:30-11:30, 下午 13:00-15:00
+    # 15min: 前8根=AM, 后8根=PM; 5min: 前24根=AM, 后24根=PM
     mid = n_bars // 2
     am_vol = volume[:mid].sum()
     pm_vol = volume[mid:].sum()
@@ -242,7 +242,7 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
     if day_range > 0:
         results["min_close_strength"] = float((close[-1] - day_low) / day_range)
     else:
-        results["min_close_strength"] = 0.5  # 无波动时居中
+        results["min_close_strength"] = 0.5
 
     return results
 

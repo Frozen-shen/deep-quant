@@ -69,24 +69,34 @@ class RegimeDetector:
          - ADX<=20 → RANGE
     """
 
-    def __init__(self, market: str = "a"):
+    # 因子权重乘数 profile: (up_pos, up_neg, down_pos, down_neg)
+    REGIME_PROFILES = {
+        "original":    (2.0, 0.3, 0.5, 1.5),
+        "conservative": (1.3, 0.7, 0.7, 1.3),
+        "aggressive":  (3.0, 0.1, 0.3, 2.0),
+        "disabled":    (1.0, 1.0, 1.0, 1.0),  # 等同于不做 regime 调整
+    }
+
+    def __init__(self, market: str = "a", profile: str = "conservative"):
         self.market = market
+        self.profile = profile
         self._index_data: Optional[pd.DataFrame] = None
         self._ma60: Optional[pd.Series] = None
         self._adx: Optional[pd.Series] = None
 
     @classmethod
-    def from_benchmark_parquet(cls, path: str) -> "RegimeDetector":
+    def from_benchmark_parquet(cls, path: str, profile: str = "conservative") -> "RegimeDetector":
         """
         从本地 parquet 文件加载基准指数 (无需网络)。
 
         Args:
           path: parquet 文件路径 (如 data/cache/index_csi1000.parquet)
+          profile: regime 参数 profile (conservative/original/aggressive/disabled)
 
         Returns:
           已初始化的 RegimeDetector 实例
         """
-        detector = cls(market="a")
+        detector = cls(market="a", profile=profile)
         if not os.path.exists(path):
             print(f"  [Regime] 基准文件不存在: {path}, 使用 RANGE fallback")
             return detector
@@ -243,10 +253,11 @@ class RegimeDetector:
         """
         根据市场状态调整因子权重 (优化 B v3 — 软权重, 不做硬筛选)。
 
-        策略:
-          - TREND_UP (牛市): 正IC因子 ×2.0, 负IC因子 ×0.3
-          - TREND_DOWN (熊市): 负IC因子 ×1.5, 正IC因子 ×0.5
-          - RANGE (震荡): 全部保留, 不调整
+        策略 (由 self.profile 控制):
+          - conservative (默认): 温和调整, 鲁棒性最佳
+          - original: 原始激进参数 (过拟合风险高)
+          - aggressive: 极端调整
+          - disabled: 不调整 (纯因子 alpha)
 
         不做硬筛选 (避免regime切换时全仓换血导致换手率爆炸)。
 
@@ -261,6 +272,9 @@ class RegimeDetector:
         if regime is None:
             regime = self.detect(today)
 
+        up_pos, up_neg, down_pos, down_neg = self.REGIME_PROFILES.get(
+            self.profile, self.REGIME_PROFILES["conservative"])
+
         adapted = []
         for f in factors:
             new_f = dict(f)
@@ -268,17 +282,15 @@ class RegimeDetector:
             base_mult = f.get("weight_multiplier", 1.0)
 
             if regime == Regime.TREND_UP:
-                # 牛市: 大幅加强动量(正IC), 大幅弱化防御(负IC)
                 if icir > 0:
-                    new_f["weight_multiplier"] = base_mult * 2.0
+                    new_f["weight_multiplier"] = base_mult * up_pos
                 else:
-                    new_f["weight_multiplier"] = base_mult * 0.3
+                    new_f["weight_multiplier"] = base_mult * up_neg
             elif regime == Regime.TREND_DOWN:
-                # 熊市: 加强防御(负IC), 弱化动量(正IC)
                 if icir > 0:
-                    new_f["weight_multiplier"] = base_mult * 0.5
+                    new_f["weight_multiplier"] = base_mult * down_pos
                 else:
-                    new_f["weight_multiplier"] = base_mult * 1.5
+                    new_f["weight_multiplier"] = base_mult * down_neg
             # RANGE: 不调整
 
             adapted.append(new_f)

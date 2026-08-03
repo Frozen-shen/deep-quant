@@ -1,0 +1,6 @@
+{
+  "locked_at": "2026-08-03 12:50:26",
+  "period": "2025-01-01 ~ 2026-06-30",
+  "script": "run_walkforward_backtest.py --folds",
+  "output": "C:\\Users\\Frozen\\ZCodeProject\\quant-starter\\data\\ic_validation\\walkforward_results.json"
+}

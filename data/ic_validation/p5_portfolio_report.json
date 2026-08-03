@@ -1,1207 +1,335 @@
 {
   "meta": {
-    "generated_at": "2026-08-02 15:09:27",
-    "description": "P5 全因子组合验证报告 (v3 — 四项优化)",
-    "optimizations": {
-      "A_turnover_control": "regime-adaptive hold_thresh/n_drop/cost_threshold",
-      "B_regime_weights": "牛市加动量×1.5, 熊市加防御×1.3",
-      "C_threshold": "MIN_ABS_ICIR=0.2 (原0.3)",
-      "D_fundamental": "预留接口 (需网络)"
-    },
+    "generated_at": "2026-08-03 10:22:00",
+    "description": "P5 全因子组合验证报告",
     "bt_config": {
-      "start": "2023-01-01",
-      "end": "2024-06-30",
+      "start": "2019-01-01",
+      "end": "2026-06-30",
       "rebalance_days": 20,
       "top_k": 30,
-      "initial_capital": 100000,
+      "ic_lookback_months": 12,
+      "initial_capital": 1000000,
       "lot_size": 100,
       "slippage_bps": 30,
       "commission_buy": 0.00025,
       "commission_sell": 0.00075
     },
-    "corr_threshold": 0.6,
-    "min_abs_icir": 0.2,
-    "use_regime": true,
-    "data_partition": "development",
-    "n_stocks": 2979,
-    "elapsed_s": 752.5
+    "thresholds": {
+      "price_volume": {
+        "min_abs_icir": 0.3,
+        "label": "价量因子"
+      },
+      "fundamental": {
+        "min_abs_icir": 0.15,
+        "label": "基本面因子"
+      },
+      "event": {
+        "min_abs_icir": 0.1,
+        "label": "事件因子",
+        "direction_consistent": true
+      },
+      "money_flow": {
+        "skip": true,
+        "label": "资金流因子 (历史不足, 跳过)"
+      }
+    }
   },
   "selected_factors": [
     {
-      "name": "min_realized_skew",
-      "icir": -18.0581,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_am_pm_ratio",
-      "icir": -13.238,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_realized_vol",
-      "icir": -5.3929,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_vol_concentration",
-      "icir": -2.2568,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_intraday_trend",
-      "icir": -2.1834,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_large_order_flow",
-      "icir": -2.0788,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_close_strength",
-      "icir": -1.2265,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_vwap_dev",
-      "icir": -1.0822,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "min_tail_return",
-      "icir": -0.8963,
-      "category": "minute",
-      "weight_multiplier": 1.0,
-      "n_days": 3
-    },
-    {
-      "name": "corr_pv_10",
-      "icir": -0.8732,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "big_bull",
-      "icir": -0.8493,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 243
-    },
-    {
       "name": "cord_30",
-      "icir": -0.8377,
+      "icir": -0.6353,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 240
     },
     {
-      "name": "skew_60d",
-      "icir": -0.7395,
+      "name": "cord_20",
+      "icir": -0.5753,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 242
+      "n_days": 241
     },
     {
-      "name": "idio_vol",
-      "icir": -0.7329,
-      "category": "relative",
+      "name": "turnover_vol",
+      "icir": -0.5651,
+      "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 58
+      "n_days": 241
+    },
+    {
+      "name": "cord_60",
+      "icir": -0.5528,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 237
+    },
+    {
+      "name": "liq_ratio",
+      "icir": -0.5267,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 243
+    },
+    {
+      "name": "turnover_trend",
+      "icir": -0.4584,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 241
     },
     {
       "name": "skew_20d",
-      "icir": -0.607,
+      "icir": -0.4442,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 242
     },
     {
-      "name": "imax_30",
-      "icir": 0.598,
+      "name": "cord_10",
+      "icir": -0.4204,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "imxd_30",
+      "icir": 0.3947,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 237
+    },
+    {
+      "name": "return_30d",
+      "icir": 0.3932,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 237
+    },
+    {
+      "name": "beta_30",
+      "icir": -0.3866,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 240
+    },
+    {
+      "name": "momentum_20d",
+      "icir": 0.3809,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 239
+    },
+    {
+      "name": "volatility_10d",
+      "icir": -0.3776,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 242
+    },
+    {
+      "name": "ma5_ma30_spread",
+      "icir": -0.3716,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 240
+    },
+    {
+      "name": "rev_mom_spread",
+      "icir": 0.3649,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 239
     },
     {
       "name": "vol_price_sync",
-      "icir": -0.5972,
+      "icir": -0.3607,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 241
     },
     {
-      "name": "volume_cv_20d",
-      "icir": -0.5957,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "volatility_5d",
-      "icir": -0.5883,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "imax_20",
-      "icir": 0.565,
+      "name": "imxd_20",
+      "icir": 0.3581,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 239
     },
     {
-      "name": "vma_60",
-      "icir": 0.5589,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "k_len",
-      "icir": -0.553,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 243
-    },
-    {
-      "name": "return_skew_20d",
-      "icir": -0.5414,
+      "name": "amplitude_5d",
+      "icir": -0.3531,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 242
-    },
-    {
-      "name": "ma60_bias",
-      "icir": 0.5402,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "rel_mom_20d",
-      "icir": -0.5331,
-      "category": "relative",
-      "weight_multiplier": 1.0,
-      "n_days": 58
-    },
-    {
-      "name": "rel_mom_60d",
-      "icir": -0.5274,
-      "category": "relative",
-      "weight_multiplier": 1.0,
-      "n_days": 58
-    },
-    {
-      "name": "sortino_20d",
-      "icir": -0.5165,
-      "category": "relative",
-      "weight_multiplier": 1.0,
-      "n_days": 58
-    },
-    {
-      "name": "volatility_60d",
-      "icir": -0.4909,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "overnight_return_20d",
-      "icir": 0.4869,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "cord_5",
-      "icir": -0.4686,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "fund_bp",
-      "icir": 0.4679,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "fund_pb",
-      "icir": -0.4666,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "channel_low_20",
-      "icir": -0.4642,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 243
-    },
-    {
-      "name": "volatility_2d",
-      "icir": -0.4583,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "imax_60",
-      "icir": 0.4558,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 231
-    },
-    {
-      "name": "ma_bullish",
-      "icir": -0.4468,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "downside_vol",
-      "icir": -0.4464,
-      "category": "relative",
-      "weight_multiplier": 1.0,
-      "n_days": 58
-    },
-    {
-      "name": "vol_compress",
-      "icir": -0.4116,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
     },
     {
       "name": "imin_20",
-      "icir": -0.4079,
+      "icir": -0.3505,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 239
     },
     {
-      "name": "imin_60",
-      "icir": -0.3687,
+      "name": "klen",
+      "icir": -0.3476,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 231
+      "n_days": 243
     },
     {
-      "name": "vol_up_price_up",
-      "icir": -0.3685,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "imax_10",
-      "icir": 0.3629,
+      "name": "volatility_20d",
+      "icir": -0.347,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 241
     },
     {
-      "name": "momentum_7d",
-      "icir": 0.3345,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "vol_change_5d",
-      "icir": -0.3301,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "fund_ep",
-      "icir": 0.3252,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "vol_regime",
-      "icir": -0.3182,
+      "name": "imax_30",
+      "icir": 0.3411,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 237
     },
     {
-      "name": "ma_bearish",
-      "icir": 0.3019,
+      "name": "ma10_ma20_spread",
+      "icir": -0.3347,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 241
     },
     {
-      "name": "fund_profit_growth_ded",
-      "icir": 0.2923,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "vma_10",
-      "icir": 0.2814,
+      "name": "imin_30",
+      "icir": -0.3298,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 242
+      "n_days": 237
     },
     {
-      "name": "doji",
-      "icir": 0.2762,
+      "name": "ma20_ma60_spread",
+      "icir": -0.3291,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 243
+      "n_days": 237
     },
     {
-      "name": "imin_10",
-      "icir": -0.2758,
+      "name": "beta_20",
+      "icir": -0.3284,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 241
     },
     {
-      "name": "big_bear",
-      "icir": -0.2647,
+      "name": "volatility_30d",
+      "icir": -0.328,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 243
+      "n_days": 240
     },
     {
-      "name": "vstd_5",
-      "icir": -0.2497,
+      "name": "lockup_pressure",
+      "icir": -0.3269,
+      "category": "event",
+      "weight_multiplier": 0.5,
+      "n_days": 5
+    },
+    {
+      "name": "ma5_ma20_spread",
+      "icir": -0.3262,
       "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 242
+      "n_days": 241
     },
     {
-      "name": "up_streak",
-      "icir": -0.2443,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "ma5_cross_ma60",
-      "icir": -0.2434,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 236
-    },
-    {
-      "name": "fund_ocf_yield",
-      "icir": 0.2347,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "imax_5",
-      "icir": 0.2315,
+      "name": "sump_30",
+      "icir": -0.3242,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 242
     },
     {
-      "name": "fund_profit_growth",
-      "icir": 0.2231,
-      "category": "fundamental",
+      "name": "ma3_ma20_spread",
+      "icir": -0.3227,
+      "category": "price_volume",
       "weight_multiplier": 1.0,
-      "n_days": 61
+      "n_days": 241
     },
     {
-      "name": "fund_ocf_ps",
-      "icir": 0.2177,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "return_3d",
-      "icir": 0.2149,
+      "name": "sumd_30",
+      "icir": -0.3221,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 242
     },
     {
-      "name": "fund_sp",
-      "icir": 0.2092,
-      "category": "fundamental",
-      "weight_multiplier": 1.0,
-      "n_days": 61
-    },
-    {
-      "name": "rsqr_10",
-      "icir": 0.2017,
+      "name": "sumn_30",
+      "icir": 0.32,
       "category": "price_volume",
       "weight_multiplier": 1.0,
       "n_days": 242
+    },
+    {
+      "name": "ma_bullish",
+      "icir": -0.3178,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 241
+    },
+    {
+      "name": "vma_60",
+      "icir": 0.3161,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 237
+    },
+    {
+      "name": "sharpe_20d",
+      "icir": 0.3132,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 241
+    },
+    {
+      "name": "imin_60",
+      "icir": -0.3119,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 231
+    },
+    {
+      "name": "imax_20",
+      "icir": 0.3089,
+      "category": "price_volume",
+      "weight_multiplier": 1.0,
+      "n_days": 239
+    },
+    {
+      "name": "preview_surprise",
+      "icir": 0.1793,
+      "category": "event",
+      "weight_multiplier": 1.0,
+      "n_days": 195
     }
   ],
-  "correlation_matrix": {
-    "corr_pv_10_vs_volume_price_corr_20d": 0.6092,
-    "corr_pv_10_vs_cord_30": 0.4951,
-    "corr_pv_10_vs_corr_pv_20": 0.6039,
-    "corr_pv_10_vs_cord_20": 0.5657,
-    "corr_pv_10_vs_cord_60": 0.3806,
-    "corr_pv_10_vs_cord_10": 0.637,
-    "corr_pv_10_vs_skew_20d": 0.3136,
-    "volume_price_corr_20d_vs_cord_30": 0.5825,
-    "volume_price_corr_20d_vs_corr_pv_20": 0.987,
-    "volume_price_corr_20d_vs_cord_20": 0.5815,
-    "volume_price_corr_20d_vs_cord_60": 0.4817,
-    "volume_price_corr_20d_vs_cord_10": 0.3992,
-    "volume_price_corr_20d_vs_skew_20d": 0.453,
-    "cord_30_vs_corr_pv_20": 0.5836,
-    "cord_30_vs_cord_20": 0.8161,
-    "cord_30_vs_cord_60": 0.7195,
-    "cord_30_vs_cord_10": 0.5535,
-    "corr_pv_20_vs_cord_20": 0.5805,
-    "corr_pv_20_vs_cord_60": 0.4852,
-    "corr_pv_20_vs_cord_10": 0.3935,
-    "corr_pv_20_vs_skew_20d": 0.4191,
-    "cord_20_vs_cord_60": 0.5767,
-    "cord_20_vs_cord_10": 0.6902,
-    "cord_60_vs_cord_10": 0.3883
-  },
-  "pruned_factors": {
-    "volume_price_corr_20d": {
-      "pruned_by": "corr_pv_10",
-      "correlation": 0.6092046089376757
-    },
-    "corr_pv_20": {
-      "pruned_by": "corr_pv_10",
-      "correlation": 0.603875312276521
-    },
-    "cord_20": {
-      "pruned_by": "cord_30",
-      "correlation": 0.8161077450763682
-    },
-    "cord_60": {
-      "pruned_by": "cord_30",
-      "correlation": 0.719453967374069
-    },
-    "cord_10": {
-      "pruned_by": "corr_pv_10",
-      "correlation": 0.6369755211551293
-    },
-    "amplitude_5d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.8005110292627785
-    },
-    "volatility_10d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.8045737042163494
-    },
-    "return_30d": {
-      "pruned_by": "imax_30",
-      "correlation": 0.6261177180762494
-    },
-    "imxd_30": {
-      "pruned_by": "imax_30",
-      "correlation": 0.8718230430003042
-    },
-    "momentum_20d": {
-      "pruned_by": "imax_20",
-      "correlation": 0.6262822607771544
-    },
-    "return_20d": {
-      "pruned_by": "imax_20",
-      "correlation": 0.6262822607771544
-    },
-    "beta_30": {
-      "pruned_by": "imax_30",
-      "correlation": -0.6204183863599902
-    },
-    "volatility_20d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6707201318026974
-    },
-    "ma10_ma30_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.7752363119991449
-    },
-    "imxd_20": {
-      "pruned_by": "imax_20",
-      "correlation": 0.8612929383982549
-    },
-    "ma5_ma30_spread": {
-      "pruned_by": "imax_20",
-      "correlation": -0.6046487903362933
-    },
-    "rev_mom_spread": {
-      "pruned_by": "imax_20",
-      "correlation": 0.6161618221023285
-    },
-    "amplitude_20d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6209002730626203
-    },
-    "high_low_ratio_5d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.7364416318260117
-    },
-    "sump_30": {
-      "pruned_by": "imax_30",
-      "correlation": -0.6629753365323281
-    },
-    "volatility_30d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6086190396207247
-    },
-    "intraday_range_20d": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6202699570250266
-    },
-    "sumd_30": {
-      "pruned_by": "imax_30",
-      "correlation": -0.663612776719762
-    },
-    "return_15d": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.6879304013144394
-    },
-    "sumn_30": {
-      "pruned_by": "imax_30",
-      "correlation": 0.6637269308742255
-    },
-    "beta_20": {
-      "pruned_by": "imax_20",
-      "correlation": -0.6183782352774053
-    },
-    "vma_30": {
-      "pruned_by": "vma_60",
-      "correlation": 0.8529144482468282
-    },
-    "return_60d": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.7994804400532215
-    },
-    "return_90d": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.6330552790184417
-    },
-    "ma10_ma60_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.9066548242563619
-    },
-    "ma10_ma20_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.6524607334118555
-    },
-    "sump_20": {
-      "pruned_by": "imax_20",
-      "correlation": -0.6701169022151133
-    },
-    "sharpe_20d": {
-      "pruned_by": "imax_20",
-      "correlation": 0.6699451805956401
-    },
-    "ma20_bias": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.6856308949657627
-    },
-    "volatility_90d": {
-      "pruned_by": "volatility_60d",
-      "correlation": 0.9216079457292271
-    },
-    "sump_60": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.7865439377668998
-    },
-    "sumd_60": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.7874159555445303
-    },
-    "sumd_20": {
-      "pruned_by": "imax_20",
-      "correlation": -0.6706510182229812
-    },
-    "sumn_60": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.7878888433650767
-    },
-    "ma5_ma20_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.6733198154686464
-    },
-    "sumn_20": {
-      "pruned_by": "imax_20",
-      "correlation": 0.6705579381327917
-    },
-    "ma3_ma20_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.6806771945196984
-    },
-    "imxd_60": {
-      "pruned_by": "ma60_bias",
-      "correlation": 0.6131325424779365
-    },
-    "ma20_ma60_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.802156708731005
-    },
-    "return_10d": {
-      "pruned_by": "channel_low_20",
-      "correlation": -0.6322000245976854
-    },
-    "vma_20": {
-      "pruned_by": "vma_60",
-      "correlation": 0.7416329391285519
-    },
-    "vstd_60": {
-      "pruned_by": "vma_60",
-      "correlation": 0.8549409322477917
-    },
-    "imin_30": {
-      "pruned_by": "imin_20",
-      "correlation": 0.6146228453596175
-    },
-    "beta_60": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.7575584166882268
-    },
-    "turnover_spike": {
-      "pruned_by": "vma_60",
-      "correlation": -0.7334899547827416
-    },
-    "vol_ratio_20d": {
-      "pruned_by": "vma_60",
-      "correlation": -0.7334899547827416
-    },
-    "position_60d": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.9028847834070837
-    },
-    "ma30_ma60_spread": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.7047146547263868
-    },
-    "boll_width_10": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6183256483557069
-    },
-    "beta_10": {
-      "pruned_by": "imax_10",
-      "correlation": -0.6285605115644146
-    },
-    "ma5_ma10_spread": {
-      "pruned_by": "imax_10",
-      "correlation": -0.6017935650112832
-    },
-    "return_7d": {
-      "pruned_by": "momentum_7d",
-      "correlation": 1.0
-    },
-    "position_20d": {
-      "pruned_by": "ma60_bias",
-      "correlation": -0.6141805300047473
-    },
-    "resi_60": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.6503055009267058
-    },
-    "imxd_10": {
-      "pruned_by": "imax_10",
-      "correlation": 0.8420479762244835
-    },
-    "sump_10": {
-      "pruned_by": "channel_low_20",
-      "correlation": 0.6410991923114606
-    },
-    "ma10_bias": {
-      "pruned_by": "channel_low_20",
-      "correlation": -0.6153141083567903
-    },
-    "ma3_ma10_spread": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.9049571520729148
-    },
-    "range_20d": {
-      "pruned_by": "volatility_60d",
-      "correlation": 0.6790696186370284
-    },
-    "sumd_10": {
-      "pruned_by": "channel_low_20",
-      "correlation": 0.6348001035043488
-    },
-    "return_5d": {
-      "pruned_by": "momentum_7d",
-      "correlation": 0.7819011922442165
-    },
-    "sumn_10": {
-      "pruned_by": "channel_low_20",
-      "correlation": -0.6276017079831648
-    },
-    "realized_vol_ratio": {
-      "pruned_by": "volatility_5d",
-      "correlation": 0.6091198046081965
-    },
-    "macd_hist": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.6600767417420452
-    },
-    "close_position_20d": {
-      "pruned_by": "channel_low_20",
-      "correlation": 0.7300379413682357
-    },
-    "body_ratio": {
-      "pruned_by": "doji",
-      "correlation": -0.7388030897578259
-    },
-    "boll_width_30": {
-      "pruned_by": "volatility_60d",
-      "correlation": 0.656251987497903
-    },
-    "beta_5": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.6457451034574027
-    },
-    "sump_5": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.7264425258310699
-    },
-    "vstd_30": {
-      "pruned_by": "vma_10",
-      "correlation": 0.6564558719769882
-    },
-    "reversal_3d": {
-      "pruned_by": "return_3d",
-      "correlation": -1.0
-    },
-    "ma5_bias": {
-      "pruned_by": "return_3d",
-      "correlation": 0.9235166274058965
-    },
-    "sumd_5": {
-      "pruned_by": "momentum_7d",
-      "correlation": -0.7263024073752256
-    },
-    "sharpe_5d": {
-      "pruned_by": "momentum_7d",
-      "correlation": 0.7258664350764855
-    },
-    "vma_5": {
-      "pruned_by": "vma_10",
-      "correlation": 0.8251394357091253
-    }
-  },
+  "correlation_matrix": {},
+  "pruned_factors": {},
   "backtest": {
-    "total_return": 0.058865,
-    "annual_return": 0.040967,
-    "benchmark_annual": -0.173565,
-    "excess_annual": 0.214531,
-    "sharpe": 0.1738,
-    "ir": 0.8076,
-    "max_drawdown": -0.201959,
-    "calmar": 0.2028,
-    "monthly_turnover": 0.0981,
-    "cost_drag": 0.004711,
-    "rebalance_count": 18,
-    "total_trades": 49,
-    "n_days": 359,
-    "equity_curve": [
-      {
-        "date": "2023-01-03",
-        "equity": 100000.0
-      },
-      {
-        "date": "2023-01-10",
-        "equity": 99566.13870000002
-      },
-      {
-        "date": "2023-01-17",
-        "equity": 99974.93870000001
-      },
-      {
-        "date": "2023-01-31",
-        "equity": 105111.93870000001
-      },
-      {
-        "date": "2023-02-07",
-        "equity": 109632.13870000002
-      },
-      {
-        "date": "2023-02-14",
-        "equity": 110646.7797
-      },
-      {
-        "date": "2023-02-21",
-        "equity": 110232.77970000001
-      },
-      {
-        "date": "2023-02-28",
-        "equity": 107964.97970000003
-      },
-      {
-        "date": "2023-03-07",
-        "equity": 109216.97970000001
-      },
-      {
-        "date": "2023-03-14",
-        "equity": 104008.3837
-      },
-      {
-        "date": "2023-03-21",
-        "equity": 102226.7837
-      },
-      {
-        "date": "2023-03-28",
-        "equity": 101070.18370000001
-      },
-      {
-        "date": "2023-04-04",
-        "equity": 97621.3837
-      },
-      {
-        "date": "2023-04-12",
-        "equity": 97263.22450000001
-      },
-      {
-        "date": "2023-04-19",
-        "equity": 96762.22450000001
-      },
-      {
-        "date": "2023-04-26",
-        "equity": 94076.52450000001
-      },
-      {
-        "date": "2023-05-08",
-        "equity": 94650.72450000001
-      },
-      {
-        "date": "2023-05-15",
-        "equity": 95493.42450000001
-      },
-      {
-        "date": "2023-05-22",
-        "equity": 95976.92450000001
-      },
-      {
-        "date": "2023-05-29",
-        "equity": 94745.12450000002
-      },
-      {
-        "date": "2023-06-05",
-        "equity": 95790.62450000002
-      },
-      {
-        "date": "2023-06-12",
-        "equity": 95625.85900000001
-      },
-      {
-        "date": "2023-06-19",
-        "equity": 95415.75900000002
-      },
-      {
-        "date": "2023-06-28",
-        "equity": 95332.95900000002
-      },
-      {
-        "date": "2023-07-05",
-        "equity": 97912.15900000001
-      },
-      {
-        "date": "2023-07-12",
-        "equity": 98656.37200000002
-      },
-      {
-        "date": "2023-07-19",
-        "equity": 98217.97200000002
-      },
-      {
-        "date": "2023-07-26",
-        "equity": 99014.77200000001
-      },
-      {
-        "date": "2023-08-02",
-        "equity": 100245.27200000001
-      },
-      {
-        "date": "2023-08-09",
-        "equity": 98615.57200000001
-      },
-      {
-        "date": "2023-08-16",
-        "equity": 97076.67200000002
-      },
-      {
-        "date": "2023-08-23",
-        "equity": 95815.07200000001
-      },
-      {
-        "date": "2023-08-30",
-        "equity": 97601.57200000001
-      },
-      {
-        "date": "2023-09-06",
-        "equity": 97741.37200000002
-      },
-      {
-        "date": "2023-09-13",
-        "equity": 97580.47200000001
-      },
-      {
-        "date": "2023-09-20",
-        "equity": 95580.27200000001
-      },
-      {
-        "date": "2023-09-27",
-        "equity": 95571.37200000002
-      },
-      {
-        "date": "2023-10-12",
-        "equity": 95088.37200000002
-      },
-      {
-        "date": "2023-10-19",
-        "equity": 92770.67200000002
-      },
-      {
-        "date": "2023-10-26",
-        "equity": 92796.47200000002
-      },
-      {
-        "date": "2023-11-02",
-        "equity": 92672.27200000001
-      },
-      {
-        "date": "2023-11-09",
-        "equity": 95806.67200000002
-      },
-      {
-        "date": "2023-11-16",
-        "equity": 97608.77200000001
-      },
-      {
-        "date": "2023-11-23",
-        "equity": 98430.67200000002
-      },
-      {
-        "date": "2023-11-30",
-        "equity": 99106.87200000002
-      },
-      {
-        "date": "2023-12-07",
-        "equity": 96424.28070000003
-      },
-      {
-        "date": "2023-12-14",
-        "equity": 94561.58070000003
-      },
-      {
-        "date": "2023-12-21",
-        "equity": 93159.58070000003
-      },
-      {
-        "date": "2023-12-28",
-        "equity": 94362.08070000003
-      },
-      {
-        "date": "2024-01-05",
-        "equity": 92741.89030000003
-      },
-      {
-        "date": "2024-01-12",
-        "equity": 93027.49030000003
-      },
-      {
-        "date": "2024-01-19",
-        "equity": 91695.99030000003
-      },
-      {
-        "date": "2024-01-26",
-        "equity": 96529.09030000004
-      },
-      {
-        "date": "2024-02-02",
-        "equity": 90186.58800000003
-      },
-      {
-        "date": "2024-02-19",
-        "equity": 96105.68800000002
-      },
-      {
-        "date": "2024-02-26",
-        "equity": 99759.58800000003
-      },
-      {
-        "date": "2024-03-04",
-        "equity": 98122.68800000002
-      },
-      {
-        "date": "2024-03-11",
-        "equity": 98597.28300000002
-      },
-      {
-        "date": "2024-03-18",
-        "equity": 101224.18300000002
-      },
-      {
-        "date": "2024-03-25",
-        "equity": 100533.98300000002
-      },
-      {
-        "date": "2024-04-01",
-        "equity": 103575.48300000002
-      },
-      {
-        "date": "2024-04-10",
-        "equity": 99868.10840000003
-      },
-      {
-        "date": "2024-04-17",
-        "equity": 101573.50840000002
-      },
-      {
-        "date": "2024-04-24",
-        "equity": 100293.10840000003
-      },
-      {
-        "date": "2024-05-06",
-        "equity": 107098.50840000004
-      },
-      {
-        "date": "2024-05-13",
-        "equity": 108485.26890000004
-      },
-      {
-        "date": "2024-05-20",
-        "equity": 113435.36890000003
-      },
-      {
-        "date": "2024-05-27",
-        "equity": 111401.76890000004
-      },
-      {
-        "date": "2024-06-03",
-        "equity": 109267.06890000004
-      },
-      {
-        "date": "2024-06-11",
-        "equity": 108038.56890000003
-      },
-      {
-        "date": "2024-06-18",
-        "equity": 108355.36890000003
-      },
-      {
-        "date": "2024-06-25",
-        "equity": 106602.26890000004
-      }
-    ],
-    "regime_history": [
-      {
-        "date": "2023-01-03",
-        "regime": "range"
-      },
-      {
-        "date": "2023-02-07",
-        "regime": "trend_up"
-      },
-      {
-        "date": "2023-03-07",
-        "regime": "range"
-      },
-      {
-        "date": "2023-04-04",
-        "regime": "trend_up"
-      },
-      {
-        "date": "2023-05-08",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-06-05",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-07-05",
-        "regime": "range"
-      },
-      {
-        "date": "2023-08-02",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-08-30",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-09-27",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-11-02",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2023-11-30",
-        "regime": "range"
-      },
-      {
-        "date": "2023-12-28",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2024-01-26",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2024-03-04",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2024-04-01",
-        "regime": "trend_down"
-      },
-      {
-        "date": "2024-05-06",
-        "regime": "trend_up"
-      },
-      {
-        "date": "2024-06-03",
-        "regime": "range"
-      }
-    ]
+    "total_return": 0,
+    "annual_return": 0,
+    "benchmark_annual": 0,
+    "excess_annual": 0,
+    "sharpe": 0,
+    "ir": 0,
+    "max_drawdown": 0,
+    "calmar": 0,
+    "monthly_turnover": 0,
+    "cost_drag": 0,
+    "rebalance_count": 0,
+    "total_trades": 0
   },
-  "bootstrap": {
-    "n_samples": 359,
-    "n_bootstrap": 1000,
-    "ir_mean": 0.7373,
-    "ir_ci_lower": -0.4741,
-    "ir_ci_upper": 1.9114,
-    "ci_excludes_zero": false
-  },
-  "verdict": "CONDITIONAL",
+  "bootstrap": {},
+  "subsample": [],
+  "regime": [],
+  "verdict": "SKIP",
   "verdict_reasons": [
-    "PASS: 年化超额 21.5%",
-    "PASS: IR 0.81",
-    "FAIL: MaxDD -20.2% < -20%",
-    "FAIL: Bootstrap CI [-0.474, 1.911] 包含0"
+    "回测被跳过"
   ]
 }

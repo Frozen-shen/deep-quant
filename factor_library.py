@@ -301,6 +301,33 @@ MICROSTRUCTURE_FACTORS = {
 
 
 # ================================================================
+#  动量/成长因子 (Momentum & Growth Factors)
+#  补充中长期动量暴露, 解决原因子库偏短期反转/低波的问题
+# ================================================================
+
+MOMENTUM_GROWTH_FACTORS = {
+    # ── 中长期动量 (Jegadeesh & Titman) ──
+    "mom_60d":   "$close / Ref($close, 60) - 1",
+    "mom_120d":  "$close / Ref($close, 120) - 1",
+    "mom_250d":  "$close / Ref($close, 250) - 1",
+    # 12-1 momentum: 跳过最近1个月避免短期反转污染
+    "mom_12_1":  "Ref($close, 21) / Ref($close, 252) - 1",
+
+    # ── 动量衍生 ──
+    # 动量加速度: 短期动量 - 长期动量
+    "mom_acceleration": "$close / Ref($close, 60) - $close / Ref($close, 120)",
+    # 波动调整动量 (momentum Sharpe)
+    "vol_adj_mom_60d": "($close / Ref($close, 60) - 1) / (Std(Ref($close, 1) / $close - 1, 60) + 0.001)",
+
+    # ── 趋势/突破 ──
+    # 突破接近度: close / 20日最高, =1 表示创新高
+    "breakout_20d": "$close / (Max($high, 20) + 0.01)",
+    # 趋势强度: ADX(14)
+    "trend_strength": "ADX(14)",
+}
+
+
+# ================================================================
 #  市场相对因子 (Market-Relative Factors)
 #  需要指数数据, 由 relative_factors.py 计算 (非表达式因子)
 # ================================================================
@@ -403,7 +430,7 @@ def get_relative_factor_names() -> list:
     return list(RELATIVE_FACTORS.keys())
 
 def get_all_factors() -> FactorLibrary:
-    """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构 + Alpha158补全)。"""
+    """合并所有预定义因子 (含 Phase2 + P2增强 + 微观结构 + Alpha158补全 + 动量成长)。"""
     all_config = {}
     all_config.update(PRICE_FACTORS)
     all_config.update(MA_FACTORS)
@@ -414,4 +441,5 @@ def get_all_factors() -> FactorLibrary:
     all_config.update(P2_ENHANCED_FACTORS)
     all_config.update(MICROSTRUCTURE_FACTORS)
     all_config.update(ALPHA158_FACTORS)
+    all_config.update(MOMENTUM_GROWTH_FACTORS)
     return FactorLibrary.from_config(all_config)

@@ -149,6 +149,7 @@ class PortfolioRanker:
             self._first_day = False
 
         # 6. 成本门槛: 只有新股分数显著超过旧股才换仓
+        #    注意: 仅约束"替换"买入, 不阻塞"补仓"买入(容量填充)
         if to_sell and to_buy and self.cost_threshold > 0:
             filtered_sell = []
             filtered_buy = []
@@ -158,7 +159,8 @@ class PortfolioRanker:
             buy_sorted = sorted([s for s in to_buy if s in scores],
                                key=lambda s: scores.get(s, -999), reverse=True)
 
-            for i in range(min(len(sell_sorted), len(buy_sorted))):
+            n_paired = min(len(sell_sorted), len(buy_sorted))
+            for i in range(n_paired):
                 old_score = scores.get(sell_sorted[i], -999)
                 new_score = scores.get(buy_sorted[i], -999)
                 # 新股分数必须超过旧股分数 * (1 + cost_threshold)
@@ -170,17 +172,23 @@ class PortfolioRanker:
                     filtered_sell.append(sell_sorted[i])
                     filtered_buy.append(buy_sorted[i])
 
+            # 未配对的额外买入 (补仓) 不受 cost_threshold 限制
+            extra_buys = [s for s in buy_sorted[n_paired:]]
             to_sell = filtered_sell
-            to_buy = filtered_buy
+            to_buy = filtered_buy + extra_buys
 
-        # 7. 限制替换数量
+        # 7. 限制替换数量 (容量感知: 仓位不足时允许补仓)
         if len(to_sell) > self.n_drop:
             sell_scores = {s: scores.get(s, -999) for s in to_sell}
             to_sell = sorted(sell_scores, key=sell_scores.get)[:self.n_drop]
 
-        if len(to_buy) > self.n_drop:
+        # 买入上限: max(n_drop, 容量缺口) — 防止仓位持续萎缩
+        current_after_sell = len(current_holdings) - len(to_sell)
+        capacity_gap = max(0, self.top_k - current_after_sell)
+        max_buys = max(self.n_drop, capacity_gap)
+        if len(to_buy) > max_buys:
             buy_scores = {s: scores.get(s, -999) for s in to_buy}
-            to_buy = sorted(buy_scores, key=buy_scores.get, reverse=True)[:self.n_drop]
+            to_buy = sorted(buy_scores, key=buy_scores.get, reverse=True)[:max_buys]
 
         # 7.5 流动性过滤 (Phase 3.3): 日均成交额不足的标的剔除
         if self.min_daily_amount > 0:

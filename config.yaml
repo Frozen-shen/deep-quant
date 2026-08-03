@@ -4,20 +4,24 @@
 # 修改此文件后必须更新 blind_test.config_hash。
 # ═══════════════════════════════════════════════════════════
 
-# ── 数据分区 (唯一合法定义, 与 DEVELOPMENT_DISCIPLINE.md v2 同步) ──
+# ── 数据分区 v4 (2026-08-03 方案C) ──
+# 方案C: Walk-Forward folds 在 research 期内完成 (5 folds, 训练扩展),
+# 终极 TEST = 2025-01~2026-06 只跑一次, blind = 2027+ 永不回测
 data_partition:
-  research:    {start: "2018-01-01", end: "2022-12-31"}  # 因子开发、IC计算
-  development: {start: "2023-01-01", end: "2024-06-30"}  # 组合验证、参数调优
-  test:        {start: "2024-07-01", end: "2025-06-30"}  # 最终测试 (只跑一次)
-  blind:       {start: "2025-07-01", end: "2026-07-31"}  # 模拟盘跟踪 (永不回测)
-  full_start: "2018-01-01"
-  full_end: "2026-07-31"
+  research:    {start: "2015-01-01", end: "2024-12-31"}  # 因子开发 + WF folds (10年)
+  development: {start: "2025-01-01", end: "2026-06-30"}  # 终极 TEST (holdout, 只跑一次)
+  test:        {start: "2026-07-01", end: "2026-12-31"}  # 预留验证 (数据未到)
+  blind:       {start: "2027-01-01", end: "2027-12-31"}  # 模拟盘跟踪 (永不回测)
+  full_start: "2015-01-01"
+  full_end: "2026-12-31"
 
 # ── 盲测状态 ──
 blind_test:
-  locked: true
-  contaminated: true  # 旧blind期(2024-07~2026-07)已被污染(trial_count=3)
-  note: "新blind期从2025-07-01开始, 旧结果全部作废"
+  locked: false
+  contaminated: false
+  note: "v4方案C: blind=2027+, daily_pipeline每日跟踪, 2028-01后评估; 终极TEST=2025-01~2026-06已锁定"
+  blind_start: "2027-01-01"
+  protocol: "daily_pipeline自动运行, 禁止手动回测, 2028-01-01后评估"
 
 # ── 执行参数 ──
 execution:
@@ -76,13 +80,16 @@ portfolio:
 time_decay:
   half_life_years: 0.5
 
-# ── Universe ──
+# ── Universe (方案C: 流动性PIT, 全市场+过滤) ──
 universe:
+  mode: "liquid"               # liquid=全市场+流动性过滤(推荐) / index=指数成分
   index: "all_cached"
   include_delisted: true
-  min_list_days: 250
+  min_list_days: 250           # 最少上市交易日 (~1年)
+  min_avg_amount: 5000000      # 20日均成交额下限 (元)
+  liquidity_lookback: 20       # 流动性回看窗口 (交易日)
   snapshot_mode: monthly
-  data_version: v20260801
+  data_version: v20260803
 
 # ── 券商执行 (QMT/miniQMT 仿真盘) ──
 # adapter: paper=内置模拟(默认), qmt=券商仿真环境(需完成下方配置)

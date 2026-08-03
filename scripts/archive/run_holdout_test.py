@@ -1,3 +1,5 @@
+# DEPRECATED — 已归档。设计缺陷: 默认同时跑TEST+BLIND, 参数漂移(top_k=15 vs P5的30), 附加未验证的vol缩放。
+# 替代: scripts/active/run_corrected_backtest.py
 """
 run_holdout_test.py — 测试集 + 模拟盘期确认回测 (v2 — Regime自适应)
 

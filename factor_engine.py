@@ -230,6 +230,43 @@ class RSVFactor(Factor):
         return f"RSV({self.window})"
 
 
+class ADXFactor(Factor):
+    """ADX (Average Directional Index): ADX(N) → 趋势强度指标 (Wilder平滑)
+
+    ADX ∈ [0, 100], 值越大趋势越强 (方向不分多空)。
+    计算步骤 (Wilder 1978):
+      1. +DM / -DM: 方向移动, 取较大且>0的一方
+      2. TR: 真实波幅 = max(H-L, |H-prevC|, |L-prevC|)
+      3. Wilder平滑 (ewm alpha=1/N) TR/+DM/-DM → +DI/-DI
+      4. DX = 100 * |+DI - -DI| / (+DI + -DI)
+      5. ADX = Wilder平滑(DX)
+    """
+    def __init__(self, window: int = 14):
+        self.window = window
+
+    def evaluate(self, df: pd.DataFrame) -> pd.Series:
+        h, l, c = df["high"], df["low"], df["close"]
+        up = h.diff()
+        down = -l.diff()
+        plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
+        minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
+        prev_c = c.shift(1)
+        tr = pd.concat([h - l, (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+        # Wilder 平滑 (等价于 RMA, alpha = 1/N)
+        atr = tr.ewm(alpha=1.0 / self.window, adjust=False, min_periods=self.window).mean()
+        plus_s = plus_dm.ewm(alpha=1.0 / self.window, adjust=False, min_periods=self.window).mean()
+        minus_s = minus_dm.ewm(alpha=1.0 / self.window, adjust=False, min_periods=self.window).mean()
+        plus_di = 100.0 * plus_s / atr.replace(0, np.nan)
+        minus_di = 100.0 * minus_s / atr.replace(0, np.nan)
+        di_sum = plus_di + minus_di
+        dx = 100.0 * (plus_di - minus_di).abs() / di_sum.replace(0, np.nan)
+        adx = dx.ewm(alpha=1.0 / self.window, adjust=False, min_periods=self.window).mean()
+        return adx
+
+    def __repr__(self):
+        return f"ADX({self.window})"
+
+
 class _UnaryFunc(Factor):
     """一元函数: Abs, Log, Sign 等"""
     def __init__(self, child: Factor, func, name: str):
@@ -551,6 +588,13 @@ def _make_func(name: str, args: List[Factor]) -> Factor:
             raise SyntaxError("RSV 需要1个参数: (window)")
         window = int(float(args[0].__repr__())) if isinstance(args[0], ConstFactor) else 9
         return RSVFactor(window)
+
+    # ADX: ADX(window) — 趋势强度指标
+    if name == "ADX":
+        if len(args) != 1:
+            raise SyntaxError("ADX 需要1个参数: (window)")
+        window = int(float(args[0].__repr__())) if isinstance(args[0], ConstFactor) else 14
+        return ADXFactor(window)
 
     # Corr: Corr(a, b, window) — 滚动相关系数
     if name == "Corr":

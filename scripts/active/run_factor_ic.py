@@ -19,8 +19,13 @@ from scipy.stats import spearmanr
 from data_cache import get_cached_symbols, load_all
 from factor_engine import FactorLibrary
 from factor_library import ALPHA158_FACTORS
+from gate import load_config
 
-START, END = "2018-01-01", "2022-12-31"
+# 研究期从 config.yaml 读取 (唯一参数源), 方案C: 2015-01-01 ~ 2024-12-31
+_cfg = load_config(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))), "config.yaml"))
+_dp = _cfg["data_partition"]["research"]
+START, END = _dp["start"], _dp["end"]
 HORIZONS = [5, 10, 20]
 MIN_CROSS_SECTION = 10   # 每日最少股票数
 MIN_DAYS = 50            # 因子最少有效天数
