@@ -325,3 +325,66 @@ class RegimeDetector:
             # 震荡: 中等
             return {"hold_thresh": 10, "n_drop": 6, "cost_threshold": 0.03,
                     "sell_rank_buffer": 2}
+
+    # ── 双变量检测 + 动量崩溃保护 (方案C v5, 新增 — 不替代上述旧方法) ──
+
+    def detect_v2(self, date_str: str) -> tuple:
+        """
+        双变量市场状态检测 (方案C v5):
+          趋势: 指数 vs MA20/MA60
+          波动率: 60日已实现波动率的滚动分位
+        返回: (regime, volatility_pctile)
+        """
+        if self._index_data is None:
+            return (Regime.RANGE, 0.5)
+        df = self._index_data
+        df["date"] = pd.to_datetime(df["date"])
+        s = df.set_index("date")["close"]
+        target = pd.Timestamp(date_str)
+        hist = s[s.index <= target]
+        if len(hist) < 90:
+            return (Regime.RANGE, 0.5)
+        price = hist.iloc[-1]
+        ma20 = hist.rolling(20).mean().iloc[-1]
+        ma60 = hist.rolling(60).mean().iloc[-1]
+        # 60日已实现波动率 (年化)
+        rets = hist.pct_change().dropna()
+        vol60 = rets.tail(60).std() * np.sqrt(252)
+        # 波动率滚动分位 (用全部历史)
+        rolling_vol = rets.rolling(60).std() * np.sqrt(252)
+        vol_pct = (rolling_vol <= vol60).mean() if rolling_vol.notna().sum() > 20 else 0.5
+        # 趋势判定
+        if price > ma20 > ma60 and vol_pct < 0.70:
+            regime = Regime.TREND_UP
+        elif price < ma20 < ma60 or vol_pct > 0.85:
+            regime = Regime.TREND_DOWN
+        else:
+            regime = Regime.RANGE
+        return (regime, float(vol_pct))
+
+    def get_weight_multipliers(self, date_str: str) -> dict:
+        """
+        风格轮动权重乘数 (方案C v5):
+          trend_up:   动量×2.0 反转×0.7 价值×1.0
+          range:      反转×1.2 价值×1.0 动量×0.8
+          trend_down: 反转×1.5 价值×1.3 动量×0.3
+        动量崩溃保护: 从高点回撤>15%且波动率>85分位 → 动量×0
+        """
+        regime, vol_pct = self.detect_v2(date_str)
+        if regime == Regime.TREND_UP:
+            base = {"momentum": 2.0, "reversal": 0.7, "value": 1.0, "quality": 1.0}
+        elif regime == Regime.TREND_DOWN:
+            base = {"momentum": 0.3, "reversal": 1.5, "value": 1.3, "quality": 1.3}
+        else:
+            base = {"momentum": 0.8, "reversal": 1.2, "value": 1.0, "quality": 1.0}
+        # 动量崩溃保护 (Daniel & Moskowitz 2016)
+        if self._index_data is not None:
+            df = self._index_data
+            s = df.set_index(pd.to_datetime(df["date"]))["close"]
+            hist = s[s.index <= pd.Timestamp(date_str)]
+            if len(hist) > 20:
+                peak = hist.max()
+                dd = hist.iloc[-1] / peak - 1
+                if dd < -0.15 and vol_pct > 0.85:
+                    base["momentum"] = 0.0
+        return base

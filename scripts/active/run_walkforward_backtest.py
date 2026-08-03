@@ -659,15 +659,34 @@ def score_stocks(factor_panels: dict, weights: dict, t_date) -> dict:
 #  回测主循环
 # ═══════════════════════════════════════════════════════════
 
+def _factor_category(fn: str) -> str:
+    """因子类别: momentum / reversal / value / quality / other"""
+    if fn.startswith("fund_"):
+        if fn in ("fund_bp", "fund_ep", "fund_pb", "fund_sp"):
+            return "value"
+        if fn in ("fund_roe", "fund_roe_ttm", "fund_net_margin", "fund_accruals"):
+            return "quality"
+        return "other"
+    if any(k in fn for k in ("momentum", "return_")):
+        return "momentum"
+    if any(k in fn for k in ("vol", "corr", "cord", "amplitude", "skew",
+                             "amihud", "turnover", "k_len", "big_", "channel")):
+        return "reversal"
+    return "other"
+
+
 def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  factor_names, bt_config, start, end, label="",
                  fixed_weights: dict | None = None,
-                 universe_fn=get_universe):
+                 universe_fn=get_universe,
+                 use_regime: bool = False):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
       权重在训练期估计, 验证期不重估 → 无信息泄漏)。
     universe_fn: universe 提供函数, 默认指数成分, 可传 get_liquid_universe。
+    use_regime: 启用风格状态机 (方案C v5), 每个调仓日按 RegimeDetector
+      双变量检测结果调整因子权重 (含动量崩溃保护)。
     """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -687,6 +706,19 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
         sell_rank_buffer=3, buy_confirm_days=1,
         cost_threshold=0.08,
     )
+
+    # Regime 检测器: use_regime 时在整个回测期只创建一次 (避免每个调仓日
+    # 重复 from_benchmark_parquet 读盘), 调仓日仅调用 get_weight_multipliers
+    regime_det = None
+    if use_regime:
+        from regime_detector import RegimeDetector
+        if os.path.exists(BENCH_PATH):
+            regime_det = RegimeDetector.from_benchmark_parquet(
+                BENCH_PATH, profile="conservative")
+            log.info("[%s] regime 检测启用 (基准: %s)", label, BENCH_PATH)
+        else:
+            log.warning("[%s] use_regime=True 但基准文件缺失: %s, 跳过",
+                        label, BENCH_PATH)
 
     all_dates_set = set(pd.to_datetime(calendar))
     bt_dates = sorted(d for d in all_dates_set
@@ -733,6 +765,25 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                 log.info("  [%s] 调仓日 %s: %d 因子入选 (|ICIR|>%.2f), IC计算 %.1fs",
                          label, today.date(), len(weights), MIN_ICIR,
                          time.time() - t_ic0)
+
+            # ★ Regime 风格轮动 (方案C v5): 按因子类别乘数调整权重
+            if regime_det is not None:
+                mults = regime_det.get_weight_multipliers(str(today.date()))
+                # 拷贝后调整: fold 模式下 fixed_weights 字典跨调仓日复用,
+                # 原地修改会导致乘数在多日叠加 (复合错误)
+                adjusted = dict(weights)
+                n_adj = 0
+                for fn in list(adjusted.keys()):
+                    cat = _factor_category(fn)
+                    if cat in mults:
+                        adjusted[fn] *= mults[cat]
+                        n_adj += 1
+                weights = adjusted
+                log.info("  [%s] 调仓日 %s: regime 乘数调整 %d 因子 "
+                         "(momentum×%.2f reversal×%.2f value×%.2f quality×%.2f)",
+                         label, today.date(), n_adj,
+                         mults["momentum"], mults["reversal"],
+                         mults["value"], mults["quality"])
 
             weights_history.append({
                 "date": str(today.date()),
@@ -907,7 +958,8 @@ FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释�
 
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
-                      universe_fn=get_universe) -> dict:
+                      universe_fn=get_universe,
+                      use_regime: bool = False) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -982,7 +1034,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         r = run_backtest(all_data, factor_panels, close_panel, calendar,
                          cal_idx, factor_names, bt_config, vs, ve,
                          label=f"VAL{fi+1}", fixed_weights=weights,
-                         universe_fn=universe_fn)
+                         universe_fn=universe_fn, use_regime=use_regime)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1032,7 +1084,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
 def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   factor_names, bt_config, stable_factors, stable_icir,
                   test_start, test_end,
-                  universe_fn=get_universe) -> dict | None:
+                  universe_fn=get_universe,
+                  use_regime: bool = False) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1069,7 +1122,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
     return run_backtest(all_data, factor_panels, close_panel, calendar,
                         cal_idx, factor_names, bt_config,
                         test_start, test_end, label="TEST",
-                        fixed_weights=weights, universe_fn=universe_fn)
+                        fixed_weights=weights, universe_fn=universe_fn,
+                        use_regime=use_regime)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1240,7 +1294,8 @@ def main():
             guard.check_range("2015-01-01", "2026-06-30")
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
-                factor_names, bt_config, universe_fn=universe_fn)
+                factor_names, bt_config, universe_fn=universe_fn,
+                use_regime=True)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -1252,7 +1307,8 @@ def main():
                 factor_names, bt_config,
                 fold_out["stable_factors"],
                 fold_out["stable_factor_icir_median"],
-                "2025-01-01", "2026-06-30", universe_fn=universe_fn)
+                "2025-01-01", "2026-06-30", universe_fn=universe_fn,
+                use_regime=True)
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
@@ -1294,6 +1350,7 @@ def main():
                 "pit_universe": ("流动性PIT(全市场+上市1年+成交额500万)"
                                  if args.liquid else "CSI300+ZZ500 月度成分"),
                 "expanding_window": "早期数据不足252天时自动退化为扩展窗口",
+                "regime_rotation": bool(args.folds),  # 方案C v5: fold 模式启用风格状态机
                 **({"fold_min_hits": FOLD_MIN_HITS,
                     "fold_icir_min": FOLD_ICIR_MIN,
                     "folds": FOLDS,
