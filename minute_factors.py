@@ -35,7 +35,20 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MINUTE_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "minute_15m")
+
+
+def get_minute_cache_dir() -> str:
+    """分钟数据目录, 频率由 config.yaml minute_factors.freq 决定 (15/5)."""
+    try:
+        from gate import load_config
+        cfg = load_config(os.path.join(BASE_DIR, "config.yaml"))
+        freq = str(cfg.get("minute_factors", {}).get("freq", "15"))
+    except Exception:
+        freq = "15"
+    return os.path.join(BASE_DIR, "data_store", f"minute_{freq}m")
+
+
+MINUTE_CACHE_DIR = get_minute_cache_dir()
 
 # 模块级缓存 (回测循环中避免重复IO)
 _minute_cache: Optional[Dict[str, pd.DataFrame]] = None

@@ -92,9 +92,19 @@ class SimpleBacktest:
         # ── 买 ──
         buy_list = decision.get("buy", [])
         if buy_list:
-            cash_per = self.cash * 0.99 / max(1, len(buy_list))  # 1%缓冲覆盖手续费
+            weights = decision.get("weights")  # {sym: 目标权重} (可选, v9b 组合优化)
+            wsum = 0.0
+            if weights:
+                wsum = sum(weights.get(s, 0.0) for s in buy_list)
+            cash_pool = self.cash * 0.99  # 1%缓冲覆盖手续费
             for s in buy_list:
                 if s not in all_data:
+                    continue
+                if weights and wsum > 0:
+                    cash_per = cash_pool * (weights.get(s, 0.0) / wsum)
+                else:
+                    cash_per = cash_pool / max(1, len(buy_list))  # 等权兜底
+                if cash_per <= 0:
                     continue
                 dt = all_data[s][all_data[s]["date"] <= today].tail(1)
                 if len(dt) == 0:

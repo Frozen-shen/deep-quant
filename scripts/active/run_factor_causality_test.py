@@ -16,10 +16,14 @@ scripts/active/run_factor_causality_test.py — 因子因果性检验 (Expanding
 import os
 import sys
 import json
+import warnings
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
+
+warnings.filterwarnings("ignore")  # ★ 抑制海量 PerformanceWarning/ConstantInputWarning
+
 from scipy.stats import spearmanr
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,27 +49,33 @@ def compute_period_ic(factor_cache, all_data, factor_names, start, end):
     """计算指定期间的日均截面 IC。"""
     rs, re_ = pd.Timestamp(start), pd.Timestamp(end)
 
+    # ★ 预构建每只股票的日期索引 (避免每日全表扫描)
+    stock_index = {}
+    for sym, df in all_data.items():
+        dates_arr = pd.to_datetime(df["date"]).values
+        close_arr = df["close"].values
+        stock_index[sym] = (dates_arr, close_arr)
+
     # 收集交易日
     all_dates = set()
     for df in list(all_data.values())[:200]:
-        mask = (df["date"] >= rs) & (df["date"] <= re_)
-        all_dates.update(df.loc[mask, "date"].tolist())
+        mask = (pd.to_datetime(df["date"]) >= rs) & (pd.to_datetime(df["date"]) <= re_)
+        all_dates.update(pd.to_datetime(df["date"])[mask].tolist())
     dates = sorted(all_dates)
 
     ic_by_factor = {name: [] for name in factor_names}
 
-    for d in dates:
+    for di, d in enumerate(dates):
         d_ts = pd.Timestamp(d)
-        # 获取前瞻收益
+        d_np = np.datetime64(d_ts)
+        # 获取前瞻收益 (searchsorted 快速定位)
         fwd_returns = {}
-        for sym, df in all_data.items():
-            past = df[df["date"] <= d_ts]
-            if len(past) == 0:
+        for sym, (dates_arr, close_arr) in stock_index.items():
+            pos = np.searchsorted(dates_arr, d_np, side="right")
+            if pos == 0 or pos + HORIZON > len(dates_arr):
                 continue
-            future = df[df["date"] > d_ts].head(HORIZON)
-            if len(future) >= HORIZON:
-                fwd_ret = future["close"].iloc[-1] / past["close"].iloc[-1] - 1
-                fwd_returns[sym] = fwd_ret
+            fwd_ret = close_arr[pos + HORIZON - 1] / close_arr[pos - 1] - 1
+            fwd_returns[sym] = fwd_ret
 
         if len(fwd_returns) < MIN_CROSS_SECTION:
             continue
@@ -73,26 +83,26 @@ def compute_period_ic(factor_cache, all_data, factor_names, start, end):
         syms = sorted(fwd_returns.keys())
         fwd_arr = np.array([fwd_returns[s] for s in syms])
 
-        for name in factor_names:
-            vals = []
-            valid_mask = []
-            for s in syms:
-                feats = factor_cache.get(s, d_ts)
-                if feats and name in feats and not np.isnan(feats[name]):
-                    vals.append(feats[name])
-                    valid_mask.append(True)
-                else:
-                    vals.append(0)
-                    valid_mask.append(False)
+        # ★ 每只股票每日只取一次 feats (原代码每因子重复取, 慢 n_factors 倍)
+        feats_list = [factor_cache.get(s, d_ts) for s in syms]
 
-            valid_mask = np.array(valid_mask)
+        for name in factor_names:
+            vals = np.empty(len(syms))
+            valid_mask = np.zeros(len(syms), dtype=bool)
+            for i, feats in enumerate(feats_list):
+                if feats and name in feats and not np.isnan(feats[name]):
+                    vals[i] = feats[name]
+                    valid_mask[i] = True
+
             if valid_mask.sum() < MIN_CROSS_SECTION:
                 continue
 
-            vals_arr = np.array(vals)
-            ic, _ = spearmanr(vals_arr[valid_mask], fwd_arr[valid_mask])
+            ic, _ = spearmanr(vals[valid_mask], fwd_arr[valid_mask])
             if not np.isnan(ic):
                 ic_by_factor[name].append(ic)
+
+        if (di + 1) % 50 == 0:
+            print(f"      {di+1}/{len(dates)} 天")
 
     # 汇总
     result = {}
@@ -125,6 +135,27 @@ def main():
             all_data[sym] = df
     print(f"  有效: {len(all_data)} 只")
 
+    # ★ 抽样 + 裁剪日期范围 (防OOM: 全量4916只×169因子×8年会撑爆内存)
+    MAX_STOCKS = 800
+    if len(all_data) > MAX_STOCKS:
+        rng = np.random.RandomState(42)
+        sampled = sorted(rng.choice(sorted(all_data.keys()), MAX_STOCKS, replace=False))
+        all_data = {s: all_data[s] for s in sampled}
+        print(f"  抽样: {MAX_STOCKS} 只 (因果检验只需代表性样本)")
+
+    # 裁剪到所需日期范围 (训练前需要250天warmup)
+    TRIM_START = pd.Timestamp("2017-01-01")
+    TRIM_END = pd.Timestamp("2023-06-30")
+    for sym in list(all_data.keys()):
+        df = all_data[sym]
+        mask = (pd.to_datetime(df["date"]) >= TRIM_START) & (pd.to_datetime(df["date"]) <= TRIM_END)
+        trimmed = df[mask].reset_index(drop=True)
+        if len(trimmed) >= 300:
+            all_data[sym] = trimmed
+        else:
+            del all_data[sym]
+    print(f"  裁剪后 (2017~2023-06): {len(all_data)} 只")
+
     # 预计算因子
     print("  预计算因子...")
     scorer = FactorScorer.from_preset("full_auto")
@@ -138,16 +169,37 @@ def main():
         if (i + 200) % 1000 == 0:
             print(f"    {min(i+200, len(symbols))}/{len(symbols)}")
 
-    # 计算两个窗口的 IC
-    print(f"\n  计算训练期 IC ({TRAIN_START}~{TRAIN_END})...")
-    train_ic = compute_period_ic(factor_cache, all_data, factor_names,
-                                  TRAIN_START, TRAIN_END)
-    print(f"    有效因子: {len(train_ic)}")
+    # 计算两个窗口的 IC (带checkpoint: 进程死亡后可续跑, 不必重算)
+    TRAIN_CKPT = os.path.join(IC_DIR, ".causality_train_ckpt.json")
+    VALID_CKPT = os.path.join(IC_DIR, ".causality_valid_ckpt.json")
 
-    print(f"  计算验证期 IC ({VALID_START}~{VALID_END})...")
-    valid_ic = compute_period_ic(factor_cache, all_data, factor_names,
-                                  VALID_START, VALID_END)
-    print(f"    有效因子: {len(valid_ic)}")
+    if os.path.exists(TRAIN_CKPT):
+        with open(TRAIN_CKPT, "r", encoding="utf-8") as f:
+            train_ic = json.load(f)
+        print(f"\n  [checkpoint] 训练期IC已缓存, 跳过 ({len(train_ic)} 因子)")
+    else:
+        print(f"\n  计算训练期 IC ({TRAIN_START}~{TRAIN_END})...")
+        train_ic = compute_period_ic(factor_cache, all_data, factor_names,
+                                      TRAIN_START, TRAIN_END)
+        print(f"    有效因子: {len(train_ic)}")
+        os.makedirs(IC_DIR, exist_ok=True)
+        with open(TRAIN_CKPT, "w", encoding="utf-8") as f:
+            json.dump(train_ic, f)
+        print(f"    [checkpoint] 已保存训练期IC")
+
+    if os.path.exists(VALID_CKPT):
+        with open(VALID_CKPT, "r", encoding="utf-8") as f:
+            valid_ic = json.load(f)
+        print(f"  [checkpoint] 验证期IC已缓存, 跳过 ({len(valid_ic)} 因子)")
+    else:
+        print(f"  计算验证期 IC ({VALID_START}~{VALID_END})...")
+        valid_ic = compute_period_ic(factor_cache, all_data, factor_names,
+                                      VALID_START, VALID_END)
+        print(f"    有效因子: {len(valid_ic)}")
+        os.makedirs(IC_DIR, exist_ok=True)
+        with open(VALID_CKPT, "w", encoding="utf-8") as f:
+            json.dump(valid_ic, f)
+        print(f"    [checkpoint] 已保存验证期IC")
 
     # 对比
     print(f"\n  {'因子':<20} {'训练IC':>8} {'验证IC':>8} {'方向一致':>8} {'衰减':>8} {'判定':>8}")

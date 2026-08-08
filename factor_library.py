@@ -461,3 +461,15 @@ FUNDAMENTAL_FACTORS = {
     "fund_ocf_yield":          "经营现金流收益率 (现金流因子, ICIR +0.24)",
     "fund_accruals":           "应计利润 (质量因子, ICIR -0.16)",
 }
+
+# ── 辅助数据因子 (v8, PIT-safe, 由 aux_factors.py 计算) ──
+# 注意: 不在 DSL 体系内, 由 walkforward 面板构建阶段按日期合并 (同 fund_*)
+AUX_FACTORS = {
+    "aux_margin_balance_ratio": "融资余额/流通市值 (杠杆水平)",
+    "aux_margin_change_5d":     "融资余额5日变化率 (杠杆资金流入)",
+    "aux_margin_buy_ratio_5d":  "融资买入额/成交额5日均 (杠杆参与度)",
+    "aux_lockup_pressure_30d":  "未来30日解禁市值/流通市值 (解禁压力)",
+    "aux_lhb_net_20d":          "20日龙虎榜净买额/流通市值 (大资金净流入)",
+    "aux_dzjy_amount_20d":      "20日大宗成交额/流通市值 (大宗活跃度)",
+    "aux_dzjy_discount_20d":    "20日大宗折溢率均值 (折价成交强度)",
+}

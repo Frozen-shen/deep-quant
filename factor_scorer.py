@@ -14,7 +14,7 @@
 import pandas as pd
 import numpy as np
 from factor_engine import FactorLibrary, parse_factor
-from factor_library import get_all_factors, FUNDAMENTAL_FACTORS
+from factor_library import get_all_factors, FUNDAMENTAL_FACTORS, AUX_FACTORS
 
 
 # ================================================================
@@ -233,8 +233,10 @@ def _build_full_auto_v5_factors():
             if k not in _V5_EXCLUDE}
 
 FACTOR_PRESETS["full_auto_v5"] = {
-    "name": "方案C v5: 全部价量因子 + 基本面因子 (fold筛选决定权重)",
-    "factors": {**_build_full_auto_v5_factors(), **{k: 1.0 for k in FUNDAMENTAL_FACTORS}},
+    "name": "方案C v5: 全部价量因子 + 基本面因子 + 辅助数据因子 (fold筛选决定权重)",
+    "factors": {**_build_full_auto_v5_factors(),
+                **{k: 1.0 for k in FUNDAMENTAL_FACTORS},
+                **{k: 1.0 for k in AUX_FACTORS}},
     "buy_threshold": 0.15,
     "sell_threshold": -0.10,
 }

@@ -160,12 +160,19 @@ def fetch_money_flow_snapshot(period: str = "20日排行") -> pd.DataFrame:
           symbol, name, price, + period-specific flow columns
     """
     import akshare as ak
+    import socket
 
+    # ★ 全局 socket 超时: akshare/requests 默认无超时, 网络挂起会永久阻塞。
+    #    设 60s 超时让挂起请求快速失败 → 走 except 分支继续后续周期。
+    _prev_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(60)
     try:
         df = ak.stock_fund_flow_individual(symbol=period)
     except Exception as e:
         print(f"  [WARN] fetch_money_flow_snapshot('{period}') 失败: {e}")
         return pd.DataFrame()
+    finally:
+        socket.setdefaulttimeout(_prev_timeout)
 
     if df is None or len(df) == 0:
         return pd.DataFrame()

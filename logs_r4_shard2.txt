@@ -1,0 +1,15 @@
+═══ Baostock 5分钟线拉取 ═══
+  宇宙: 5073 只, 本次: 1269 只 (offset=1269)
+  日期: 2022-01-01 ~ 2026-08-07
+  缓存: C:\Users\Frozen\ZCodeProject\quant-starter\data_store\minute_5m
+  强制: False
+
+login success!
+  [1250/1269] 成功=2 跳过=1208 失败=40 | 2268只/分 | ETA 0min
+logout failed!
+
+═══ 完成 ═══
+  耗时: 0.6 分钟
+  成功: 2, 跳过(缓存): 1210, 失败: 57
+  缓存目录: C:\Users\Frozen\ZCodeProject\quant-starter\data_store\minute_5m
+  总文件: 4997, 总大小: 6615MB

@@ -66,7 +66,17 @@ MIN_CROSS_SECTION = 30    # 单次截面IC最少股票数
 REBALANCE_DAYS = 20       # 调仓间隔 (交易日)
 
 # ── 分钟因子 (方案C v5, 数据 2022 起) ──
-MINUTE_DIR = os.path.join(BASE_DIR, "data_store", "minute_15m")
+def _minute_dir() -> str:
+    """分钟数据目录, 频率由 config.yaml minute_factors.freq 决定 (15/5)."""
+    try:
+        cfg = load_config(os.path.join(BASE_DIR, "config.yaml"))
+        freq = str(cfg.get("minute_factors", {}).get("freq", "15"))
+    except Exception:
+        freq = "15"
+    return os.path.join(BASE_DIR, "data_store", f"minute_{freq}m")
+
+
+MINUTE_DIR = _minute_dir()
 MINUTE_DATA_START = "2022-01-01"  # 分钟数据起点 (该日期前无数据 → NaN 跳过)
 
 # 模块级懒加载缓存: sym -> (按日升序 DataFrame, 唯一日 datetime64 数组) 或 None。
@@ -128,10 +138,54 @@ def build_close_panel(all_data: dict, calendar: list) -> pd.DataFrame:
     return panel.reindex(pd.DatetimeIndex(calendar))
 
 
-def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
+def _load_industry_map() -> dict:
+    """加载行业映射 {code: industry} (新浪行业快照)。
+
+    近似 PIT: 行业分类为最新快照 (换行业股票占比极小, 影响可接受)。
+    """
+    path = os.path.join(BASE_DIR, "data_store", "aux_industry", "industry_map.parquet")
+    if not os.path.exists(path):
+        return {}
+    try:
+        df = pd.read_parquet(path)
+        return dict(zip(df["code"].astype(str), df["industry"].astype(str)))
+    except Exception:
+        return {}
+
+
+def _industry_neutralize(df: pd.DataFrame, industry_map: dict) -> pd.DataFrame:
+    """行业截面中性化: 每个日期, 行业内 z-score (组内标准化)。
+
+    未覆盖股票 (无行业映射) 保留原值, 不参与任何行业组。
+    """
+    ind_codes: dict = {}
+    for code, ind in industry_map.items():
+        ind_codes.setdefault(ind, []).append(code)
+
+    out = df.copy()
+    for ind, codes in ind_codes.items():
+        cols = [c for c in codes if c in out.columns]
+        if len(cols) < 5:
+            continue
+        sub = out[cols].to_numpy(dtype=np.float64)
+        mu = np.nanmean(sub, axis=1, keepdims=True)
+        sd = np.nanstd(sub, axis=1, keepdims=True)
+        sd = np.where(sd < 1e-12, np.nan, sd)
+        normed = (sub - mu) / sd
+        # 显式构造 DataFrame 赋值 (避免 loc 2D 赋值的列序歧义)
+        out[cols] = pd.DataFrame(normed.astype(np.float32),
+                                 index=out.index, columns=cols)
+    return out
+
+
+def neutralize_factor(df: pd.DataFrame, k: float = 3.0,
+                      industry_map: dict | None = None) -> pd.DataFrame:
     """
     前置中性化: MAD 去极值 + z-score 标准化 (逐列/逐因子)。
     处理 NaN (保留为 NaN, 不参与统计)。
+
+    industry_map 提供时: z-score 步骤替换为行业截面中性化
+    (行业组内 z-score), 用于消除行业风格暴露 (v8.1)。
     """
     # 保持输入 dtype (float32): 全面板 astype(float64) 内存翻倍 (~9.4GB→~19GB) 会 OOM。
     # 计算阶段逐列提升为 float64 (单列很小), 写回时显式降回 float32。
@@ -151,12 +205,24 @@ def neutralize_factor(df: pd.DataFrame, k: float = 3.0) -> pd.DataFrame:
         # MAD 去极值: |x - med| > k * 1.4826 * mad → 截断
         limit = k * 1.4826 * mad
         x = np.clip(x, med - limit, med + limit)
-        # z-score
+        # pandas 2.x 下 float64 数组直接写入 float32 列会抛 LossySetitemError,
+        # 必须显式 .astype(np.float32) (数值差异 max ~5.7e-8, 可接受)
+        out.loc[m, col] = x.astype(np.float32)
+
+    if industry_map:
+        # 行业截面中性化 (替换原时序 z-score)
+        return _industry_neutralize(out, industry_map)
+
+    # 原逻辑: 逐股票时序 z-score
+    for col in out.columns:
+        vals = out[col]
+        m = vals.notna()
+        if m.sum() < 10:
+            continue
+        x = vals[m].to_numpy(dtype=np.float64)
         mu, sd = np.mean(x), np.std(x)
         if sd < 1e-12:
             continue
-        # pandas 2.x 下 float64 数组直接写入 float32 列会抛 LossySetitemError,
-        # 必须显式 .astype(np.float32) (数值差异 max ~5.7e-8, 可接受)
         out.loc[m, col] = ((x - mu) / sd).astype(np.float32)
     return out
 
@@ -188,10 +254,12 @@ def apply_portfolio_constraints(scores: dict, constraints: dict) -> dict:
 def precompute_factor_panels(all_data: dict, factor_names: list,
                              needed_dates: list,
                              include_fundamental: bool = False,
+                             include_aux: bool = False,
                              include_minute: bool = False,
                              minute_lookback: int = 20,
                              neutralize_enabled: bool = False,
-                             neutralize_k: float = 3.0) -> dict:
+                             neutralize_k: float = 3.0,
+                             industry_map: dict | None = None) -> dict:
     """
     预计算因子并裁剪到所需日期, 构建 {factor: DataFrame(日期×股票)} 面板。
 
@@ -273,6 +341,12 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
         n_fund = _merge_fundamental_panels(panels, all_data, factor_names, idx)
         log.info("  基本面因子面板: %d 个 (%.0fs)", n_fund, time.time() - t1)
 
+    # ── 辅助数据因子合并 (v8, PIT-safe, 由 aux_factors.py 计算) ──
+    if include_aux:
+        t1a = time.time()
+        n_aux = _merge_aux_panels(panels, factor_names, idx, symbols)
+        log.info("  辅助数据因子面板: %d 个 (%.0fs)", n_aux, time.time() - t1a)
+
     # ── 分钟因子合并 (PIT-safe, 方案C v5, 数据2022起) ──
     if include_minute:
         t1m = time.time()
@@ -284,9 +358,11 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
     if neutralize_enabled:
         t2 = time.time()
         for fn in list(panels.keys()):
-            panels[fn] = neutralize_factor(panels[fn], k=neutralize_k)
-        log.info("  中性化完成: %d 因子 (MAD去极值+z-score, k=%.1f, %.0fs)",
-                 len(panels), neutralize_k, time.time() - t2)
+            panels[fn] = neutralize_factor(panels[fn], k=neutralize_k,
+                                           industry_map=industry_map)
+        log.info("  中性化完成: %d 因子 (MAD去极值 k=%.1f, 行业中性化=%s, %.0fs)",
+                 len(panels), neutralize_k,
+                 "开" if industry_map else "关", time.time() - t2)
 
     log.info("  面板就绪: %d 因子 × %d 日期", len(panels), len(needed_dates))
     return panels
@@ -508,6 +584,65 @@ def _ffill(arr: np.ndarray) -> np.ndarray:
     valid = last_valid >= 0
     out[valid] = arr[last_valid[valid]]
     return out
+
+
+def _merge_aux_panels(panels: dict, factor_names: list,
+                      idx: pd.DatetimeIndex, symbols: list) -> int:
+    """将 aux_* 辅助数据因子按日期 PIT 合并进 panels (原地修改, v8)。
+
+    PIT 规则 (与 _merge_fundamental_panels 同风格):
+      - 因子面板由 aux_factors 构建 (归一化已完成)
+      - 两融/龙虎榜/大宗当日盘后披露 → 面板日期取 <= 回测日期的最近值
+      - 列对齐到主面板股票集 (aux 源含退市股, 需裁剪)
+
+    Returns: 实际合并的 aux_* 因子数。
+    """
+    from factor_library import AUX_FACTORS
+    from aux_factors import (build_margin_panels, build_lockup_panels,
+                             build_lhb_panels, build_dzjy_panels, _mktcap_panel)
+
+    aux_names = [fn for fn in factor_names if fn in AUX_FACTORS]
+    if not aux_names:
+        return 0
+
+    mp = build_margin_panels()  # {fn: DataFrame(date × 两融标的)}
+    mktcap = _mktcap_panel()
+    mp.update(build_lockup_panels(mktcap))  # 解禁压力 (共享流通市值面板)
+    mp.update(build_lhb_panels(mktcap))     # 龙虎榜
+    mp.update(build_dzjy_panels())          # 大宗交易
+    if not mp:
+        return 0
+
+    dates_arr = idx.to_numpy(dtype="datetime64[ns]")
+    n_merged = 0
+    for fn in aux_names:
+        if fn not in mp:
+            continue
+        src = mp[fn]
+        src_dates = src.index.to_numpy(dtype="datetime64[ns]")
+        if not np.all(src_dates[1:] >= src_dates[:-1]):
+            order = np.argsort(src_dates, kind="stable")
+            src_dates = src_dates[order]
+            src = src.iloc[order]
+        # PIT: 每个回测日期取 <= 该日期的最近披露日
+        pos = np.searchsorted(src_dates, dates_arr, side="right") - 1
+        valid = pos >= 0
+        # 对齐到主面板股票集 (aux 源含退市股 → 裁剪; 缺失股票 → NaN 列)
+        cols = {}
+        for sym in symbols:
+            if sym not in src.columns:
+                cols[sym] = np.full(len(dates_arr), np.nan, dtype=np.float64)
+                continue
+            vals = src[sym].to_numpy(dtype=np.float64)
+            rp = np.clip(pos, 0, len(vals) - 1)
+            out = np.full(len(dates_arr), np.nan, dtype=np.float64)
+            out[valid] = vals[rp[valid]]
+            cols[sym] = out
+        aligned = pd.DataFrame(cols, index=idx, dtype=np.float32)
+        if len(aligned.columns) > 0:
+            panels[fn] = aligned
+            n_merged += 1
+    return n_merged
 
 
 def _merge_minute_panels(panels: dict, all_data: dict,
@@ -955,6 +1090,34 @@ def _factor_category(fn: str) -> str:
     return "other"
 
 
+def _inv_vol_weights(all_data: dict, buy_list: list, today,
+                     lookback: int = 60) -> dict | None:
+    """波动率倒数加权 (v9b): w_i ∝ 1/σ_i, σ=过去 lookback 日日收益 std。
+
+    PIT: 只用 <= today 的数据。返回 {sym: weight} (归一化) 或 None。
+    """
+    vols = {}
+    for s in buy_list:
+        if s not in all_data:
+            continue
+        df = all_data[s][all_data[s]["date"] <= today]
+        if len(df) < 20:
+            continue
+        rets = df["close"].pct_change().dropna().tail(lookback)
+        if len(rets) < 10:
+            continue
+        v = float(rets.std())
+        if v > 0 and not np.isnan(v):
+            vols[s] = v
+    if not vols:
+        return None
+    inv = {s: 1.0 / v for s, v in vols.items()}
+    tot = sum(inv.values())
+    if tot <= 0:
+        return None
+    return {s: w / tot for s, w in inv.items()}
+
+
 def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  factor_names, bt_config, start, end, label="",
                  fixed_weights: dict | None = None,
@@ -962,7 +1125,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  use_regime: bool = False,
                  portfolio_constraints: dict | None = None,
                  minute_weights: dict | None = None,
-                 minute_lambda: float = 0.3):
+                 minute_lambda: float = 0.3,
+                 weight_mode: str = "equal"):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -1108,6 +1272,11 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                         s for s in decision.get("sell", [])
                         if s in all_data and rules.can_sell(
                             s, all_data[s][all_data[s]["date"] <= today].tail(2))]
+                    # ★ 组合层权重优化 (v9b): 波动率倒数加权
+                    if weight_mode == "inv_vol":
+                        w = _inv_vol_weights(all_data, decision.get("buy", []), today)
+                        if w:
+                            decision["weights"] = w
                     pending = decision
                     rebalance_count += 1
                     n_turn = (len(decision.get("sell", [])) +
@@ -1282,7 +1451,7 @@ FOLDS = [
 FOLD_MIN_HITS = 3          # 因子须在 >=3/5 folds 中 |ICIR| 达标才保留
 FOLD_ICIR_MIN = 0.05       # fold 内 |ICIR| 入选阈值 (滚动模式下仅作下限)
 FOLD_T_STAT_MIN = 1.645    # 统计显著标准: |ICIR|*sqrt(n_obs) >= 1.645 (单尾5%)
-FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合)
+FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合); 可由 config fold.max_factors 覆盖
 
 
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
@@ -1290,7 +1459,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       universe_fn=get_universe,
                       use_regime: bool = False,
                       portfolio_constraints: dict | None = None,
-                      minute_layer: dict | None = None) -> dict:
+                      minute_layer: dict | None = None,
+                      max_factors: int | None = None,
+                      weight_mode: str = "equal") -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1381,7 +1552,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          universe_fn=universe_fn, use_regime=use_regime,
                          portfolio_constraints=portfolio_constraints,
                          minute_weights=ml_weights if fi >= 3 else None,
-                         minute_lambda=ml_lambda)
+                         minute_lambda=ml_lambda,
+                         weight_mode=weight_mode)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1402,16 +1574,17 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         if max(pos_cnt, neg_cnt) >= FOLD_MIN_HITS:  # 方向一致
             cand.append(fn)
     cand_icir = {fn: float(np.median(factor_icirs[fn])) for fn in cand}
-    # 按 |ICIR| 排序取 top FOLD_MAX_FACTORS
+    # 按 |ICIR| 排序取 top FOLD_MAX_FACTORS (可由 max_factors 覆盖)
+    limit = max_factors if max_factors else FOLD_MAX_FACTORS
     ranked = sorted(cand_icir.items(), key=lambda kv: -abs(kv[1]))
-    stable = [fn for fn, _ in ranked[:FOLD_MAX_FACTORS]]
+    stable = [fn for fn, _ in ranked[:limit]]
     stable_icir = {fn: cand_icir[fn] for fn in stable}
 
     log.info("")
     log.info("=" * 60)
     log.info("  稳定因子: %d/%d (≥%d folds 显著+方向一致, top%d)",
              len(stable), len(factor_names), FOLD_MIN_HITS,
-             FOLD_MAX_FACTORS)
+             limit)
     if stable:
         top = sorted(stable_icir.items(), key=lambda kv: -abs(kv[1]))[:15]
         for fn, icir in top:
@@ -1434,7 +1607,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   universe_fn=get_universe,
                   use_regime: bool = False,
                   portfolio_constraints: dict | None = None,
-                  minute_layer: dict | None = None) -> dict | None:
+                  minute_layer: dict | None = None,
+                  weight_mode: str = "equal") -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1487,7 +1661,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         fixed_weights=weights, universe_fn=universe_fn,
                         use_regime=use_regime,
                         portfolio_constraints=portfolio_constraints,
-                        minute_weights=ml_weights, minute_lambda=ml_lambda)
+                        minute_weights=ml_weights, minute_lambda=ml_lambda,
+                        weight_mode=weight_mode)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1503,6 +1678,8 @@ def main():
                         help="仅跑 TEST")
     parser.add_argument("--folds", action="store_true",
                         help="方案C: 5-fold Walk-Forward + 终极 TEST")
+    parser.add_argument("--folds-only", action="store_true",
+                        help="仅 5-fold 分析, 不执行终极 TEST (v8 新因子验证用, 不消耗 TEST 锁)")
     parser.add_argument("--liquid", action="store_true",
                         help="使用流动性 PIT universe (全市场+过滤, 方案C推荐)")
     parser.add_argument("--unlock-test", action="store_true",
@@ -1519,8 +1696,10 @@ def main():
     _neut = config.get("neutralization", {}) or {}
     neutralize_enabled = bool(_neut.get("enabled", False))
     neutralize_k = float(_neut.get("winsorize_k", 3.0))
-    log.info("  前置中性化: %s (MAD去极值 k=%.1f)",
-             "开启" if neutralize_enabled else "关闭", neutralize_k)
+    industry_neutral = bool(_neut.get("industry_neutral", False))
+    log.info("  前置中性化: %s (MAD去极值 k=%.1f, 行业中性化=%s)",
+             "开启" if neutralize_enabled else "关闭", neutralize_k,
+             "开" if industry_neutral else "关")
 
     # 分钟因子开关 (config.yaml minute_factors 段, 方案C v5)
     _min_cfg = config.get("minute_factors", {}) or {}
@@ -1546,7 +1725,7 @@ def main():
     if args.unlock_test and os.path.exists(TEST_LOCK_PATH):
         os.remove(TEST_LOCK_PATH)
         log.warning("  🔓 终极 TEST 锁已解除")
-    if args.folds and not args.unlock_test and os.path.exists(TEST_LOCK_PATH):
+    if args.folds and not args.folds_only and not args.unlock_test and os.path.exists(TEST_LOCK_PATH):
         with open(TEST_LOCK_PATH, "r", encoding="utf-8") as f:
             lock_info = json.load(f)
         log.error("=" * 60)
@@ -1669,10 +1848,12 @@ def main():
     factor_panels = precompute_factor_panels(
         all_data, factor_names, needed_dates,
         include_fundamental=bool(args.folds),
+        include_aux=bool(args.folds),
         include_minute=bool(args.folds) and minute_enabled,
         minute_lookback=minute_lookback,
         neutralize_enabled=neutralize_enabled,
-        neutralize_k=neutralize_k)
+        neutralize_k=neutralize_k,
+        industry_map=_load_industry_map() if industry_neutral else None)
     log.info("  面板就绪: %d 因子", len(factor_panels))
 
     # ── 5. 回测 (带日期守卫) ──
@@ -1705,21 +1886,25 @@ def main():
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
                 use_regime=True, portfolio_constraints=portfolio_constraints,
-                minute_layer=minute_layer)
+                minute_layer=minute_layer,
+                max_factors=int(config.get("fold", {}).get("max_factors", 40)),
+                weight_mode=str(config.get("portfolio_optimizer", "equal")))
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
             extra_meta["stable_factors"] = fold_out["stable_factors"]
             extra_meta["stable_factor_icir_median"] = (
                 fold_out["stable_factor_icir_median"])
-            r = run_fold_test(
-                all_data, factor_panels, close_panel, calendar, cal_idx,
-                factor_names, bt_config,
-                fold_out["stable_factors"],
-                fold_out["stable_factor_icir_median"],
-                "2025-01-01", "2026-06-30", universe_fn=universe_fn,
-                use_regime=True, portfolio_constraints=portfolio_constraints,
-                minute_layer=minute_layer)
+            r = None
+            if not args.folds_only:
+                r = run_fold_test(
+                    all_data, factor_panels, close_panel, calendar, cal_idx,
+                    factor_names, bt_config,
+                    fold_out["stable_factors"],
+                    fold_out["stable_factor_icir_median"],
+                    "2025-01-01", "2026-06-30", universe_fn=universe_fn,
+                    use_regime=True, portfolio_constraints=portfolio_constraints,
+                    minute_layer=minute_layer)
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)

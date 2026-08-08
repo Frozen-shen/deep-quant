@@ -87,5 +87,488 @@
     "decay_warning": false,
     "decayed_factors": [],
     "weeks_decaying": 0
+  },
+  {
+    "timestamp": "2026-08-03T16:36:12.546078",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 13,
+        "ic_mean": -0.088748,
+        "ic_std": 0.042669,
+        "icir": -2.0799,
+        "pos_ratio": 0.0769
+      },
+      {
+        "factor": "klen",
+        "n_days": 13,
+        "ic_mean": -0.156823,
+        "ic_std": 0.194585,
+        "icir": -0.8059,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 13,
+        "ic_mean": -0.195125,
+        "ic_std": 0.290766,
+        "icir": -0.6711,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 13,
+        "ic_mean": -0.202384,
+        "ic_std": 0.304162,
+        "icir": -0.6654,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 13,
+        "ic_mean": -0.17605,
+        "ic_std": 0.265572,
+        "icir": -0.6629,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 13,
+        "ic_mean": -0.193771,
+        "ic_std": 0.296729,
+        "icir": -0.653,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 13,
+        "ic_mean": -0.031816,
+        "ic_std": 0.063908,
+        "icir": -0.4978,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "skew_20d",
+        "n_days": 13,
+        "ic_mean": -0.035712,
+        "ic_std": 0.087089,
+        "icir": -0.4101,
+        "pos_ratio": 0.4615
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 13,
+        "ic_mean": -0.079742,
+        "ic_std": 0.198264,
+        "icir": -0.4022,
+        "pos_ratio": 0.4615
+      },
+      {
+        "factor": "vol_price_sync",
+        "n_days": 13,
+        "ic_mean": -0.030513,
+        "ic_std": 0.07964,
+        "icir": -0.3831,
+        "pos_ratio": 0.4615
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [
+      {
+        "factor": "turnover_trend",
+        "current_ic": -0.031816,
+        "baseline_ic": -0.069141,
+        "ratio": 0.4602
+      },
+      {
+        "factor": "momentum_20d",
+        "current_ic": 0.021162,
+        "baseline_ic": 0.053303,
+        "ratio": 0.397
+      },
+      {
+        "factor": "rev_mom_spread",
+        "current_ic": 0.021762,
+        "baseline_ic": 0.051682,
+        "ratio": 0.4211
+      },
+      {
+        "factor": "ma20_ma60_spread",
+        "current_ic": -0.023089,
+        "baseline_ic": -0.052293,
+        "ratio": 0.4415
+      },
+      {
+        "factor": "liq_ratio",
+        "current_ic": 0.005415,
+        "baseline_ic": -0.087099,
+        "ratio": 0.0622
+      }
+    ],
+    "weeks_decaying": 1
+  },
+  {
+    "timestamp": "2026-08-04T16:35:42.771791",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 13,
+        "ic_mean": -0.087719,
+        "ic_std": 0.035685,
+        "icir": -2.4582,
+        "pos_ratio": 0.0
+      },
+      {
+        "factor": "klen",
+        "n_days": 13,
+        "ic_mean": -0.173397,
+        "ic_std": 0.223773,
+        "icir": -0.7749,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 13,
+        "ic_mean": -0.198881,
+        "ic_std": 0.265171,
+        "icir": -0.75,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 13,
+        "ic_mean": -0.21463,
+        "ic_std": 0.287126,
+        "icir": -0.7475,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 13,
+        "ic_mean": -0.224096,
+        "ic_std": 0.30456,
+        "icir": -0.7358,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 13,
+        "ic_mean": -0.213564,
+        "ic_std": 0.293614,
+        "icir": -0.7274,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 13,
+        "ic_mean": -0.089438,
+        "ic_std": 0.154749,
+        "icir": -0.578,
+        "pos_ratio": 0.5385
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 13,
+        "ic_mean": -0.032157,
+        "ic_std": 0.063661,
+        "icir": -0.5051,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 13,
+        "ic_mean": -0.087393,
+        "ic_std": 0.197238,
+        "icir": -0.4431,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "skew_20d",
+        "n_days": 13,
+        "ic_mean": -0.037319,
+        "ic_std": 0.08778,
+        "icir": -0.4251,
+        "pos_ratio": 0.3846
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [
+      {
+        "factor": "turnover_trend",
+        "current_ic": -0.032157,
+        "baseline_ic": -0.069141,
+        "ratio": 0.4651
+      }
+    ],
+    "weeks_decaying": 1
+  },
+  {
+    "timestamp": "2026-08-05T16:34:23.215164",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 13,
+        "ic_mean": -0.091204,
+        "ic_std": 0.038865,
+        "icir": -2.3467,
+        "pos_ratio": 0.0
+      },
+      {
+        "factor": "vol_price_sync",
+        "n_days": 13,
+        "ic_mean": -0.078693,
+        "ic_std": 0.093663,
+        "icir": -0.8402,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 13,
+        "ic_mean": -0.210639,
+        "ic_std": 0.28862,
+        "icir": -0.7298,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 13,
+        "ic_mean": -0.225846,
+        "ic_std": 0.316172,
+        "icir": -0.7143,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 13,
+        "ic_mean": -0.224676,
+        "ic_std": 0.316288,
+        "icir": -0.7104,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 13,
+        "ic_mean": -0.231622,
+        "ic_std": 0.326105,
+        "icir": -0.7103,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "klen",
+        "n_days": 13,
+        "ic_mean": -0.189676,
+        "ic_std": 0.273579,
+        "icir": -0.6933,
+        "pos_ratio": 0.3077
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 13,
+        "ic_mean": -0.09557,
+        "ic_std": 0.167643,
+        "icir": -0.5701,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 13,
+        "ic_mean": -0.035418,
+        "ic_std": 0.070487,
+        "icir": -0.5025,
+        "pos_ratio": 0.4615
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 13,
+        "ic_mean": -0.103237,
+        "ic_std": 0.215392,
+        "icir": -0.4793,
+        "pos_ratio": 0.3846
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [],
+    "weeks_decaying": 0
+  },
+  {
+    "timestamp": "2026-08-06T16:36:14.958593",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 12,
+        "ic_mean": -0.09645,
+        "ic_std": 0.034657,
+        "icir": -2.783,
+        "pos_ratio": 0.0
+      },
+      {
+        "factor": "klen",
+        "n_days": 12,
+        "ic_mean": -0.164003,
+        "ic_std": 0.200869,
+        "icir": -0.8165,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 12,
+        "ic_mean": -0.206264,
+        "ic_std": 0.299962,
+        "icir": -0.6876,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 12,
+        "ic_mean": -0.185957,
+        "ic_std": 0.274099,
+        "icir": -0.6784,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 12,
+        "ic_mean": -0.209374,
+        "ic_std": 0.315577,
+        "icir": -0.6635,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 12,
+        "ic_mean": -0.202272,
+        "ic_std": 0.30732,
+        "icir": -0.6582,
+        "pos_ratio": 0.4167
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 12,
+        "ic_mean": -0.038853,
+        "ic_std": 0.061488,
+        "icir": -0.6319,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 12,
+        "ic_mean": -0.086173,
+        "ic_std": 0.153248,
+        "icir": -0.5623,
+        "pos_ratio": 0.4167
+      },
+      {
+        "factor": "skew_20d",
+        "n_days": 12,
+        "ic_mean": -0.043901,
+        "ic_std": 0.085701,
+        "icir": -0.5123,
+        "pos_ratio": 0.4167
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 12,
+        "ic_mean": -0.0922,
+        "ic_std": 0.201412,
+        "icir": -0.4578,
+        "pos_ratio": 0.4167
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [],
+    "weeks_decaying": 0
+  },
+  {
+    "timestamp": "2026-08-07T16:38:31.712804",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 12,
+        "ic_mean": -0.094011,
+        "ic_std": 0.029408,
+        "icir": -3.1967,
+        "pos_ratio": 0.0
+      },
+      {
+        "factor": "klen",
+        "n_days": 12,
+        "ic_mean": -0.181301,
+        "ic_std": 0.231161,
+        "icir": -0.7843,
+        "pos_ratio": 0.25
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 12,
+        "ic_mean": -0.229675,
+        "ic_std": 0.293885,
+        "icir": -0.7815,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 12,
+        "ic_mean": -0.211968,
+        "ic_std": 0.271935,
+        "icir": -0.7795,
+        "pos_ratio": 0.25
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 12,
+        "ic_mean": -0.226771,
+        "ic_std": 0.30187,
+        "icir": -0.7512,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 12,
+        "ic_mean": -0.235527,
+        "ic_std": 0.314305,
+        "icir": -0.7494,
+        "pos_ratio": 0.25
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 12,
+        "ic_mean": -0.039764,
+        "ic_std": 0.060318,
+        "icir": -0.6592,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 12,
+        "ic_mean": -0.096974,
+        "ic_std": 0.15876,
+        "icir": -0.6108,
+        "pos_ratio": 0.5
+      },
+      {
+        "factor": "skew_20d",
+        "n_days": 12,
+        "ic_mean": -0.046854,
+        "ic_std": 0.08465,
+        "icir": -0.5535,
+        "pos_ratio": 0.3333
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 12,
+        "ic_mean": -0.101566,
+        "ic_std": 0.19883,
+        "icir": -0.5108,
+        "pos_ratio": 0.3333
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [],
+    "weeks_decaying": 0
   }
 ]

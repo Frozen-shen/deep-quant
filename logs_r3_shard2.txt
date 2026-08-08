@@ -1,0 +1,30 @@
+═══ Baostock 5分钟线拉取 ═══
+  宇宙: 5073 只, 本次: 1269 只 (offset=1269)
+  日期: 2022-01-01 ~ 2026-08-06
+  缓存: C:\Users\Frozen\ZCodeProject\quant-starter\data_store\minute_5m
+  强制: False
+
+login success!
+timed out
+接收数据异常，请稍后再试。
+timed out
+接收数据异常，请稍后再试。
+'utf-8' codec can't decode byte 0xab in position 0: invalid start byte
+接收数据异常，请稍后再试。
+  [800/1269] 成功=35 跳过=761 失败=4 | 12只/分 | ETA 39min
+  [850/1269] 成功=85 跳过=761 失败=4 | 6只/分 | ETA 65min
+  [900/1269] 成功=135 跳过=761 失败=4 | 5只/分 | ETA 74min
+  [950/1269] 成功=185 跳过=761 失败=4 | 4只/分 | ETA 75min
+  [1000/1269] 成功=235 跳过=761 失败=4 | 4只/分 | ETA 70min
+  [1050/1269] 成功=285 跳过=761 失败=4 | 4只/分 | ETA 60min
+  [1100/1269] 成功=335 跳过=761 失败=4 | 3只/分 | ETA 48min
+  [1150/1269] 成功=385 跳过=761 失败=4 | 3只/分 | ETA 35min
+  [1200/1269] 成功=435 跳过=761 失败=4 | 3只/分 | ETA 21min
+  [1250/1269] 成功=447 跳过=761 失败=42 | 3只/分 | ETA 6min
+logout failed!
+
+═══ 完成 ═══
+  耗时: 365.7 分钟
+  成功: 447, 跳过(缓存): 763, 失败: 59
+  缓存目录: C:\Users\Frozen\ZCodeProject\quant-starter\data_store\minute_5m
+  总文件: 4994, 总大小: 6612MB
