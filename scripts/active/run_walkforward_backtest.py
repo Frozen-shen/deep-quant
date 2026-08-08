@@ -1126,7 +1126,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  portfolio_constraints: dict | None = None,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3,
-                 weight_mode: str = "equal"):
+                 weight_mode: str = "equal",
+                 pool_filter_cfg: dict | None = None):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -1138,6 +1139,9 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
       段: max_single_pct/max_industry_pct/max_turnover), None=不启用。
     minute_weights: 方案B 分钟叠加层权重 {min_factor: icir}, None=不叠加。
     minute_lambda: 叠加权重 λ (综合分 = 主分 + λ×分钟分)。
+    pool_filter_cfg: 股票池分域配置 (config.yaml pool_filter 段,
+      含 enabled/low_vol_mult/high_vol_mult/low_vol_up/high_vol_up)。
+      None 或 enabled=false 时行为与 v9 完全一致 (不施加任何乘数)。
     """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -1250,6 +1254,35 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
             scores = score_stocks(factor_panels, weights, today,
                                   minute_weights=minute_weights,
                                   minute_lambda=minute_lambda)
+
+            # ★ 股票池分域 (v10): 波动率分层 × regime 乘数 (选股层软偏好)。
+            # 乘数表与 vol_pct 严格对应: >0.70 高波动市场 → 避险表 (低波加分),
+            # <0.30 低波动市场 → 弹性表 (高波加分), 其余中性 (×1.0)。
+            # 分支结构即保证对应关系 (热路径不用断言); 数据不足的股票
+            # vol_bucket 按 mid 处理 (×1.0), PIT 由 vol_bucket 内部保证。
+            if pool_filter_cfg and pool_filter_cfg.get("enabled"):
+                from pool_filter import vol_bucket, apply_pool_filter
+                if regime_det is not None:
+                    _reg, _vol_pct = regime_det.detect_v2(str(today.date()))
+                else:
+                    _vol_pct = 0.5
+                _buckets = vol_bucket(scores, all_data, today)
+                if _vol_pct > 0.70:  # 高波动市场: 避险偏好
+                    _mults = {"low": pool_filter_cfg.get("low_vol_mult", 1.5),
+                              "mid": 1.0,
+                              "high": pool_filter_cfg.get("high_vol_mult", 0.5)}
+                elif _vol_pct < 0.30:  # 低波动市场: 弹性偏好
+                    _mults = {"low": pool_filter_cfg.get("low_vol_up", 0.8),
+                              "mid": 1.0,
+                              "high": pool_filter_cfg.get("high_vol_up", 1.2)}
+                else:
+                    _mults = {"low": 1.0, "mid": 1.0, "high": 1.0}
+                scores = apply_pool_filter(scores, _buckets, _vol_pct, _mults)
+                log.info("  [%s] 调仓日 %s: pool_filter vol_pct=%.2f (%s)",
+                         label, today.date(), _vol_pct,
+                         "高波避险" if _vol_pct > 0.70 else
+                         ("低波弹性" if _vol_pct < 0.30 else "中性"))
+
             # PIT 过滤
             scores = {s: v for s, v in scores.items() if s in pit_stocks}
 
@@ -1461,7 +1494,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       portfolio_constraints: dict | None = None,
                       minute_layer: dict | None = None,
                       max_factors: int | None = None,
-                      weight_mode: str = "equal") -> dict:
+                      weight_mode: str = "equal",
+                      pool_filter_cfg: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1553,7 +1587,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          portfolio_constraints=portfolio_constraints,
                          minute_weights=ml_weights if fi >= 3 else None,
                          minute_lambda=ml_lambda,
-                         weight_mode=weight_mode)
+                         weight_mode=weight_mode,
+                         pool_filter_cfg=pool_filter_cfg)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1608,7 +1643,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   use_regime: bool = False,
                   portfolio_constraints: dict | None = None,
                   minute_layer: dict | None = None,
-                  weight_mode: str = "equal") -> dict | None:
+                  weight_mode: str = "equal",
+                  pool_filter_cfg: dict | None = None) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1662,7 +1698,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         use_regime=use_regime,
                         portfolio_constraints=portfolio_constraints,
                         minute_weights=ml_weights, minute_lambda=ml_lambda,
-                        weight_mode=weight_mode)
+                        weight_mode=weight_mode,
+                        pool_filter_cfg=pool_filter_cfg)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1888,7 +1925,8 @@ def main():
                 use_regime=True, portfolio_constraints=portfolio_constraints,
                 minute_layer=minute_layer,
                 max_factors=int(config.get("fold", {}).get("max_factors", 40)),
-                weight_mode=str(config.get("portfolio_optimizer", "equal")))
+                weight_mode=str(config.get("portfolio_optimizer", "equal")),
+                pool_filter_cfg=config.get("pool_filter"))
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -1904,7 +1942,8 @@ def main():
                     fold_out["stable_factor_icir_median"],
                     "2025-01-01", "2026-06-30", universe_fn=universe_fn,
                     use_regime=True, portfolio_constraints=portfolio_constraints,
-                    minute_layer=minute_layer)
+                    minute_layer=minute_layer,
+                    pool_filter_cfg=config.get("pool_filter"))
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
