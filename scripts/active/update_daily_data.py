@@ -63,7 +63,7 @@ def get_cached_symbols() -> List[str]:
     return sorted([
         f.replace(".parquet", "")
         for f in os.listdir(DATA_STORE)
-        if f.endswith(".parquet") and len(f) == 11  # "XXXXXX.parquet"
+        if f.endswith(".parquet") and len(f) == 14  # "XXXXXX.parquet" (6位代码 + .parquet)
     ])
 
 

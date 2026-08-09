@@ -116,7 +116,7 @@ def step_data_fetch(date_str: str, resume: bool = True) -> str:
 
 
 def step_data_quality(date_str: str) -> str:
-    """基础数据质量校验。"""
+    """基础数据质量校验 — 日线陈旧检查 + 各数据目录最新日期同步性检查。"""
     import pandas as pd
     import glob
 
@@ -151,7 +151,51 @@ def step_data_quality(date_str: str) -> str:
     detail = f"抽样 {sample_size} 只: 过期 {stale_count}, 空/异常 {empty_count}"
     if stale_count > sample_size * 0.3:
         raise RuntimeError(f"数据过期率过高: {stale_count}/{sample_size}")
-    return detail
+
+    # ── 各数据目录最新日期同步性检查 (2026-08-09 新增, 防"静默滞后") ──
+    # 背景: update_daily_data len(f)==11 bug + 腾讯源被封曾导致日线/指数静默滞后 1 周。
+    sync_checks = [
+        ("日线主库", os.path.join(data_store, "*.parquet"), "date", None),
+        ("两融 aux_margin", os.path.join(data_store, "aux_margin", "*.parquet"), "file", "date"),
+        ("龙虎榜 aux_lhb", os.path.join(data_store, "aux_lhb", "*.parquet"), "file", "date"),
+        ("大宗交易 aux_dzjy", os.path.join(data_store, "aux_dzjy", "*.parquet"), "file", "date"),
+        ("分钟15m", os.path.join(data_store, "minute_15m", "*.parquet"), "datetime", None),
+        ("指数基准", os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet"), "date", None),
+    ]
+    sync_msgs = []
+    for name, pattern, col, file_col in sync_checks:
+        try:
+            fs = glob.glob(pattern)
+            if not fs:
+                sync_msgs.append(f"{name}: 无文件")
+                continue
+            if col == "file":
+                # 按日文件: 从文件名取日期
+                latest = max(pd.to_datetime(
+                    os.path.basename(f).replace(".parquet", "")) for f in fs)
+            else:
+                latest = pd.to_datetime(pd.read_parquet(fs[0])[col]).max()
+            lag = (target_date - latest).days
+            mark = "✓" if lag <= 7 else "⚠ 滞后"
+            sync_msgs.append(f"{name}: {latest.date()} [{mark} 差{lag}天]")
+        except Exception as e:
+            sync_msgs.append(f"{name}: 检查失败({str(e)[:30]})")
+    sync_str = " | ".join(sync_msgs)
+    log.info("数据同步检查: %s", sync_str)
+
+    # 任一日线关键数据滞后 > 7 天视为质量异常 (指数/aux 滞后只记录不中断)
+    daily_latest = None
+    try:
+        fs = glob.glob(os.path.join(data_store, "*.parquet"))
+        daily_latest = max(pd.to_datetime(pd.read_parquet(f, columns=["date"])["date"]).max()
+                           for f in fs[:50])
+    except Exception:
+        pass
+    if daily_latest is not None and (target_date - daily_latest).days > 7:
+        raise RuntimeError(
+            f"日线数据滞后 {target_date.date()} vs {daily_latest.date()}, 请检查数据源/代理")
+
+    return detail + " | " + sync_str
 
 
 def step_signal_generation(date_str: str, dry_run: bool = False) -> str:

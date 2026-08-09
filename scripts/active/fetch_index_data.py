@@ -6,7 +6,8 @@ fetch_index_data.py — 获取A股主要指数日线数据
   data/cache/index_csi500.parquet   (中证500, 000905)
   data/cache/index_csi1000.parquet  (中证1000, 000852) ← 主基准
 
-数据源: 腾讯财经 (stock_zh_index_daily_tx)
+数据源: 东财 (stock_zh_index_daily_em, 经 eastmoney_proxy 代理)
+  (原腾讯源 stock_zh_index_daily_tx 2026-08 起被限流, 已切换)
 """
 import os
 import sys
@@ -21,9 +22,14 @@ os.environ["no_proxy"] = "*"
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "cache")
+# 东财代理 (config.yaml eastmoney_proxy 段): 必须在 akshare 首次 import 前启用
+import eastmoney_proxy
+eastmoney_proxy.setup_from_config(BASE_DIR)
+
+CACHE_DIR = os.path.join(BASE_DIR, "data", "cache")
 
 INDICES = {
     "sh000300": "csi300",
@@ -32,19 +38,18 @@ INDICES = {
 }
 
 START_DATE = "2018-01-01"
-END_DATE = "2026-07-31"
+END_DATE = "2026-08-07"
 
 
 def fetch_index(symbol: str, name: str) -> pd.DataFrame:
-    """获取单个指数日线 (腾讯数据源)。"""
+    """获取单个指数日线 (东财数据源, 走代理)。"""
     import akshare as ak
 
     print(f"  获取 {name} ({symbol})...", flush=True)
-    df = ak.stock_zh_index_daily_tx(symbol=symbol)
+    df = ak.stock_zh_index_daily_em(symbol=symbol)
 
-    # 腾讯源列: date, open, close, high, low, amount(实为成交量)
+    # 东财源列: date, open, close, high, low, volume, amount
     df["date"] = pd.to_datetime(df["date"])
-    df = df.rename(columns={"amount": "volume"})
 
     # 按日期范围过滤
     df = df[(df["date"] >= START_DATE) & (df["date"] <= END_DATE)].copy()

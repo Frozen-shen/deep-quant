@@ -3,6 +3,22 @@
 全量拉取 data_store 所有股票的历史资金流 -> data_store/aux_flow/{code}.parquet
 断点续传: 已存在文件跳过。失败列表写 aux_flow/_failed.json
 """
+# ⚠️ 插件引入必须放在最顶部, 在 efinance 之前!
+import akshare_proxy_patch
+akshare_proxy_patch.install_patch(
+    "101.201.173.125",
+    auth_token="20260809YL16REJA",
+    retry=30,
+    hook_domains=[
+        "fund.eastmoney.com",
+        "push2.eastmoney.com",
+        "push2his.eastmoney.com",
+        "emweb.securities.eastmoney.com",
+        "searchapi.eastmoney.com/api/suggest/get",
+    ],
+    fast=True,
+)
+
 import os, sys, time, random, glob, json
 os.environ.pop("HTTP_PROXY", None); os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("http_proxy", None); os.environ.pop("https_proxy", None)

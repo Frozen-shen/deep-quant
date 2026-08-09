@@ -34,6 +34,10 @@ import pandas as pd
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
 
+# 东财代理 (config.yaml eastmoney_proxy 段): 必须在 akshare 首次 import 前启用
+import eastmoney_proxy
+eastmoney_proxy.setup_from_config(BASE_DIR)
+
 DEFAULT_START = "2015-01-01"
 DEFAULT_END = datetime.now().strftime("%Y-%m-%d")
 
