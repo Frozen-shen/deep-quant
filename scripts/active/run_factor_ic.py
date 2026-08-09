@@ -21,7 +21,7 @@ from factor_engine import FactorLibrary
 from factor_library import ALPHA158_FACTORS
 from gate import load_config
 
-# 研究期从 config.yaml 读取 (唯一参数源), 方案C: 2015-01-01 ~ 2024-12-31
+# 研究期从 config.yaml 读取 (唯一参数源), 方案C v5: research 2015-01-01 ~ 2026-06-30 (含毕业TEST①)
 _cfg = load_config(os.path.join(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))), "config.yaml"))
 _dp = _cfg["data_partition"]["research"]

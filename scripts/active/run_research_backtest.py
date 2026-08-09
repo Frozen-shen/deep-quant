@@ -53,7 +53,7 @@ THRESHOLDS = {
 # 回测参数 (方案C v4: 仅限 research 期 2015-01~2024-12, 终极TEST/BLIND 禁入)
 BT_CONFIG = {
     "start": "2019-01-01",       # 回测起始 (2018用于因子warmup)
-    "end": "2024-12-31",         # 回测结束 (research 期内, 禁止触碰 TEST/BLIND)
+    "end": "2024-12-31",         # 回测结束 (research 期内; research 已扩至 2026-06-30, 本脚本保持保守区间)
     "rebalance_days": 20,        # 每20个交易日调仓
     "top_k": 30,                 # 持仓数量
     "ic_lookback_months": 12,    # IC估计回溯窗口

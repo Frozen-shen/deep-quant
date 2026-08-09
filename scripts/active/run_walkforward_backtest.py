@@ -96,7 +96,7 @@ def _load_partitions() -> dict:
     except Exception:
         return {
             "development": ("2026-07-01", "2026-12-31"),
-            "test": ("2026-07-01", "2026-07-31"),
+            "test": ("2026-07-01", "2026-12-31"),
         }
 
 
@@ -1719,6 +1719,10 @@ def main():
                         help="仅 5-fold 分析, 不执行终极 TEST (v8 新因子验证用, 不消耗 TEST 锁)")
     parser.add_argument("--force-partial-test", action="store_true",
                         help="显式确认在数据不完备时执行 TEST② (仅用于确认, 会消耗 TEST 锁)")
+    parser.add_argument("--extend-val", nargs=2, metavar=("START", "END"),
+                        default=None,
+                        help="fold 分析后, 用稳定因子权重在扩展区间做模拟考验证 "
+                             "(如 2025-01-01 2026-06-30, TEST① 毕业数据; 不消耗任何 TEST 锁)")
     parser.add_argument("--liquid", action="store_true",
                         help="使用流动性 PIT universe (全市场+过滤, 方案C推荐)")
     parser.add_argument("--unlock-test", action="store_true",
@@ -1730,6 +1734,48 @@ def main():
     args = parser.parse_args()
 
     config = load_config(os.path.join(BASE_DIR, "config.yaml"))
+
+    # ── 启动防护 (2026-08-09 防低级失误) ──
+    # 1. config 完整性校验 (重复键检测)
+    try:
+        from gate import validate_config_integrity
+        with open(os.path.join(BASE_DIR, "config.yaml"), encoding="utf-8") as _f:
+            _raw = _f.read()
+        _errs = validate_config_integrity(config, _raw)
+        if _errs:
+            log.error("🚫 config.yaml 完整性校验失败: %s", _errs)
+            sys.exit(1)
+    except Exception as _e:
+        log.warning("  config 完整性校验跳过: %s", _e)
+
+    # 2. 结果自动备份 (带时间戳, 防覆盖丢失)
+    if os.path.exists(OUTPUT_PATH):
+        import shutil as _shutil
+        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        _bak = os.path.join(IC_DIR, f"walkforward_results_bak_{_ts}.json")
+        try:
+            _shutil.copy2(OUTPUT_PATH, _bak)
+            log.info("  📦 上一轮结果已备份: %s", _bak)
+        except Exception as _e2:
+            log.warning("  结果备份失败: %s", _e2)
+
+    # 3. 关键实验状态打印 (防配置遗留)
+    _pf = config.get("pool_filter", {}) or {}
+    _mm = config.get("minute_factors", {}) or {}
+    _dp = config.get("data_partition", {}) or {}
+    log.info("── 实验状态 ──")
+    log.info("  数据分区: research=%s~%s dev(TEST②)=%s~%s blind=%s",
+             _dp.get("research", {}).get("start", "?"),
+             _dp.get("research", {}).get("end", "?"),
+             _dp.get("development", {}).get("start", "?"),
+             _dp.get("development", {}).get("end", "?"),
+             _dp.get("blind", {}).get("start", "?"))
+    log.info("  pool_filter=%s (低波×%.1f/高波×%.1f) | minute_freq=%s | fold.max_factors=%s | industry_neutral=%s",
+             "开" if _pf.get("enabled") else "关",
+             _pf.get("low_vol_mult", 1.5), _pf.get("high_vol_mult", 0.5),
+             _mm.get("freq", "15"), config.get("fold", {}).get("max_factors", 40),
+             bool((config.get("neutralization", {}) or {}).get("industry_neutral", False)))
+    log.info("────────────")
 
     # 前置中性化开关 (config.yaml neutralization 段)
     _neut = config.get("neutralization", {}) or {}
@@ -1872,6 +1918,12 @@ def main():
         for d in calendar:
             if pd.Timestamp(test_s).date() <= d.date() <= pd.Timestamp(test_e).date():
                 needed.add(d)
+        # 扩展模拟考 (--extend-val): 区间加入面板构建 (否则 scores 为空 → 空仓)
+        if args.extend_val:
+            ev_s0, ev_e0 = args.extend_val[0], args.extend_val[1]
+            for d in calendar:
+                if pd.Timestamp(ev_s0).date() <= d.date() <= pd.Timestamp(ev_e0).date():
+                    needed.add(d)
     else:
         for label, (s, e) in partitions_to_run.items():
             part_dates = [d for d in calendar
@@ -1976,6 +2028,34 @@ def main():
                         "output": OUTPUT_PATH,
                     }, f, ensure_ascii=False, indent=2)
                 log.info("  🔒 终极 TEST 锁已写入: %s", TEST_LOCK_PATH)
+
+            # ★ 扩展模拟考 (--extend-val): 稳定因子固定权重在扩展区间回测
+            # (TEST① 毕业数据, 权重训练期 2015-2023 未见此段 → OOS; 不消耗 TEST 锁)
+            if args.extend_val:
+                ev_s, ev_e = args.extend_val[0], args.extend_val[1]
+                guard.check_range(ev_s, ev_e)
+                log.info("=" * 60)
+                log.info("  扩展模拟考: %s ~ %s (稳定因子固定权重, pool_filter=%s)",
+                         ev_s, ev_e, "开" if config.get("pool_filter", {}).get("enabled") else "关")
+                log.info("=" * 60)
+                ev_r = run_backtest(
+                    all_data, factor_panels, close_panel, calendar, cal_idx,
+                    factor_names, bt_config, ev_s, ev_e, label="EXTEND",
+                    fixed_weights={fn: fold_out["stable_factor_icir_median"][fn]
+                                   for fn in fold_out["stable_factors"]},
+                    universe_fn=universe_fn, use_regime=True,
+                    portfolio_constraints=portfolio_constraints,
+                    minute_weights=minute_layer.get("weights")
+                    if minute_layer.get("enabled") else None,
+                    minute_lambda=float(minute_layer.get("lambda", 0.3)),
+                    pool_filter_cfg=config.get("pool_filter"))
+                if ev_r:
+                    results["extend_val"] = ev_r
+                    extra_meta["extend_val"] = {
+                        "period": f"{ev_s} ~ {ev_e}",
+                        "pool_filter_enabled": bool(
+                            config.get("pool_filter", {}).get("enabled")),
+                    }
         else:
             for label, (s, e) in partitions_to_run.items():
                 log.info("")

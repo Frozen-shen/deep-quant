@@ -88,7 +88,7 @@ portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v
 
 # ── 股票池分域 (v10, 波动率分层×regime乘数, 设计文档 2026-08-09) ──
 pool_filter:
-  enabled: false          # v9 基线重跑 (配对bootstrap); false 时行为与 v9 完全一致
+  enabled: false          # 模拟考 off 对照组 (2026-08-09); true=pool_filter 开
   low_vol_mult: 1.5       # 高波动市场: 低波档乘数
   high_vol_mult: 0.5      # 高波动市场: 高波档乘数
   low_vol_up: 0.8         # 低波动市场: 低波档乘数 (牛市弹性)
