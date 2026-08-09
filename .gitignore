@@ -77,3 +77,7 @@ trained_weights.json
 
 # ZCode plans
 .zcode/
+
+# LGBM fold compare panel cache (large, rebuildable)
+data/ic_validation/panels_cache_lgbm/
+data/ic_validation/panels_cache_lgbm_tmp/
