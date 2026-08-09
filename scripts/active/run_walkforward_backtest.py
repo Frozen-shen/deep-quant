@@ -1118,6 +1118,49 @@ def _inv_vol_weights(all_data: dict, buy_list: list, today,
     return {s: w / tot for s, w in inv.items()}
 
 
+def _risk_parity_weights(all_data: dict, buy_list: list, today,
+                         lookback: int = 60, shrink: float = 0.5) -> dict | None:
+    """风险平价权重 (P0, 2026-08-09): 按协方差风险贡献均等分配。
+
+    简化实现 (小样本友好):
+      - 样本协方差 + Ledoit-Wolf 收缩 (shrink 比例)
+      - 风险贡献均等: w_i ∝ 1/(ΣΣ w_j σ_ij 的边际贡献) — 用迭代近似:
+        权重 ∝ 对角元素倒数 → 迭代 3 次风险平价
+    PIT: 只用 <= today 数据。
+    """
+    rets = {}
+    for s in buy_list:
+        if s not in all_data:
+            continue
+        df = all_data[s][all_data[s]["date"] <= today]
+        if len(df) < 20:
+            continue
+        r = df["close"].pct_change().dropna().tail(lookback)
+        if len(r) < 10:
+            continue
+        rets[s] = r.to_numpy(dtype=np.float64)
+    if len(rets) < 2:
+        return None
+    # 对齐长度
+    n = min(len(v) for v in rets.values())
+    X = np.column_stack([v[-n:] for v in rets.values()])
+    syms = list(rets.keys())
+    # 样本协方差 + 收缩
+    S = np.cov(X, rowvar=False)
+    diag = np.diag(S)
+    target = np.eye(len(syms)) * np.mean(diag)
+    S_shrunk = (1 - shrink) * S + shrink * target
+    # 迭代风险平价 (3 次)
+    w = 1.0 / np.sqrt(np.diag(S_shrunk))
+    w = w / w.sum()
+    for _ in range(3):
+        port_var = w @ S_shrunk @ w
+        mrc = S_shrunk @ w / port_var  # 边际风险贡献
+        w = w * (1.0 / np.maximum(mrc, 1e-9))
+        w = w / w.sum()
+    return {s: float(wi) for s, wi in zip(syms, w) if wi > 0}
+
+
 def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  factor_names, bt_config, start, end, label="",
                  fixed_weights: dict | None = None,
@@ -1308,6 +1351,10 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                     # ★ 组合层权重优化 (v9b): 波动率倒数加权
                     if weight_mode == "inv_vol":
                         w = _inv_vol_weights(all_data, decision.get("buy", []), today)
+                        if w:
+                            decision["weights"] = w
+                    elif weight_mode == "risk_parity":
+                        w = _risk_parity_weights(all_data, decision.get("buy", []), today)
                         if w:
                             decision["weights"] = w
                     pending = decision
