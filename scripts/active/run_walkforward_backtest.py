@@ -2045,6 +2045,14 @@ def main():
             # 方案C: 5-fold 分析 + 终极 TEST
             guard.check_range("2015-01-01",
                              config.get("data_partition", {}).get("full_end", "2026-12-31"))
+            # ── 因子正交化 (P2, 可选): fold 权重计算前 Gram-Schmidt 去冗余 ──
+            # 顺序与 fold 权重一致 (sorted factor_names); 不改变第一个因子
+            if config.get("factor_orthogonalize", {}).get("enabled"):
+                from orthogonalize import orthogonalize_panels
+                factor_panels = orthogonalize_panels(
+                    factor_panels, sorted(factor_names))
+                log.info("  因子正交化: %d 因子 (Gram-Schmidt, 顺序 %s)",
+                         len(factor_panels), sorted(factor_names)[:3])
             # 方案B: 分钟因子独立验证 (fold 4-5 训练期)
             ml_cfg = config.get("minute_layer", {})
             ml_weights = None
