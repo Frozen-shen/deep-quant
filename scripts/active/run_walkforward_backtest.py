@@ -1717,6 +1717,8 @@ def main():
                         help="方案C: 5-fold Walk-Forward + 终极 TEST")
     parser.add_argument("--folds-only", action="store_true",
                         help="仅 5-fold 分析, 不执行终极 TEST (v8 新因子验证用, 不消耗 TEST 锁)")
+    parser.add_argument("--force-partial-test", action="store_true",
+                        help="显式确认在数据不完备时执行 TEST② (仅用于确认, 会消耗 TEST 锁)")
     parser.add_argument("--liquid", action="store_true",
                         help="使用流动性 PIT universe (全市场+过滤, 方案C推荐)")
     parser.add_argument("--unlock-test", action="store_true",
@@ -1758,7 +1760,7 @@ def main():
         log.info("  组合约束: 未启用")
 
     # 终极 TEST 锁 (方案C: 2025-01~2026-06 只跑一次)
-    TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock_v4")
+    TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock_v5")
     if args.unlock_test and os.path.exists(TEST_LOCK_PATH):
         os.remove(TEST_LOCK_PATH)
         log.warning("  🔓 终极 TEST 锁已解除")
@@ -1785,6 +1787,10 @@ def main():
         partitions_to_run = {"test": PARTITIONS["test"]}
     else:
         partitions_to_run = dict(PARTITIONS)
+        # v5: development 与 test 同区间时只跑一次 (避免重复回测)
+        if (PARTITIONS.get("development") == PARTITIONS.get("test")
+                and "development" in partitions_to_run):
+            del partitions_to_run["test"]
 
     # 日期范围静态检查 (不触碰盲测期)
     for label, (s, e) in partitions_to_run.items():
@@ -1938,6 +1944,18 @@ def main():
                 fold_out["stable_factor_icir_median"])
             r = None
             if not args.folds_only:
+                # ★ TEST② 数据完备性守卫: test_end 超过数据日历末端时拒绝
+                # (避免用部分数据消耗一次性 TEST; 需 --force-partial-test 显式确认)
+                _last_cal = calendar[-1] if calendar else None
+                if _last_cal is not None and pd.Timestamp(test_e) > pd.Timestamp(_last_cal):
+                    if not args.force_partial_test:
+                        log.error("=" * 60)
+                        log.error("  🚫 TEST② 区间 %s 超过数据末端 %s, 数据不完备。",
+                                  test_e, _last_cal.date())
+                        log.error("  请使用 --folds-only (不跑 TEST) 或 --force-partial-test 显式确认。")
+                        log.error("=" * 60)
+                        sys.exit(1)
+                    log.warning("  ⚠️ 数据不完备, 但 --force-partial-test 已确认, 继续运行")
                 r = run_fold_test(
                     all_data, factor_panels, close_panel, calendar, cal_idx,
                     factor_names, bt_config,
@@ -1990,6 +2008,7 @@ def main():
                                  if args.liquid else "CSI300+ZZ500 月度成分"),
                 "expanding_window": "早期数据不足252天时自动退化为扩展窗口",
                 "regime_rotation": bool(args.folds),  # 方案C v5: fold 模式启用风格状态机
+                "pool_filter": config.get("pool_filter"),  # v10: 股票池分域配置溯源
                 "portfolio_constraints": (portfolio_constraints
                                           if portfolio_constraints
                                           else None),

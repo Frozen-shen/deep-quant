@@ -20,7 +20,7 @@ data_partition:
 blind_test:
   locked: false
   contaminated: false
-  note: "v4方案C: blind=2027+, daily_pipeline每日跟踪, 2028-01后评估; 终极TEST=2025-01~2026-06已锁定"
+  note: "v5演进: blind=2027+, daily_pipeline每日跟踪; TEST①(2025-01~2026-06)已毕业; TEST②=2026-07~12只跑一次"
   blind_start: "2027-01-01"
   protocol: "daily_pipeline自动运行, 禁止手动回测, 2028-01-01后评估"
 

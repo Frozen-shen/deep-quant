@@ -50,7 +50,7 @@
   - `vol_bucket(scores, all_data, today) -> dict`：按候选股 60 日波动率分位返回档位标签 {sym: 'low'|'mid'|'high'}
   - `apply_pool_filter(scores, buckets, vol_pct, multipliers) -> dict`：分数 × 档位乘数
 - `run_walkforward_backtest.py` 改动：
-  - `run_backtest` 增加 `pool_filter: str = "none"` 参数
+  - `run_backtest` 增加 `pool_filter_cfg: dict | None = None` 参数（config pool_filter 段透传）
   - 调仓日 score_stocks 之后、ranker.rank 之前调用 apply_pool_filter
 - `config.yaml` 新增：
   ```yaml
