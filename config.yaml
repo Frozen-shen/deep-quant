@@ -4,13 +4,14 @@
 # 修改此文件后必须更新 blind_test.config_hash。
 # ═══════════════════════════════════════════════════════════
 
-# ── 数据分区 v4 (2026-08-03 方案C) ──
-# 方案C: Walk-Forward folds 在 research 期内完成 (5 folds, 训练扩展),
-# 终极 TEST = 2025-01~2026-06 只跑一次, blind = 2027+ 永不回测
+# ── 数据分区 v5 (2026-08-09 滚动演进) ──
+# TEST① = 2025-01~2026-06 (v6/v7 已测2次, 检验价值耗尽, 2026-08-09 毕业并入 research)
+# TEST② = 2026-07~2026-12 (数据积累中, 只跑一次, 由 lock 机制保护)
+# blind = 2027+ 永不回测; 行业依据: QuantConnect WFO 滚动窗口 + WorldQuant 回测→模拟→实盘
 data_partition:
-  research:    {start: "2015-01-01", end: "2024-12-31"}  # 因子开发 + WF folds (10年)
-  development: {start: "2025-01-01", end: "2026-06-30"}  # 终极 TEST (holdout, 只跑一次)
-  test:        {start: "2026-07-01", end: "2026-12-31"}  # 预留验证 (数据未到)
+  research:    {start: "2015-01-01", end: "2026-06-30"}  # 因子开发 + WF folds (含毕业TEST①)
+  development: {start: "2026-07-01", end: "2026-12-31"}  # TEST② (holdout, 数据积累中, 只跑一次)
+  test:        {start: "2026-07-01", end: "2026-12-31"}  # 与 development 同区间 (TEST②)
   blind:       {start: "2027-01-01", end: "2027-12-31"}  # 模拟盘跟踪 (永不回测)
   full_start: "2015-01-01"
   full_end: "2026-12-31"
@@ -87,7 +88,7 @@ portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v
 
 # ── 股票池分域 (v10, 波动率分层×regime乘数, 设计文档 2026-08-09) ──
 pool_filter:
-  enabled: false          # v10 实验时置 true; false 时行为与 v9 完全一致
+  enabled: false          # v9 基线重跑 (配对bootstrap); false 时行为与 v9 完全一致
   low_vol_mult: 1.5       # 高波动市场: 低波档乘数
   high_vol_mult: 0.5      # 高波动市场: 高波档乘数
   low_vol_up: 0.8         # 低波动市场: 低波档乘数 (牛市弹性)

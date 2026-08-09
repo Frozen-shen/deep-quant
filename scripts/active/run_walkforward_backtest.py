@@ -95,7 +95,7 @@ def _load_partitions() -> dict:
         }
     except Exception:
         return {
-            "development": ("2026-01-01", "2026-06-30"),
+            "development": ("2026-07-01", "2026-12-31"),
             "test": ("2026-07-01", "2026-07-31"),
         }
 
@@ -1859,8 +1859,10 @@ def main():
                     needed.add(d)
                 elif pd.Timestamp(vs).date() <= d_ <= pd.Timestamp(ve).date():
                     needed.add(d)
-        # 终极 TEST (方案C: 2025-01 ~ 2026-06)
-        test_s, test_e = "2025-01-01", "2026-06-30"
+        # 终极 TEST (TEST②: 从 config data_partition.development 读取, 2026-07 起)
+        _dev = config.get("data_partition", {}).get("development", {})
+        test_s = _dev.get("start", "2026-07-01")
+        test_e = _dev.get("end", "2026-12-31")
         for d in calendar:
             if pd.Timestamp(test_s).date() <= d.date() <= pd.Timestamp(test_e).date():
                 needed.add(d)
@@ -1899,7 +1901,8 @@ def main():
     with DateRangeGuard(config, script_name="run_walkforward_backtest") as guard:
         if args.folds:
             # 方案C: 5-fold 分析 + 终极 TEST
-            guard.check_range("2015-01-01", "2026-06-30")
+            guard.check_range("2015-01-01",
+                             config.get("data_partition", {}).get("full_end", "2026-12-31"))
             # 方案B: 分钟因子独立验证 (fold 4-5 训练期)
             ml_cfg = config.get("minute_layer", {})
             ml_weights = None
@@ -1940,7 +1943,7 @@ def main():
                     factor_names, bt_config,
                     fold_out["stable_factors"],
                     fold_out["stable_factor_icir_median"],
-                    "2025-01-01", "2026-06-30", universe_fn=universe_fn,
+                    test_s, test_e, universe_fn=universe_fn,
                     use_regime=True, portfolio_constraints=portfolio_constraints,
                     minute_layer=minute_layer,
                     pool_filter_cfg=config.get("pool_filter"))
@@ -1950,7 +1953,7 @@ def main():
                 with open(TEST_LOCK_PATH, "w", encoding="utf-8") as f:
                     json.dump({
                         "locked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "period": "2025-01-01 ~ 2026-06-30",
+                        "period": f"{test_s} ~ {test_e}",
                         "script": "run_walkforward_backtest.py --folds",
                         "output": OUTPUT_PATH,
                     }, f, ensure_ascii=False, indent=2)
@@ -1999,7 +2002,7 @@ def main():
                 **({"fold_min_hits": FOLD_MIN_HITS,
                     "fold_icir_min": FOLD_ICIR_MIN,
                     "folds": FOLDS,
-                    "ultimate_test": "2025-01-01 ~ 2026-06-30 (只跑一次)"}
+                    "ultimate_test": f"{test_s} ~ {test_e} (只跑一次, TEST②)"}
                    if args.folds else {}),
             },
             "n_stocks": len(all_data),

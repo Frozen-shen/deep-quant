@@ -69,7 +69,7 @@ def _load_partitions() -> dict:
         }
     except Exception:
         return {
-            "development": ("2026-01-01", "2026-06-30"),
+            "development": ("2026-07-01", "2026-12-31"),
             "test": ("2026-07-01", "2026-12-31"),
         }
 
