@@ -96,7 +96,9 @@ class SimpleBacktest:
             wsum = 0.0
             if weights:
                 wsum = sum(weights.get(s, 0.0) for s in buy_list)
-            cash_pool = self.cash * 0.99  # 1%缓冲覆盖手续费
+            # ★ 波动率目标仓位 (P0): 可选总仓位缩放 (无 cash_scale 时恒为 1.0,
+            # 行为与原来完全一致)
+            cash_pool = self.cash * 0.99 * float(decision.get("cash_scale", 1.0))
             for s in buy_list:
                 if s not in all_data:
                     continue

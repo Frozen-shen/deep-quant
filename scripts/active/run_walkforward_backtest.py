@@ -1161,6 +1161,24 @@ def _risk_parity_weights(all_data: dict, buy_list: list, today,
     return {s: float(wi) for s, wi in zip(syms, w) if wi > 0}
 
 
+def _vol_target_scale(vol_pct: float, cfg: dict | None) -> float:
+    """波动率目标仓位缩放 (P0, Moreira & Muir 2017 简化版)。
+
+    市场已实现波动率百分位 vol_pct (0-1) 高于目标 → 降仓:
+      scale = clip(target_pct / (vol_pct + eps), min_scale, max_scale)
+    cfg: {"target_pct": 0.7, "max_scale": 1.0, "min_scale": 0.4}
+    """
+    if not cfg:
+        return 1.0
+    target = float(cfg.get("target_pct", 0.7))
+    mx = float(cfg.get("max_scale", 1.0))
+    mn = float(cfg.get("min_scale", 0.4))
+    if vol_pct <= 0 or target <= 0:
+        return 1.0
+    scale = target / max(vol_pct, 1e-6)
+    return float(np.clip(scale, mn, mx))
+
+
 def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  factor_names, bt_config, start, end, label="",
                  fixed_weights: dict | None = None,
@@ -1170,7 +1188,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3,
                  weight_mode: str = "equal",
-                 pool_filter_cfg: dict | None = None):
+                 pool_filter_cfg: dict | None = None,
+                 vol_target_cfg: dict | None = None):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -1185,6 +1204,9 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     pool_filter_cfg: 股票池分域配置 (config.yaml pool_filter 段,
       含 enabled/low_vol_mult/high_vol_mult/low_vol_up/high_vol_up)。
       None 或 enabled=false 时行为与 v9 完全一致 (不施加任何乘数)。
+    vol_target_cfg: 波动率目标仓位配置 (config.yaml vol_target 段,
+      含 enabled/target_pct/max_scale/min_scale)。
+      None 或 enabled=false 时行为与之前完全一致 (不缩放仓位)。
     """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
@@ -1357,6 +1379,17 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                         w = _risk_parity_weights(all_data, decision.get("buy", []), today)
                         if w:
                             decision["weights"] = w
+
+                    # ★ 波动率目标仓位 (P0): 按市场波动率缩放总仓位
+                    if (vol_target_cfg and vol_target_cfg.get("enabled")
+                            and regime_det is not None):
+                        _r2, _vp2 = regime_det.detect_v2(str(today.date()))
+                        _scale = _vol_target_scale(_vp2, vol_target_cfg)
+                        if _scale < 1.0 and decision.get("buy"):
+                            # 买入金额按 scale 缩放的实现: 记录 scale 供 execute 用
+                            decision["cash_scale"] = _scale
+                            log.info("  [%s] 调仓日 %s: vol_target scale=%.2f (vol_pct=%.2f)",
+                                     label, today.date(), _scale, _vp2)
                     pending = decision
                     rebalance_count += 1
                     n_turn = (len(decision.get("sell", [])) +
@@ -1542,7 +1575,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       minute_layer: dict | None = None,
                       max_factors: int | None = None,
                       weight_mode: str = "equal",
-                      pool_filter_cfg: dict | None = None) -> dict:
+                      pool_filter_cfg: dict | None = None,
+                      vol_target_cfg: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1635,7 +1669,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          minute_weights=ml_weights if fi >= 3 else None,
                          minute_lambda=ml_lambda,
                          weight_mode=weight_mode,
-                         pool_filter_cfg=pool_filter_cfg)
+                         pool_filter_cfg=pool_filter_cfg,
+                         vol_target_cfg=vol_target_cfg)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1691,7 +1726,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   portfolio_constraints: dict | None = None,
                   minute_layer: dict | None = None,
                   weight_mode: str = "equal",
-                  pool_filter_cfg: dict | None = None) -> dict | None:
+                  pool_filter_cfg: dict | None = None,
+                  vol_target_cfg: dict | None = None) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1746,7 +1782,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         portfolio_constraints=portfolio_constraints,
                         minute_weights=ml_weights, minute_lambda=ml_lambda,
                         weight_mode=weight_mode,
-                        pool_filter_cfg=pool_filter_cfg)
+                        pool_filter_cfg=pool_filter_cfg,
+                        vol_target_cfg=vol_target_cfg)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2034,7 +2071,8 @@ def main():
                 minute_layer=minute_layer,
                 max_factors=int(config.get("fold", {}).get("max_factors", 40)),
                 weight_mode=str(config.get("portfolio_optimizer", "equal")),
-                pool_filter_cfg=config.get("pool_filter"))
+                pool_filter_cfg=config.get("pool_filter"),
+                vol_target_cfg=config.get("vol_target"))
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -2063,7 +2101,8 @@ def main():
                     test_s, test_e, universe_fn=universe_fn,
                     use_regime=True, portfolio_constraints=portfolio_constraints,
                     minute_layer=minute_layer,
-                    pool_filter_cfg=config.get("pool_filter"))
+                    pool_filter_cfg=config.get("pool_filter"),
+                    vol_target_cfg=config.get("vol_target"))
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
@@ -2095,7 +2134,8 @@ def main():
                     minute_weights=minute_layer.get("weights")
                     if minute_layer.get("enabled") else None,
                     minute_lambda=float(minute_layer.get("lambda", 0.3)),
-                    pool_filter_cfg=config.get("pool_filter"))
+                    pool_filter_cfg=config.get("pool_filter"),
+                    vol_target_cfg=config.get("vol_target"))
                 if ev_r:
                     results["extend_val"] = ev_r
                     extra_meta["extend_val"] = {
@@ -2111,7 +2151,8 @@ def main():
                                  calendar, cal_idx, factor_names,
                                  bt_config, s, e, label=label.upper(),
                                  universe_fn=universe_fn,
-                                 portfolio_constraints=portfolio_constraints)
+                                 portfolio_constraints=portfolio_constraints,
+                                 vol_target_cfg=config.get("vol_target"))
                 if r:
                     results[label] = r
 
