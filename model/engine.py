@@ -13,7 +13,9 @@ class SimpleBacktest:
     """透明的回测引擎：cash + positions dict，无数据库依赖。"""
 
     def __init__(self, initial_capital=100000, top_k=5, lot_size=100,
-                 slippage_bps=0, turnover_limit_pct=1.0):
+                 slippage_bps=0, turnover_limit_pct=1.0,
+                 execution_price="open", vwap_residual_bps=0,
+                 vwap_panel: dict = None):
         self.initial = initial_capital
         self.cash = float(initial_capital)
         self.positions = {}  # {symbol: {"qty": int, "entry_price": float, "entry_date": str}}
@@ -21,9 +23,39 @@ class SimpleBacktest:
         self.lot_size = lot_size
         self.slippage_bps = slippage_bps        # 滑点 (bps), 小盘建议30-50
         self.turnover_limit = turnover_limit_pct  # 月单边换手上限, 0.5=50%
+        # ★ 执行价模式 (方案B v24, 2026-08-11):
+        #   open = 次日开盘价 (原逻辑); vwap = 次日 VWAP (拆单执行模拟)
+        self.execution_price = execution_price
+        # VWAP 残差滑点 (bps): 真实拆单无法完美命中 VWAP, 默认 10bps
+        self.vwap_residual_bps = vwap_residual_bps
+        # vwap_panel: {symbol: DataFrame(date 索引 × vwap 列)}, 懒加载由外部注入
+        self.vwap_panel = vwap_panel or {}
         self._monthly_buy = {}   # {YYYY-MM: amount}
         self._monthly_sell = {}  # {YYYY-MM: amount}
         self._month_capital = initial_capital  # 月初净值, 用于计算换手率
+
+    def _exec_price(self, s, today, all_data):
+        """成交价: open=次日开盘 (原逻辑); vwap=次日VWAP (拆单基准价)。
+
+        残差滑点由 _apply_slippage 承担 (slippage_bps=vwap_residual_bps,
+        买上浮/卖下沉, 方向正确); 此处只返回基准价。
+        """
+        if s not in all_data:
+            return None
+        dt = all_data[s][all_data[s]["date"] <= today].tail(1)
+        if len(dt) == 0:
+            return None
+        px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
+        if self.execution_price == "vwap":
+            vf = self.vwap_panel.get(s)
+            if vf is not None and len(vf) > 0:
+                t = pd.Timestamp(today)
+                sub = vf[vf.index <= t]
+                if len(sub) > 0 and np.isfinite(sub["vwap"].iloc[-1]):
+                    px = float(sub["vwap"].iloc[-1])
+                    if px <= 0:
+                        px = float(dt["open"].iloc[-1]) if "open" in dt.columns else px
+        return px
 
     @property
     def total_equity(self):
@@ -74,10 +106,9 @@ class SimpleBacktest:
             qty = pos.get("qty", 0)
             if qty <= 0 or s not in all_data:
                 continue
-            dt = all_data[s][all_data[s]["date"] <= today].tail(1)
-            if len(dt) == 0:
+            px = self._exec_price(s, today, all_data)
+            if px is None:
                 continue
-            px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
             px = self._apply_slippage(px, "SELL")  # ★ 卖出滑点
             comm = calc_sell_commission(qty, px)
             proceeds = qty * px - comm
@@ -108,10 +139,9 @@ class SimpleBacktest:
                     cash_per = cash_pool / max(1, len(buy_list))  # 等权兜底
                 if cash_per <= 0:
                     continue
-                dt = all_data[s][all_data[s]["date"] <= today].tail(1)
-                if len(dt) == 0:
+                px = self._exec_price(s, today, all_data)
+                if px is None:
                     continue
-                px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
                 px = self._apply_slippage(px, "BUY")  # ★ 买入滑点
                 # ★ 涨停检查: 优先用未复权价, 无则后退后复权
                 if s in limit_data:
@@ -157,10 +187,9 @@ class SimpleBacktest:
         pos = self.positions.get(symbol)
         if pos is None:
             return
-        dt = all_data[symbol][all_data[symbol]["date"] <= today].tail(1)
-        if len(dt) == 0:
+        px = self._exec_price(symbol, today, all_data)
+        if px is None:
             return
-        px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
         qty = pos["qty"]
         comm = calc_sell_commission(qty, px)
         self.cash += qty * px - comm

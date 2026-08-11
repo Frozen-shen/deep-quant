@@ -66,6 +66,10 @@ data/smart_money/
 # Logs directory
 logs/
 
+# Backtest auto-backups (regenerated each run, v15+ kept as named version files)
+data/ic_validation/walkforward_results_bak_*.json
+data/ic_validation/walkforward_results_final_*.json
+
 # Experiment tracking (auto-generated)
 experiments/
 

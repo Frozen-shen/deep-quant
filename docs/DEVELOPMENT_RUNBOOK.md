@@ -2,12 +2,15 @@
 
 > 2026-08-09 建立。本轮开发暴露 5 类低级失误（参数名错、漏 --liquid、面板区间未覆盖、
 > 结果覆盖无备份、config 编辑误伤）。以下机制为强制门禁。
+> 2026-08-11 增补：参数透传遗漏 3 连发（weight_mode/vol_target/trend_timing），
+> 新增第 7 节 AST 透传门禁。
 
 ## 1. 改代码后：冒烟测试门禁（必做）
 
 任何修改 `run_walkforward_backtest.py` / 因子模块 / 面板逻辑后，**先跑冒烟**再全量：
 
 ```bash
+py scripts/active/check_param_passthrough.py        # 透传完整性 (第7节)
 py scripts/active/run_walkforward_backtest.py --folds --folds-only --liquid --sample 50
 ```
 
@@ -59,3 +62,23 @@ py scripts/active/run_walkforward_backtest.py --folds --liquid
 - TEST②（2026-07+）只跑一次，`--force-partial-test` 仅用于数据完备性确认
 - TEST①（2025-2026）已毕业：可作扩展模拟考（--extend-val），**不进训练**（fold 结构保持 2015-2023 训练）
 - blind（2027+）永不回测，只走 daily_pipeline 模拟盘
+
+## 7. 参数透传完整性门禁（2026-08-11 增补）
+
+**背景**：2026-08-09~11 三个实验参数（weight_mode / vol_target_cfg / trend_timing_cfg）
+在 `main → run_fold_analysis / run_fold_test → run_backtest` 链路中遗漏 3 次，
+参数被静默吞掉退化为默认值，导致实验结论失真。均为"中间层签名/调用漏改"。
+
+**门禁**（任何修改主脚本后必跑，退出码 0 才继续）：
+
+```bash
+py scripts/active/check_param_passthrough.py
+```
+
+检查逻辑（AST 静态分析，不执行代码）：
+1. 签名检查：`run_backtest` / `run_fold_analysis` / `run_fold_test` 必须声明全部关键参数
+2. 调用点检查：每个调用点必须显式传入签名中的全部关键参数（禁静默省略 → 默认值）
+3. main 豁免签名检查（CLI 入口从 config 读参），但其调用点仍被检查
+
+**新增实验参数时必须**：登记到 `check_param_passthrough.py` 的 `DEFAULT_KEY_PARAMS`，
+否则门禁覆盖不到。遗漏可致实验结论失真（代价：一整轮回测作废）。

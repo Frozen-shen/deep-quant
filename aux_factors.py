@@ -31,12 +31,21 @@ AUX_FACTOR_NAMES = [
     "aux_lhb_net_20d",
     "aux_dzjy_amount_20d",
     "aux_dzjy_discount_20d",
+    "aux_gdhs_change_pct",
+    "aux_ggcg_net_20d",
+    "aux_fhps_send_ratio",
+    "aux_fhps_dividend",
+    "aux_yjkb_profit_growth",
 ]
 
 _MARGIN_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_margin")
 _RESTRICTED_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_restricted")
 _LHB_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_lhb")
 _DZJY_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_dzjy")
+_GDHS_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_gdhs")
+_GGCG_CACHE_PATH = os.path.join(BASE_DIR, "data_store", "aux_ggcg", "aux_ggcg.parquet")
+_FHPS_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_fhps")
+_YJKB_CACHE_DIR = os.path.join(BASE_DIR, "data_store", "aux_yjkb")
 
 # 模块级缓存: 原始数据一次性加载
 _margin_raw: Optional[pd.DataFrame] = None
@@ -256,6 +265,123 @@ def build_dzjy_panels(mktcap: Optional[pd.DataFrame] = None) -> Dict[str, pd.Dat
         panels["aux_dzjy_discount_20d"] = _float32_panel(
             disc.rolling(20, min_periods=5).mean())
     return panels
+
+
+def build_gdhs_panels() -> Dict[str, pd.DataFrame]:
+    """股东户数因子 (筹码集中度, 季频公告, PIT 按公告日期可用):
+      aux_gdhs_change_pct = 股东户数增减比例 (户数减少=筹码集中=看涨, 负向因子)
+
+    数据: aux_gdhs/{code}.parquet (股东户数公告日期 = 可用日)
+    前向填充到日频 (最近公告值延续), 公告前无数据 → NaN。
+    """
+    frames = []
+    for f in os.listdir(_GDHS_CACHE_DIR):
+        if not f.endswith(".parquet"):
+            continue
+        try:
+            df = pd.read_parquet(os.path.join(_GDHS_CACHE_DIR, f),
+                                 columns=["代码", "股东户数公告日期", "股东户数-增减比例"])
+            frames.append(df)
+        except Exception:
+            continue
+    if not frames:
+        return {}
+    raw = pd.concat(frames, ignore_index=True)
+    raw["股东户数公告日期"] = pd.to_datetime(raw["股东户数公告日期"], errors="coerce")
+    raw = raw.dropna(subset=["股东户数公告日期"])
+    raw["date"] = raw["股东户数公告日期"].dt.normalize()
+    raw = raw[["date", "代码", "股东户数-增减比例"]]
+
+    piv = raw.pivot_table(index="date", columns="代码",
+                          values="股东户数-增减比例", aggfunc="last")
+    piv = piv.sort_index()
+    return {"aux_gdhs_change_pct": _float32_panel(piv)}
+
+
+def build_ggcg_panels() -> Dict[str, pd.DataFrame]:
+    """股东增减持事件因子 (公告日 PIT):
+      aux_ggcg_net_20d = 滚动20日净增持比例 (Σ增持比例 - Σ减持比例, 单位%)
+
+    数据: aux_ggcg.parquet (公告日, 增减文本, 占总股本比例全正 → 符号化)
+    """
+    if not os.path.exists(_GGCG_CACHE_PATH):
+        return {}
+    raw = pd.read_parquet(_GGCG_CACHE_PATH,
+                          columns=["代码", "公告日", "持股变动信息-增减",
+                                   "持股变动信息-占总股本比例"])
+    raw["公告日"] = pd.to_datetime(raw["公告日"], errors="coerce")
+    raw = raw.dropna(subset=["公告日"])
+    raw["date"] = raw["公告日"].dt.normalize()
+    sign = np.where(raw["持股变动信息-增减"].astype(str).str.contains("增持"), 1.0, -1.0)
+    raw["signed"] = sign * pd.to_numeric(raw["持股变动信息-占总股本比例"],
+                                         errors="coerce").fillna(0.0)
+    raw = raw[["date", "代码", "signed"]]
+
+    piv = raw.pivot_table(index="date", columns="代码", values="signed", aggfunc="sum")
+    piv = piv.sort_index()
+    net20 = piv.rolling(20, min_periods=3).sum()
+    return {"aux_ggcg_net_20d": _float32_panel(net20)}
+
+
+def build_fhps_panels() -> Dict[str, pd.DataFrame]:
+    """分红送配因子 (季频预案, PIT 按预案公告日可用):
+      aux_fhps_send_ratio = 送转总比例 (高送转事件, 公告日可用后延续)
+      aux_fhps_dividend   = 现金分红比例 (红利因子)
+
+    数据: aux_fhps/{YYYYMMDD}.parquet (季度预案全市场)
+    """
+    frames = []
+    for f in os.listdir(_FHPS_CACHE_DIR):
+        if not f.endswith(".parquet"):
+            continue
+        try:
+            df = pd.read_parquet(os.path.join(_FHPS_CACHE_DIR, f),
+                                 columns=["代码", "预案公告日", "送转股份-送转总比例",
+                                          "现金分红-现金分红比例"])
+            frames.append(df)
+        except Exception:
+            continue
+    if not frames:
+        return {}
+    raw = pd.concat(frames, ignore_index=True)
+    raw["预案公告日"] = pd.to_datetime(raw["预案公告日"], errors="coerce")
+    raw = raw.dropna(subset=["预案公告日"])
+    raw["date"] = raw["预案公告日"].dt.normalize()
+    panels = {}
+    for col, key in [("送转股份-送转总比例", "aux_fhps_send_ratio"),
+                     ("现金分红-现金分红比例", "aux_fhps_dividend")]:
+        sub = raw[["date", "代码", col]].dropna(subset=[col])
+        piv = sub.pivot_table(index="date", columns="代码", values=col, aggfunc="last")
+        panels[key] = _float32_panel(piv.sort_index())
+    return panels
+
+
+def build_yjkb_panels() -> Dict[str, pd.DataFrame]:
+    """业绩快报因子 (季频公告, PIT 按公告日期可用):
+      aux_yjkb_profit_growth = 净利润同比增长 (快报早于财报, 增量时序信息)
+
+    数据: aux_yjkb/{YYYYMMDD}.parquet
+    """
+    frames = []
+    for f in os.listdir(_YJKB_CACHE_DIR):
+        if not f.endswith(".parquet"):
+            continue
+        try:
+            df = pd.read_parquet(os.path.join(_YJKB_CACHE_DIR, f),
+                                 columns=["股票代码", "公告日期", "净利润-同比增长"])
+            frames.append(df)
+        except Exception:
+            continue
+    if not frames:
+        return {}
+    raw = pd.concat(frames, ignore_index=True)
+    raw["公告日期"] = pd.to_datetime(raw["公告日期"], errors="coerce")
+    raw = raw.dropna(subset=["公告日期"])
+    raw["date"] = raw["公告日期"].dt.normalize()
+    raw = raw[["date", "股票代码", "净利润-同比增长"]].dropna(subset=["净利润-同比增长"])
+    piv = raw.pivot_table(index="date", columns="股票代码",
+                          values="净利润-同比增长", aggfunc="last")
+    return {"aux_yjkb_profit_growth": _float32_panel(piv.sort_index())}
 
 
 def get_aux_factor_names() -> List[str]:

@@ -115,7 +115,9 @@ class TestConfig(unittest.TestCase):
         # 关键参数存在
         self.assertGreater(cfg["rolling"]["embargo_days"], 0)
         self.assertEqual(cfg["execution"]["signal_delay"], 1)
-        self.assertEqual(cfg["execution"]["execution_price"], "open")
+        # 执行价: vwap 进生产 (v24b 验证: fold +1.38pp, EXTEND +1.4pp, 2026-08-12)
+        self.assertIn(cfg["execution"]["execution_price"], ["open", "vwap"])
+        self.assertIn(cfg["execution"]["vwap_residual_bps"], [0, 10])
 
 
 if __name__ == "__main__":

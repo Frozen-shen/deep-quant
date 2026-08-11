@@ -74,19 +74,13 @@ COLUMN_MAP = {
 def get_universe_symbols() -> List[str]:
     """
     获取需要拉取基本面的股票列表。
-    优先从 data_store (全量) 获取, 回退到 data_cache (小池子)。
+    优先从 data_store (全量) 获取 (旧 data_cache 已冻结为 legacy)。
     """
     symbols = set()
 
     # 从 data_store 获取 (全量宇宙)
     if os.path.exists(DATA_STORE_DIR):
         for f in os.listdir(DATA_STORE_DIR):
-            if f.endswith(".parquet") and not f.startswith("_"):
-                symbols.add(f.replace(".parquet", ""))
-
-    # 从 data_cache 获取 (小池子)
-    if os.path.exists(DATA_CACHE_DIR):
-        for f in os.listdir(DATA_CACHE_DIR):
             if f.endswith(".parquet") and not f.startswith("_"):
                 symbols.add(f.replace(".parquet", ""))
 

@@ -156,21 +156,14 @@ def _make_session():
 
 def _get_stock_list_from_local() -> pd.DataFrame:
     """
-    离线回退: 从本地 data_cache/ + data_store/ 目录扫描股票代码。
-    当所有在线API不可用时使用。
+    离线回退: 从本地 data_store/ 目录扫描股票代码。
+    当所有在线API不可用时使用。 (旧 data_cache 已冻结为 legacy, 不再扫描)
     """
     from pathlib import Path
 
     codes = set()
 
-    # 扫描 data_cache/ (1550只, 双交易所)
-    dc_dir = Path(BASE_DIR) / "data_cache"
-    if dc_dir.exists():
-        for f in dc_dir.glob("*.parquet"):
-            if len(f.stem) == 6 and f.stem.isdigit():
-                codes.add(f.stem)
-
-    # 扫描 data_store/ (2776只, 偏深交所)
+    # 扫描 data_store/ (全市场主库)
     ds_dir = Path(DATA_STORE)
     if ds_dir.exists():
         for f in ds_dir.glob("*.parquet"):
@@ -180,7 +173,7 @@ def _get_stock_list_from_local() -> pd.DataFrame:
     if not codes:
         raise RuntimeError("本地无缓存数据, 无法获取股票列表")
 
-    log(f"  本地缓存扫描: {len(codes)} 只 (data_cache + data_store 合并)")
+    log(f"  本地缓存扫描: {len(codes)} 只 (data_store)")
     df = pd.DataFrame({"code": sorted(codes), "name": ""})
     return df
 

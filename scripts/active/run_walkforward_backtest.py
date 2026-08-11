@@ -58,12 +58,27 @@ BENCH_PATH = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
 
 # ── Walk-forward 参数 ──
 TRAIL_DAYS = 252          # 回看窗口 (交易日)
-LABEL_HORIZON = 21        # 前瞻收益标签长度 (交易日)
-IC_STEP = 21              # 月度IC观测间隔 (交易日)
+
+# 调仓周期 (路线C v22, 2026-08-11): 由 config execution.rebalance_days 控制
+# (默认 20=月频; 5=周频实验)。LABEL_HORIZON/IC_STEP 与调仓周期联动,
+# 保证 IC 估计的持有期与换手频率匹配。
+# ★ 语义保持 v15: 标签 = 调仓 + 1 (月频 20+1=21, 与 v15 硬编码 21 完全一致,
+#   2026-08-11 曾误改为 max(5, REBALANCE_DAYS)=20 导致 IC 窗口漂移, stable 集
+#   从 50/50 一致性变为 40/50 → 已修复)。
+def _load_rebalance_days() -> int:
+    try:
+        cfg = load_config(os.path.join(BASE_DIR, "config.yaml"))
+        return int(cfg.get("execution", {}).get("rebalance_days", 20))
+    except Exception:
+        return 20
+
+
+REBALANCE_DAYS = _load_rebalance_days()
+LABEL_HORIZON = max(5, REBALANCE_DAYS + 1)  # 前瞻收益标签长度 (交易日)
+IC_STEP = LABEL_HORIZON                     # IC观测间隔 (交易日)
 MIN_ICIR = 0.02           # |ICIR| 入选阈值
 MIN_IC_OBS = 6            # 因子最少月度IC观测数
 MIN_CROSS_SECTION = 30    # 单次截面IC最少股票数
-REBALANCE_DAYS = 20       # 调仓间隔 (交易日)
 
 # ── 分钟因子 (方案C v5, 数据 2022 起) ──
 def _minute_dir() -> str:
@@ -114,6 +129,10 @@ def load_bt_config() -> dict:
         "slippage_bps": cfg["execution"]["slippage_bps"],
         "commission_buy": cfg["execution"]["commission_buy"],
         "commission_sell": cfg["execution"]["commission_sell"],
+        "vol_source": str(cfg.get("regime", {}).get("vol_source", "daily")),
+        # 执行价模式 (方案B v24): open=次日开盘 / vwap=次日VWAP拆单
+        "execution_price": str(cfg.get("execution", {}).get("execution_price", "open")),
+        "vwap_residual_bps": int(cfg.get("execution", {}).get("vwap_residual_bps", 0)),
     }
 
 
@@ -586,6 +605,69 @@ def _ffill(arr: np.ndarray) -> np.ndarray:
     return out
 
 
+# ── VWAP 面板 (方案B v24, 2026-08-11) ──
+# 日 VWAP = (未复权 amount/volume × 单位修正) × 复权因子, 对齐回测日线复权基准。
+# 数据源: data_cache/unadjusted/{sym}.parquet (真实量额 + 未复权 close) +
+#         data_store/{sym}.parquet (复权 close, 计算因子 close_adj/close_u)。
+# ★ 单位自动检测 (2026-08-11 实测发现): 历史 fetch 混用 baostock/腾讯源,
+#   volume 单位不一致 (部分股票=股, 部分=手, 如 000001=手/601318=股)。
+#   用中位数 amt/vol vs close 量级判定: 100倍 → 手, 否则股。
+# 验证: 10/10 股票 VWAP 100% 落在复权 [low,high] 区间 (全历史 2018 起)。
+_vwap_cache: dict = {}
+
+
+def _build_vwap_panel(symbols: list) -> dict:
+    """
+    构建日 VWAP 面板 {symbol: DataFrame(date 索引 × vwap 列)}。
+
+    每只股票懒加载一次 (模块级缓存 _vwap_cache)。全历史覆盖
+    (2018 起, 无 fold 1-2 回退问题)。单位检测失败/数据缺失 → 跳过
+    (execute 回退 open)。
+    """
+    global _vwap_cache
+    if _vwap_cache:
+        return _vwap_cache
+    u_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
+    adj_dir = os.path.join(BASE_DIR, "data_store")
+    n_ok = 0
+    for i, sym in enumerate(symbols):
+        upath = os.path.join(u_dir, f"{sym}.parquet")
+        apath = os.path.join(adj_dir, f"{sym}.parquet")
+        if not (os.path.exists(upath) and os.path.exists(apath)):
+            continue
+        try:
+            u = pd.read_parquet(upath, columns=["date", "close", "amount", "volume"])
+            a = pd.read_parquet(apath, columns=["date", "close"])
+            u["date"] = pd.to_datetime(u["date"])
+            a["date"] = pd.to_datetime(a["date"])
+            if len(u) == 0 or len(a) == 0:
+                continue
+            m = u.merge(a, on="date", suffixes=("_u", "_adj"), how="inner")
+            m = m.sort_values("date")
+            m = m[(m["volume"] > 0) & (m["amount"] > 0) & (m["close_u"] > 0)]
+            if len(m) == 0:
+                continue
+            # 单位检测: 中位数 amt/vol 与 close 同量级 → 股; 100倍 → 手
+            per = (m["amount"] / m["volume"]).median()
+            med_close = m["close_u"].median()
+            if med_close * 50 < per < med_close * 200:
+                vol_factor = 100.0  # 手
+            else:
+                vol_factor = 1.0    # 股
+            m["vwap"] = (m["amount"] / (m["volume"] * vol_factor)) * \
+                        (m["close_adj"] / m["close_u"])
+            m = m[m["vwap"].notna() & (m["vwap"] > 0)]
+            if len(m) > 0:
+                _vwap_cache[sym] = m[["date", "vwap"]].set_index("date").sort_index()
+                n_ok += 1
+        except Exception:
+            continue
+        if (i + 1) % 500 == 0:
+            log.info("  VWAP面板: %d/%d 只 (%d 有效)", i + 1, len(symbols), n_ok)
+    log.info("  VWAP面板: %d/%d 只 (未复权×复权因子, 单位自动检测)", n_ok, len(symbols))
+    return _vwap_cache
+
+
 def _merge_aux_panels(panels: dict, factor_names: list,
                       idx: pd.DatetimeIndex, symbols: list) -> int:
     """将 aux_* 辅助数据因子按日期 PIT 合并进 panels (原地修改, v8)。
@@ -599,7 +681,10 @@ def _merge_aux_panels(panels: dict, factor_names: list,
     """
     from factor_library import AUX_FACTORS
     from aux_factors import (build_margin_panels, build_lockup_panels,
-                             build_lhb_panels, build_dzjy_panels, _mktcap_panel)
+                             build_lhb_panels, build_dzjy_panels,
+                             build_gdhs_panels, build_ggcg_panels,
+                             build_fhps_panels, build_yjkb_panels,
+                             _mktcap_panel)
 
     aux_names = [fn for fn in factor_names if fn in AUX_FACTORS]
     if not aux_names:
@@ -610,6 +695,10 @@ def _merge_aux_panels(panels: dict, factor_names: list,
     mp.update(build_lockup_panels(mktcap))  # 解禁压力 (共享流通市值面板)
     mp.update(build_lhb_panels(mktcap))     # 龙虎榜
     mp.update(build_dzjy_panels())          # 大宗交易
+    mp.update(build_gdhs_panels())          # 股东户数 (筹码集中度)
+    mp.update(build_ggcg_panels())          # 股东增减持事件
+    mp.update(build_fhps_panels())          # 分红送配 (高送转/红利)
+    mp.update(build_yjkb_panels())          # 业绩快报
     if not mp:
         return 0
 
@@ -1161,6 +1250,25 @@ def _risk_parity_weights(all_data: dict, buy_list: list, today,
     return {s: float(wi) for s, wi in zip(syms, w) if wi > 0}
 
 
+def _trend_scale(regime, cfg: dict | None) -> float:
+    """趋势择时仓位缩放 (阶段3, 2026-08-10): 保障熊市年化收益为正。
+
+    大盘趋势状态 (RegimeDetector.detect_v2):
+      TREND_DOWN → down_scale (防守降仓, 默认 0.4)
+      RANGE      → range_scale (中性偏防守, 默认 0.8)
+      TREND_UP   → 1.0 (满仓)
+    cfg: {"down_scale": 0.4, "range_scale": 0.8}
+    """
+    if not cfg:
+        return 1.0
+    rname = getattr(regime, 'name', str(regime))
+    if 'DOWN' in rname:
+        return float(cfg.get("down_scale", 0.4))
+    if 'RANGE' in rname:
+        return float(cfg.get("range_scale", 0.8))
+    return 1.0
+
+
 def _vol_target_scale(vol_pct: float, cfg: dict | None) -> float:
     """波动率目标仓位缩放 (P0, Moreira & Muir 2017 简化版)。
 
@@ -1189,7 +1297,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  minute_lambda: float = 0.3,
                  weight_mode: str = "equal",
                  pool_filter_cfg: dict | None = None,
-                 vol_target_cfg: dict | None = None):
+                 vol_target_cfg: dict | None = None,
+                 trend_timing_cfg: dict | None = None):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -1212,17 +1321,37 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     from trading_rules import TradingRules
     from portfolio_ranker import PortfolioRanker
 
+    # ★ 方案B v24: VWAP 拆单模式下, 滑点假设 = 残差滑点 (拆单无法完美命中
+    # VWAP, 但远低于一次性开盘市价单的 30bps; 买上浮/卖下沉由 _apply_slippage
+    # 按方向处理)
+    exec_price = bt_config.get("execution_price", "open")
+    slip = bt_config["slippage_bps"]
+    if exec_price == "vwap":
+        slip = bt_config.get("vwap_residual_bps", slip)
+        log.info("  VWAP执行模式: 基准价=次日VWAP, 残差滑点=%dbps (原开盘+%dbps)",
+                 slip, bt_config["slippage_bps"])
+
     bt = SimpleBacktest(
         initial_capital=bt_config["initial_capital"],
         top_k=bt_config["top_k"],
         lot_size=bt_config["lot_size"],
-        slippage_bps=bt_config["slippage_bps"],
+        slippage_bps=slip,
         turnover_limit_pct=1.0,
+        execution_price=exec_price,
+        vwap_residual_bps=bt_config.get("vwap_residual_bps", 0),
     )
+    # ★ 方案B v24: VWAP 执行价模式 → 构建日 VWAP 面板 (懒加载, 未复权×复权因子)
+    if bt.execution_price == "vwap" and not bt.vwap_panel:
+        bt.vwap_panel = _build_vwap_panel(sorted(all_data.keys()))
+    if bt.execution_price == "vwap" and not bt.vwap_panel:
+        log.warning("  [%s] vwap 面板为空, 回退 open 执行价", label)
     rules = TradingRules()
+    # hold_thresh 与调仓周期联动 (路线C v22): 月频30天 / 周频~10天,
+    # 避免周频下 PortfolioRanker 的 30 天持有锁死换手
+    hold_thresh = max(5, REBALANCE_DAYS + 10)
     ranker = PortfolioRanker(
         top_k=bt_config["top_k"],
-        n_drop=10, hold_thresh=30,
+        n_drop=10, hold_thresh=hold_thresh,
         sell_rank_buffer=3, buy_confirm_days=1,
         cost_threshold=0.08,
     )
@@ -1234,8 +1363,10 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
         from regime_detector import RegimeDetector
         if os.path.exists(BENCH_PATH):
             regime_det = RegimeDetector.from_benchmark_parquet(
-                BENCH_PATH, profile="conservative")
-            log.info("[%s] regime 检测启用 (基准: %s)", label, BENCH_PATH)
+                BENCH_PATH, profile="conservative",
+                vol_source=bt_config.get("vol_source", "daily"))
+            log.info("[%s] regime 检测启用 (基准: %s, vol_source=%s)",
+                     label, BENCH_PATH, bt_config.get("vol_source", "daily"))
         else:
             log.warning("[%s] use_regime=True 但基准文件缺失: %s, 跳过",
                         label, BENCH_PATH)
@@ -1390,6 +1521,18 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                             decision["cash_scale"] = _scale
                             log.info("  [%s] 调仓日 %s: vol_target scale=%.2f (vol_pct=%.2f)",
                                      label, today.date(), _scale, _vp2)
+                    # ★ 趋势择时 (阶段3): 大盘下跌趋势降仓, 保障熊市年化收益为正
+                    if (trend_timing_cfg and trend_timing_cfg.get("enabled")
+                            and regime_det is not None):
+                        _r3, _vp3 = regime_det.detect_v2(str(today.date()))
+                        _tscale = _trend_scale(_r3, trend_timing_cfg)
+                        if _tscale < 1.0 and decision.get("buy"):
+                            _prev = float(decision.get("cash_scale", 1.0))
+                            decision["cash_scale"] = _prev * _tscale
+                            log.info("  [%s] 调仓日 %s: trend_timing scale=%.2f (regime=%s, 总仓位=%.2f)",
+                                     label, today.date(), _tscale,
+                                     getattr(_r3, 'name', _r3),
+                                     decision["cash_scale"])
                     pending = decision
                     rebalance_count += 1
                     n_turn = (len(decision.get("sell", [])) +
@@ -1420,19 +1563,26 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                                         label,
                                         portfolio_constraints["max_industry_pct"] * 100)
                         # 换手约束: 超上限 → 跳过本轮调仓 (pending=None)。
+                        # 语义: config max_turnover=0.5 是"月度累计单边换手"上限
+                        # (纪律: 月单边≤50%)。调仓周期越短, 每期可用的换手预算越少:
+                        #   期上限 = 月上限 × (REBALANCE_DAYS / 21)
+                        # 月频(20)≈0.48/期, 周频(5)=0.12/期 — 与月频公平对比。
                         # 建仓期 (无持仓) 跳过检查: 分母 max(n_hold,1) 退化
                         # 为 1 会把首次建仓 (30只) 误判为 1500% 换手而永久卡死
                         n_hold = len(bt.positions)
                         if n_hold > 0:
                             max_turn = portfolio_constraints.get(
-                                "max_turnover", 0.5)
+                                "max_turnover", 0.5) * (REBALANCE_DAYS / 21.0)
                             turnover = ((len(decision.get("buy", [])) +
                                          len(decision.get("sell", []))) /
                                         (2 * max(n_hold, 1)))
                             if turnover > max_turn:
-                                log.info("  [%s] 换手 %.0f%% > 上限 %.0f%%, "
-                                         "跳过本轮调仓",
-                                         label, turnover * 100, max_turn * 100)
+                                log.info("  [%s] 换手 %.0f%% > 期上限 %.0f%% "
+                                         "(月%.0f%%×%.1f周数), 跳过本轮调仓",
+                                         label, turnover * 100, max_turn * 100,
+                                         portfolio_constraints.get(
+                                             "max_turnover", 0.5) * 100,
+                                         21.0 / REBALANCE_DAYS)
                                 pending = None
 
             positions_history.append({
@@ -1576,7 +1726,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       max_factors: int | None = None,
                       weight_mode: str = "equal",
                       pool_filter_cfg: dict | None = None,
-                      vol_target_cfg: dict | None = None) -> dict:
+                      vol_target_cfg: dict | None = None,
+                      trend_timing_cfg: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1670,7 +1821,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          minute_lambda=ml_lambda,
                          weight_mode=weight_mode,
                          pool_filter_cfg=pool_filter_cfg,
-                         vol_target_cfg=vol_target_cfg)
+                         vol_target_cfg=vol_target_cfg,
+                         trend_timing_cfg=trend_timing_cfg)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -1727,7 +1879,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   minute_layer: dict | None = None,
                   weight_mode: str = "equal",
                   pool_filter_cfg: dict | None = None,
-                  vol_target_cfg: dict | None = None) -> dict | None:
+                  vol_target_cfg: dict | None = None,
+                  trend_timing_cfg: dict | None = None) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -1783,7 +1936,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         minute_weights=ml_weights, minute_lambda=ml_lambda,
                         weight_mode=weight_mode,
                         pool_filter_cfg=pool_filter_cfg,
-                        vol_target_cfg=vol_target_cfg)
+                        vol_target_cfg=vol_target_cfg,
+                        trend_timing_cfg=trend_timing_cfg)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2080,7 +2234,8 @@ def main():
                 max_factors=int(config.get("fold", {}).get("max_factors", 40)),
                 weight_mode=str(config.get("portfolio_optimizer", "equal")),
                 pool_filter_cfg=config.get("pool_filter"),
-                vol_target_cfg=config.get("vol_target"))
+                vol_target_cfg=config.get("vol_target"),
+                trend_timing_cfg=config.get("trend_timing"))
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -2109,8 +2264,10 @@ def main():
                     test_s, test_e, universe_fn=universe_fn,
                     use_regime=True, portfolio_constraints=portfolio_constraints,
                     minute_layer=minute_layer,
+                    weight_mode=str(config.get("portfolio_optimizer", "equal")),
                     pool_filter_cfg=config.get("pool_filter"),
-                    vol_target_cfg=config.get("vol_target"))
+                    vol_target_cfg=config.get("vol_target"),
+                    trend_timing_cfg=config.get("trend_timing"))
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
@@ -2143,7 +2300,9 @@ def main():
                     if minute_layer.get("enabled") else None,
                     minute_lambda=float(minute_layer.get("lambda", 0.3)),
                     pool_filter_cfg=config.get("pool_filter"),
-                    vol_target_cfg=config.get("vol_target"))
+                    vol_target_cfg=config.get("vol_target"),
+                    weight_mode=str(config.get("portfolio_optimizer", "equal")),
+                    trend_timing_cfg=config.get("trend_timing"))
                 if ev_r:
                     results["extend_val"] = ev_r
                     extra_meta["extend_val"] = {
@@ -2160,7 +2319,10 @@ def main():
                                  bt_config, s, e, label=label.upper(),
                                  universe_fn=universe_fn,
                                  portfolio_constraints=portfolio_constraints,
-                                 vol_target_cfg=config.get("vol_target"))
+                                 weight_mode=str(config.get("portfolio_optimizer", "equal")),
+                                 pool_filter_cfg=config.get("pool_filter"),
+                                 vol_target_cfg=config.get("vol_target"),
+                                 trend_timing_cfg=config.get("trend_timing"))
                 if r:
                     results[label] = r
 

@@ -46,8 +46,8 @@ def get_universe() -> list:
         if len(files) > 100:
             return sorted(files)
 
-    # 次选: data_cache/ (部分缓存)
-    cache_dir = os.path.join(BASE_DIR, "data_cache")
+    # 次选: data_store/ 主库 (旧 data_cache 已冻结为 legacy, 不再扫描)
+    cache_dir = os.path.join(BASE_DIR, "data_store")
     if os.path.exists(cache_dir):
         files = [f.replace(".parquet", "") for f in os.listdir(cache_dir)
                  if f.endswith(".parquet") and not f.startswith("index_")]

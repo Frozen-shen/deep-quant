@@ -36,9 +36,12 @@ def _make_session() -> requests.Session:
 
 
 def get_cached_symbols() -> list:
-    """获取 data_cache 中已有复权数据的股票列表。"""
+    """获取 data_store 主库中已有复权数据的股票列表 (旧 data_cache 已冻结为 legacy)。"""
+    store = BASE_DIR / "data_store"
+    if not store.exists():
+        return []
     return sorted([
-        f.stem for f in DATA_CACHE.glob("*.parquet")
+        f.stem for f in store.glob("*.parquet")
         if len(f.stem) == 6 and f.stem.isdigit()
     ])
 

@@ -79,6 +79,10 @@ def load(symbol: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return None
     df = pd.read_parquet(path)
+    if "date" not in df.columns:  # 防御: 非日线文件 (aux 数据) 误入根目录
+        return None
+    if "close" in df.columns and (df["close"] <= 0).any():
+        return None  # 防御: 复权失真产生负价 (2026-08-10 腾讯qfq缺陷, baostock修复后自然恢复)
     df["date"] = pd.to_datetime(df["date"])
     return df
 

@@ -57,8 +57,8 @@ def update_minute_data():
     print(f"[{datetime.now():%H:%M:%S}] 更新分钟K线...")
     try:
         mf = MinuteFetcher(period="5", cache_days=60)
-        # 获取日线缓存中的股票列表
-        cache_dir = os.path.join(BASE_DIR, "data_cache")
+        # 获取日线缓存中的股票列表 (主库 data_store, 旧 data_cache 已冻结为 legacy)
+        cache_dir = os.path.join(BASE_DIR, "data_store")
         if not os.path.exists(cache_dir):
             print("  ✗ 无日线缓存目录")
             return

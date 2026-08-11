@@ -44,8 +44,12 @@ execution:
   commission_buy: 0.00025      # 买入手续费
   commission_sell: 0.00075     # 卖出手续费 (含印花税)
   signal_delay: 1              # T+1信号延迟
-  execution_price: open        # 成交价: 次日开盘
+  execution_price: vwap        # 成交价: vwap=次日VWAP拆单 (v24b验证进生产: fold+1.38pp, EXTEND+1.4pp)
+  vwap_residual_bps: 10        # VWAP残差滑点 (bps, 拆单无法完美命中VWAP)
   turnover_limit_pct: 0.5      # 月单边换手≤50%
+  rebalance_days: 20           # 调仓间隔 (交易日): v22 C1实验(周频5) 淘汰:
+                               #   期换手上限12% vs 策略自然换手18-38% → 98%调仓被跳过,
+                               #   周频在月50%换手纪律下不可行 (2026-08-11)
 
 # ── 模型参数 (教训#6: 极端正则化) ──
 model:
@@ -70,7 +74,7 @@ factors:
 minute_factors:
   enabled: true
   lookback: 20
-  freq: "15"            # 生产用15分钟 (v7实验: 5分钟差异不显著且TEST点估计更差, 2026-08-07)
+  freq: "15"            # 生产用15分钟 (v19实验2026-08-11: 5m模拟考-2.9% vs 15m +0.7%, 淘汰; v7同结论)
 
 # ── 分钟因子叠加层 (方案B, 2026-08-04) ──
 minute_layer:
@@ -93,6 +97,12 @@ pool_filter:
   high_vol_mult: 0.5      # 高波动市场: 高波档乘数
   low_vol_up: 0.8         # 低波动市场: 低波档乘数 (牛市弹性)
   high_vol_up: 1.2        # 低波动市场: 高波档乘数
+
+# ── 市场状态 (v20, 2026-08-11) ──
+# vol_source: daily=指数日收益60日std (原逻辑); rv_5m=市场截面已实现波动率
+#   (build_market_rv.py 产物, 全市场个股5m RV截面中位数, 2022起, 之前回退 daily)
+regime:
+  vol_source: "daily"    # v25组合实验后决策: v24b(仅VWAP)最优, rv_5m仅fold_3防守更强但EXTEND回落 → 生产 daily
 
 # ── 标签 ──
 label:
@@ -145,10 +155,16 @@ portfolio_constraints:
 
 # ── 波动率目标仓位 (P0, 2026-08-09) ──
 vol_target:
-  enabled: false          # 实验时置 true
+  enabled: true          # 实验时置 true
   target_pct: 0.70        # 目标波动率百分位
   max_scale: 1.0          # 满仓上限
   min_scale: 0.40         # 最低仓位
+
+# ── 趋势择时 (阶段3, 2026-08-10): 保障熊市年化收益为正 ──
+trend_timing:
+  enabled: false          # v18 实验淘汰: 2022仍负+模拟考-12.2pp (2026-08-11)
+  down_scale: 0.40        # 下跌趋势仓位 (熊市少亏)
+  range_scale: 0.80       # 震荡市仓位
 
 # ── 因子正交化 (P2, 2026-08-09) ──
 factor_orthogonalize:

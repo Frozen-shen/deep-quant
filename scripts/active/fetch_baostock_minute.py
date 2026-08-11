@@ -57,7 +57,7 @@ def get_universe() -> list:
 
 
 def to_baostock_symbol(code: str) -> str:
-    """600519 -> sh.600519, 000001 -> sz.000001"""
+    """600519 -> sh.600519, 000001 -> sz.000001 (指数走 INDEX_SYMBOLS 映射)"""
     if code.startswith("6"):
         return f"sh.{code}"
     else:
@@ -65,11 +65,21 @@ def to_baostock_symbol(code: str) -> str:
 
 
 def to_em_secid(code: str) -> str:
-    """600519 -> 1.600519, 000001 -> 0.000001 (东财 secid)"""
+    """600519 -> 1.600519, 000001 -> 0.000001 (东财 secid; 指数走 INDEX_SYMBOLS)"""
     if code.startswith("6"):
         return f"1.{code}"
     else:
         return f"0.{code}"
+
+
+# ── 指数分钟线支持 (路线A v20: 中证1000 5m 已实现波动率 → 风险层) ──
+# 指数代码与股票代码冲突 (000001=平安银行 vs 上证指数), 必须显式映射。
+INDEX_SYMBOLS = {
+    "000852": {"bs": "sh.000852", "em": "1.000852", "name": "index_csi1000"},
+    "000300": {"bs": "sh.000300", "em": "1.000300", "name": "index_csi300"},
+    "000905": {"bs": "sh.000905", "em": "1.000905", "name": "index_csi500"},
+}
+INDEX_CACHE_DIR = os.path.join(BASE_DIR, "data", "cache")
 
 
 # 东财历史行情镜像域名 (按 IP 限流时轮换)
@@ -105,22 +115,28 @@ def _em_get(url: str, params: dict, host_idx: int = 0, retries: int = 4):
     return None
 
 
-def fetch_one_em(code: str, freq: str, start: str, end: str) -> pd.DataFrame:
+def fetch_one_em(code: str, freq: str, start: str, end: str,
+                 secid: str | None = None, is_index: bool = False) -> pd.DataFrame:
     """东财 5/15 分钟 K 线 (klt=5/15, fqt=1 前复权), 按年分请求.
 
     字段映射: 东财 klines 每行 "时间,开,收,高,低,量(手),额(元)"
     -> 统一列 datetime/day/open/high/low/close/volume(股)/amount
+
+    is_index=True: 用显式 secid (如 1.000852), fqt=0 不复权 (指数无复权概念)
     """
     klt = "5" if freq == "5" else "15"
+    if secid is None:
+        secid = to_em_secid(code)
+    fqt = "0" if is_index else "1"
     chunks = []
     cur = pd.Timestamp(start)
     end_ts = pd.Timestamp(end)
     while cur <= end_ts:
         y = cur.year
         cend = min(cur + pd.offsets.YearEnd(0), end_ts)
-        params = {"secid": to_em_secid(code), "fields1": "f1,f2,f3,f4,f5,f6",
+        params = {"secid": secid, "fields1": "f1,f2,f3,f4,f5,f6",
                   "fields2": "f51,f52,f53,f54,f55,f56,f57",
-                  "klt": klt, "fqt": "1",
+                  "klt": klt, "fqt": fqt,
                   "beg": cur.strftime("%Y%m%d"), "end": cend.strftime("%Y%m%d"),
                   "lmt": "100000"}
         j = _em_get("/api/qt/stock/kline/get", params)
@@ -169,15 +185,19 @@ def setup_proxy(proxy: str):
     print(f"  [PROXY] baostock 走 SOCKS5 {host}:{port} (切换节点 = 换出口 IP)")
 
 
-def fetch_one(bs, symbol: str, freq: str, start: str, end: str) -> pd.DataFrame:
-    """拉取单只股票的分钟线数据。"""
+def fetch_one(bs, symbol: str, freq: str, start: str, end: str,
+              adjustflag: str = "2") -> pd.DataFrame:
+    """拉取单只股票/指数的分钟线数据。
+
+    adjustflag: 2=前复权(股票), 3=不复权(指数, 指数无复权概念)
+    """
     rs = bs.query_history_k_data_plus(
         symbol,
         "date,time,code,open,high,low,close,volume,amount",
         start_date=start,
         end_date=end,
         frequency=freq,
-        adjustflag="2",  # 前复权
+        adjustflag=adjustflag,
     )
     rows = []
     while (rs.error_code == "0") and rs.next():
@@ -203,6 +223,68 @@ def fetch_one(bs, symbol: str, freq: str, start: str, end: str) -> pd.DataFrame:
     return df[["datetime", "day", "open", "high", "low", "close", "volume", "amount"]].reset_index(drop=True)
 
 
+def fetch_index(args, freq: str) -> int:
+    """拉取单只指数分钟线 → data/cache/index_<name>_<freq>m.parquet.
+
+    指数用 baostock sh.000852 (adjustflag=3 不复权) 主源;
+    --source em 时走东财 secid (fqt=0) + SOCKS5 代理。
+    """
+    code = args.index
+    if code not in INDEX_SYMBOLS:
+        print(f"不支持的指数: {code}, 可选: {list(INDEX_SYMBOLS)}")
+        return 1
+    info = INDEX_SYMBOLS[code]
+    name = info["name"]
+    out_path = os.path.join(INDEX_CACHE_DIR, f"{name}_{freq}m.parquet")
+    os.makedirs(INDEX_CACHE_DIR, exist_ok=True)
+
+    if args.source == "em" and not args.proxy:
+        print("--source em 需要 --proxy (东财直连被墙, 走 SOCKS5)")
+        return 1
+    if args.proxy:
+        setup_proxy(args.proxy)
+
+    # 东财源统一走 cheapproxy 网关 (config.yaml eastmoney_proxy 段)
+    # install_patch 替换 requests.Session → _em_get 的懒加载 session 自动生效
+    try:
+        import eastmoney_proxy
+        eastmoney_proxy.setup_from_config(BASE_DIR)
+    except Exception as _e:
+        print(f"  [WARN] 东财网关初始化失败: {_e}")
+
+    print(f"═══ 指数 {freq}分钟线拉取: {code} ({info['bs']}) ═══")
+    print(f"  日期: {args.start} ~ {args.end}")
+    print(f"  输出: {out_path}")
+    print()
+
+    df = pd.DataFrame()
+    if args.source != "em":
+        import socket
+        socket.setdefaulttimeout(120)
+        import baostock as bs
+        lg = bs.login()
+        if lg.error_code != "0":
+            print(f"登录失败: {lg.error_msg}")
+            return 1
+        df = fetch_one(bs, info["bs"], freq, args.start, args.end, adjustflag="3")
+        bs.logout()
+        if len(df) == 0:
+            print("  baostock 返回空, 尝试东财源...")
+    if len(df) == 0:
+        df = fetch_one_em(code, freq, args.start, args.end,
+                          secid=info["em"], is_index=True)
+    if len(df) == 0:
+        print("  ❌ 指数分钟线拉取失败 (两源均为空)")
+        return 1
+
+    df.to_parquet(out_path, index=False)
+    days = pd.to_datetime(df["day"]).dt.date.unique()
+    print(f"  ✅ 成功: {len(df)} 行, {len(days)} 个交易日, "
+          f"{min(days)} ~ {max(days)}")
+    print(f"  缓存: {out_path}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Baostock 分钟线批量拉取")
     parser.add_argument("--freq", type=str, default="15", choices=["5", "15"],
@@ -221,7 +303,14 @@ def main():
                         help="SOCKS5 代理 host:port (如 127.0.0.1:7897), 用于换出口 IP")
     parser.add_argument("--source", type=str, default="bs", choices=["bs", "em"],
                         help="数据源: bs=baostock (默认), em=东财 (走 --proxy 时生效)")
+    parser.add_argument("--index", type=str, default=None,
+                        help="拉取单只指数分钟线 (如 000852=中证1000), "
+                             "保存到 data/cache/<name>_<freq>m.parquet")
     args = parser.parse_args()
+
+    # ── 指数模式: 单只, 存 data/cache/index_*.parquet ──
+    if args.index:
+        return fetch_index(args, args.freq)
 
     if args.source == "em" and not args.proxy:
         print("--source em 需要 --proxy (东财直连被墙, 走 SOCKS5)")

@@ -472,4 +472,9 @@ AUX_FACTORS = {
     "aux_lhb_net_20d":          "20日龙虎榜净买额/流通市值 (大资金净流入)",
     "aux_dzjy_amount_20d":      "20日大宗成交额/流通市值 (大宗活跃度)",
     "aux_dzjy_discount_20d":    "20日大宗折溢率均值 (折价成交强度)",
+    "aux_gdhs_change_pct":      "股东户数增减比例 (筹码集中度, 负向)",
+    "aux_ggcg_net_20d":         "20日净增持比例 (股东增持事件)",
+    "aux_fhps_send_ratio":      "送转总比例 (高送转事件)",
+    "aux_fhps_dividend":        "现金分红比例 (红利因子)",
+    "aux_yjkb_profit_growth":   "业绩快报净利润同比增长",
 }

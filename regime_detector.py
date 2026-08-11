@@ -77,26 +77,36 @@ class RegimeDetector:
         "disabled":    (1.0, 1.0, 1.0, 1.0),  # 等同于不做 regime 调整
     }
 
-    def __init__(self, market: str = "a", profile: str = "conservative"):
+    def __init__(self, market: str = "a", profile: str = "conservative",
+                 vol_source: str = "daily"):
         self.market = market
         self.profile = profile
+        # 波动率来源: daily=指数日收益60日std (原逻辑), rv_5m=市场截面已实现波动率
+        # (build_market_rv.py 产物, 5m 数据 2022 起, 之前回退 daily)
+        self.vol_source = vol_source
         self._index_data: Optional[pd.DataFrame] = None
         self._ma60: Optional[pd.Series] = None
         self._adx: Optional[pd.Series] = None
+        self._market_rv: Optional[pd.DataFrame] = None  # date, rv_median, n_stocks
+        self._market_rv_vol60: Optional[pd.Series] = None
+        self._market_rv_pct: Optional[pd.Series] = None  # 滚动252日分位 (方案A v23)
 
     @classmethod
-    def from_benchmark_parquet(cls, path: str, profile: str = "conservative") -> "RegimeDetector":
+    def from_benchmark_parquet(cls, path: str, profile: str = "conservative",
+                               vol_source: str = "daily") -> "RegimeDetector":
         """
         从本地 parquet 文件加载基准指数 (无需网络)。
 
         Args:
           path: parquet 文件路径 (如 data/cache/index_csi1000.parquet)
           profile: regime 参数 profile (conservative/original/aggressive/disabled)
+          vol_source: 波动率来源 daily=日收益std / rv_5m=市场截面已实现波动率
+            (build_market_rv.py 产物, 5m 数据 2022 起, 之前回退 daily)
 
         Returns:
           已初始化的 RegimeDetector 实例
         """
-        detector = cls(market="a", profile=profile)
+        detector = cls(market="a", profile=profile, vol_source=vol_source)
         if not os.path.exists(path):
             print(f"  [Regime] 基准文件不存在: {path}, 使用 RANGE fallback")
             return detector
@@ -123,7 +133,48 @@ class RegimeDetector:
             # 只有 close 时用简化版: 用 close 的绝对变动代替
             detector._adx = None
 
+        # 市场已实现波动率 (vol_source=rv_5m 时使用; 文件不存在则回退 daily)
+        detector._load_market_rv()
         return detector
+
+    def _load_market_rv(self):
+        """加载市场已实现波动率序列 (build_market_rv.py 产物)。
+
+        路径: data/cache/market_rv_5m.parquet (date, rv_median, n_stocks)
+        5m 数据 2022-01 起; 文件缺失/vol_source=daily 时静默跳过,
+        detect_v2 自动回退日收益波动率。
+
+        校准 (方案A v23, 2026-08-11): rv_5m 与 daily 的分布量纲不同
+        (rv_5m 均值 0.310/std 0.044 vs daily 0.238/0.071), 固定阈值
+        0.30/0.70/0.85 是为 daily 校准的, 直接套用会导致 2025-26 全程
+        误判"低波弹性" (v20 模拟考 -2.2pp 根因)。修复: 用滚动 126 日
+        分位 (当前值在过去半年的位置, min_periods=60 使 2022-08 起生效,
+        覆盖 fold_3 后半段; 252 日窗口会让 2023 前全部回退 daily, 弃用)。
+        """
+        if self.vol_source != "rv_5m":
+            return
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "cache", "market_rv_5m.parquet")
+        if not os.path.exists(path):
+            return
+        try:
+            df = pd.read_parquet(path)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+            rv = df.set_index("date")["rv_median"]
+            # 60日滚动均值 (语义对齐日收益逻辑的 vol60)
+            vol60 = rv.rolling(60).mean()
+            # 滚动 126 日分位: 当前 vol60 在过去半年中的百分位 (PIT 安全,
+            # 只用 ≤ 当天的数据)。min_periods=60: 早期数据不足时回退 daily。
+            roll_pct = vol60.rolling(126, min_periods=60).apply(
+                lambda x: float((x <= x[-1]).mean()), raw=True)
+            self._market_rv_vol60 = vol60
+            self._market_rv_pct = roll_pct
+            self._market_rv = df
+        except Exception:
+            self._market_rv = None
+            self._market_rv_vol60 = None
+            self._market_rv_pct = None
 
     def load_index_data(self) -> bool:
         """加载指数数据 (上证综指 / 恒生指数)。需要网络。"""
@@ -347,12 +398,29 @@ class RegimeDetector:
         price = hist.iloc[-1]
         ma20 = hist.rolling(20).mean().iloc[-1]
         ma60 = hist.rolling(60).mean().iloc[-1]
-        # 60日已实现波动率 (年化)
-        rets = hist.pct_change().dropna()
-        vol60 = rets.tail(60).std() * np.sqrt(252)
-        # 波动率滚动分位 (用全部历史)
-        rolling_vol = rets.rolling(60).std() * np.sqrt(252)
-        vol_pct = (rolling_vol <= vol60).mean() if rolling_vol.notna().sum() > 20 else 0.5
+
+        # ── 波动率百分位 ──
+        # vol_source=rv_5m: 市场截面已实现波动率 (5m, 2022 起, 更精确/响应更快)
+        # 数据不足 (2022 前) 或文件缺失 → 回退日收益 60日 std (原逻辑)
+        vol_pct = None
+        if (self._market_rv is not None
+                and self._market_rv_vol60 is not None
+                and self._market_rv_pct is not None):
+            # 滚动 252 日分位 (方案A v23 校准): 当前 vol60 在过去一年中的位置,
+            # 阈值 0.30/0.70/0.85 语义与 daily 路径对齐 (daily 也用历史分位)。
+            # PIT: 滚动分位序列只用 ≤ 当天的数据。
+            pct_hist = self._market_rv_pct
+            pct_hist = pct_hist[pct_hist.index <= target]
+            if len(pct_hist) >= 30 and np.isfinite(pct_hist.iloc[-1]):
+                vol_pct = float(pct_hist.iloc[-1])
+
+        if vol_pct is None:
+            # 60日已实现波动率 (年化)
+            rets = hist.pct_change().dropna()
+            vol60 = rets.tail(60).std() * np.sqrt(252)
+            # 波动率滚动分位 (用全部历史)
+            rolling_vol = rets.rolling(60).std() * np.sqrt(252)
+            vol_pct = (rolling_vol <= vol60).mean() if rolling_vol.notna().sum() > 20 else 0.5
         # 趋势判定
         if price > ma20 > ma60 and vol_pct < 0.70:
             regime = Regime.TREND_UP

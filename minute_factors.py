@@ -69,6 +69,11 @@ MINUTE_FACTOR_NAMES = [
     "min_large_order_flow",
     "min_am_pm_ratio",
     "min_close_strength",
+    # ── 分布特征 (路线B v21, 2026-08-11): 已开发并检验, 淘汰 ──
+    # min_realized_kurt / min_open_30m / min_tail_30m / min_ret_vol_corr /
+    # min_ret_autocorr: IC 诊断中 kurt(T+20 -0.111)/autocorr(-0.060) 单因子
+    # 较强, 但进入叠加层后 fold_4 -3.9pp 且 EXTEND 无增益 (与现有波动率因子
+    # 冗余) → v21b 检验不合格, 回滚保持 10 因子生产集 (2026-08-11)。
 ]
 
 
@@ -256,6 +261,75 @@ def _compute_single_day(day_bars: pd.DataFrame, prev_close: Optional[float]) -> 
         results["min_close_strength"] = float((close[-1] - day_low) / day_range)
     else:
         results["min_close_strength"] = 0.5
+
+    # ════════════════════════════════════════════════════════════
+    #  分布特征 (路线B v21): 对标 Amaya et al. 2015 已实现高阶矩
+    # ════════════════════════════════════════════════════════════
+
+    # ── 11. 已实现峰度 (4阶矩, 厚尾/跳变检测) ──
+    if len(returns_intra) > 5:
+        mean_r = np.mean(returns_intra)
+        std_r = np.std(returns_intra)
+        if std_r > 1e-9:
+            results["min_realized_kurt"] = float(
+                np.mean(((returns_intra - mean_r) / std_r) ** 4))
+        else:
+            results["min_realized_kurt"] = 0.0
+    else:
+        results["min_realized_kurt"] = np.nan
+
+    # ── 12/13. 开盘30分钟 / 尾盘30分钟收益 (真实时间切分) ──
+    # A股时段: 9:30-11:30 / 13:00-15:00。用 bar 的时间戳按时间过滤
+    #   (优先 datetime 列含完整时间; day 列只有日期时无法切分 → NaN):
+    #   开盘30min  = 10:00 前最后一根 bar 收盘 vs 首根开盘
+    #   尾盘30min  = 15:00 收盘 vs 14:30 前最后一根 bar 收盘
+    ts = day_bars["datetime"] if "datetime" in day_bars.columns else day_bars["day"]
+    if isinstance(ts.iloc[0], pd.Timestamp):
+        t10 = ts.dt.time <= pd.Timestamp("10:00").time()
+        t1430 = ts.dt.time <= pd.Timestamp("14:30").time()
+        if open_[0] > 0:
+            open30_close = close[t10.values]
+            if len(open30_close) >= 1:
+                results["min_open_30m"] = float(
+                    (open30_close[-1] - open_[0]) / open_[0])
+            else:
+                results["min_open_30m"] = np.nan
+            tail_start = close[t1430.values]
+            if len(tail_start) >= 1:
+                results["min_tail_30m"] = float(
+                    (close[-1] - tail_start[-1]) / tail_start[-1]) \
+                    if tail_start[-1] > 0 else 0.0
+            else:
+                results["min_tail_30m"] = np.nan
+        else:
+            results["min_open_30m"] = np.nan
+            results["min_tail_30m"] = np.nan
+    else:
+        results["min_open_30m"] = np.nan
+        results["min_tail_30m"] = np.nan
+
+    # ── 14. 日内量价相关性 (bar收益 × bar成交量) ──
+    r_len = len(returns_intra)
+    if r_len > 5:
+        vol_head = volume[:r_len].astype(float)
+        if np.std(vol_head) > 1e-9:
+            corr = np.corrcoef(returns_intra, vol_head)[0, 1]
+            results["min_ret_vol_corr"] = float(corr) if np.isfinite(corr) else 0.0
+        else:
+            results["min_ret_vol_corr"] = 0.0
+    else:
+        results["min_ret_vol_corr"] = np.nan
+
+    # ── 15. 日内收益自相关 (lag-1, 动量/反转的日内形态) ──
+    if r_len > 6:
+        r0, r1 = returns_intra[:-1], returns_intra[1:]
+        if np.std(r0) > 1e-9 and np.std(r1) > 1e-9:
+            ac = np.corrcoef(r0, r1)[0, 1]
+            results["min_ret_autocorr"] = float(ac) if np.isfinite(ac) else 0.0
+        else:
+            results["min_ret_autocorr"] = 0.0
+    else:
+        results["min_ret_autocorr"] = np.nan
 
     return results
 
