@@ -1394,11 +1394,16 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     industry_warned = False
     prev_equity = float(bt_config["initial_capital"])
     pit_sizes = []
+    trades_history = []   # 逐笔成交 (v24b 后, 2026-08-12): engine.execute 返回
 
     for di, today in enumerate(bt_dates):
         # T+1 执行
         if pending is not None:
-            bt.execute(pending, today, all_data, rules)
+            _, _, trades = bt.execute(pending, today, all_data, rules)
+            for t in trades:
+                t = dict(t)
+                t["label"] = label
+                trades_history.append(t)
             pending = None
 
         # 调仓日
@@ -1683,6 +1688,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
         "weights_evolution": weights_history,
         "positions_history": positions_history,
         "equity_curve": equity_curve,
+        "trades": trades_history,   # 逐笔成交 (v24b 后 2026-08-12: 真实成交价/数量/佣金)
     }
 
     log.info("  结果:")

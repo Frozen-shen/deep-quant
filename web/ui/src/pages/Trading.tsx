@@ -121,7 +121,8 @@ export default function Trading() {
     col<Trade>('qty', { title: '数量', width: 100, render: (v) => fmtNum(v as number, 0) }),
     col<Trade>('price', { title: '价格', width: 110, render: (v) => fmtNum(v as number, 2) }),
     col<Trade>('commission', { title: '佣金', width: 100, render: (v) => fmtNum(v as number, 2) }),
-    col<Trade>('reason', { title: '原因', ellipsis: true }),
+    { title: '原因', dataIndex: 'reason', ellipsis: true,
+      render: (_v: unknown, r: Trade) => r.reason ?? (r.action === 'BUY' ? '建仓/加仓' : '调出/减仓') },
   ]
 
   return (
@@ -146,7 +147,10 @@ export default function Trading() {
               <Col span={6}><StatCard title="换仓笔数" value={bt?.count ?? 0} /></Col>
             </Row>
             <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 4 }}>
-              {bt?.period ?? ''} · {bt?.n_rebalances ?? 0} 次调仓 · 数据还原自回测 JSON（非实盘成交）
+              {bt?.period ?? ''} · {bt?.n_rebalances ?? 0} 次调仓 · 回测数据（非实盘成交）
+              {bt?.source === 'real'
+                ? <Tag color="green" style={{ marginLeft: 8 }}>真实逐笔成交</Tag>
+                : <Tag color="orange" style={{ marginLeft: 8 }}>近似重建（旧 JSON 无逐笔）</Tag>}
             </Typography.Paragraph>
             <Row gutter={16}>
               <Col span={14}>

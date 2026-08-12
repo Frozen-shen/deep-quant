@@ -69,6 +69,7 @@ export async function fetchBrokerTrades(year?: number): Promise<{ year: number |
 export async function fetchBacktestTrades(): Promise<{
   available: boolean; version?: string; period?: string; excess_annual?: number;
   sharpe?: number; max_drawdown?: number; n_rebalances?: number; count: number; trades: any[];
+  source?: 'real' | 'reconstructed';
   equity_curve?: Array<{ date: string; equity: number }>;
   active_returns?: number[];
   rebalances?: Array<{ date: string; n_positions: number }>;

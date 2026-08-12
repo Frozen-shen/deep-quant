@@ -12,8 +12,9 @@ router = APIRouter(prefix="/api/broker", tags=["broker"])
 _adapter = get_adapter("paper")  # config.yaml broker.adapter 可切换 qmt
 
 # v24b 最优实验的 EXTEND 模拟考结果 (2026-08-12 部署为生产权重)
+# v24d (2026-08-12): 重跑版, 记录真实逐笔成交 (buy+sell, 含价格/数量/佣金)
 V24B_RESULT = (Path(__file__).resolve().parents[3] / "data" / "ic_validation"
-               / "walkforward_results_v24b_vwap.json")
+               / "walkforward_results_v24d_trades.json")
 
 
 @router.get("/status")
@@ -153,12 +154,23 @@ def _reconstruct_v24b_trades(ev: dict) -> list[dict]:
 
 @router.get("/backtest-trades")
 def backtest_trades():
-    """v24b 最优实验 (EXTEND 模拟考) 的调仓记录 — 还原自回测 JSON。"""
+    """v24b 最优实验 (EXTEND 模拟考) 的调仓记录。
+
+    优先使用回测 JSON 中记录的**真实逐笔成交** (v24c 重跑后写入,
+    含真实成交价/数量/佣金); 旧版 JSON 无 trades 字段时回退重建近似。
+    """
     ev = _load_v24b_extend()
     if not ev:
         return {"available": False, "count": 0, "trades": [],
                 "note": "walkforward_results_v24b_vwap.json 不存在"}
-    trades = _reconstruct_v24b_trades(ev)
+    # 真实逐笔成交 (v24c 重跑产物) vs 重建近似
+    real_trades = ev.get("trades") or []
+    if real_trades:
+        trades = [dict(t) for t in real_trades]
+        source = "real"
+    else:
+        trades = _reconstruct_v24b_trades(ev)
+        source = "reconstructed"
     # 附带: 净值曲线 / 超额收益 / 调仓点 (供前端图表)
     curve = ev.get("equity_curve") or []
     active = ev.get("daily_active_returns") or []
@@ -175,6 +187,7 @@ def backtest_trades():
         "n_rebalances": ev.get("n_rebalances"),
         "count": len(trades),
         "trades": trades,
+        "source": source,               # real=回测真实逐笔 / reconstructed=近似重建
         "equity_curve": curve,          # [{date, equity}]
         "active_returns": active,       # [float] 日超额收益 (与 equity_curve 同序)
         "rebalances": rebalances,       # [{date, n_positions}]

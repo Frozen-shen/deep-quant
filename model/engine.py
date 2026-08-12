@@ -178,22 +178,29 @@ class SimpleBacktest:
         # 限制持仓数
         while len(self.positions) > self.top_k:
             oldest = min(self.positions.keys(), key=lambda s: self.positions[s].get("entry_date", ""))
-            self._force_sell(oldest, today, all_data)
+            t = self._force_sell(oldest, today, all_data)
+            if t:
+                sells += 1
+                trades.append(t)
 
         return buys, sells, trades
 
     def _force_sell(self, symbol, today, all_data):
-        """强制卖出最老的持仓。"""
+        """强制卖出最老的持仓 (记录逐笔, v24c 2026-08-12: 补录 trades)。"""
         pos = self.positions.get(symbol)
         if pos is None:
-            return
+            return None
         px = self._exec_price(symbol, today, all_data)
         if px is None:
-            return
+            return None
         qty = pos["qty"]
         comm = calc_sell_commission(qty, px)
-        self.cash += qty * px - comm
+        proceeds = qty * px - comm
+        self.cash += proceeds
         del self.positions[symbol]
+        return {"date": str(today.date()), "symbol": symbol, "action": "SELL",
+                "price": px, "qty": qty, "commission": comm,
+                "proceeds": proceeds, "cash_after": self.cash}
 
     def mark_to_market(self, close_prices: dict):
         """按收盘价计算总权益。"""
