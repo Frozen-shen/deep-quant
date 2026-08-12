@@ -47,6 +47,8 @@ class MinuteFetcher:
                  cache_days: int = DEFAULT_CACHE_DAYS):
         self.period = period
         self.cache_days = cache_days
+        # 本地 5m 全历史缓存 (回测大量调用时避免重复读 parquet)
+        self._local_cache: Dict[str, Optional[pd.DataFrame]] = {}
         _ensure_cache_dir()
 
     # ════════════════════════════════════════
@@ -79,15 +81,23 @@ class MinuteFetcher:
             end_date = datetime.now().strftime("%Y%m%d")
 
         # ── 本地全历史缓存 (baostock minute_5m, 2026-08-12 接入) ──
+        if symbol in self._local_cache:
+            return self._local_cache[symbol]
         local_path = os.path.join(BASE_DIR, "data_store", "minute_5m", f"{symbol}.parquet")
         if os.path.exists(local_path):
             try:
                 ldf = pd.read_parquet(local_path)
                 if len(ldf) > 0 and "day" in ldf.columns:
-                    ldf["时间"] = pd.to_datetime(ldf["day"])
+                    # 时间列优先用 datetime (含时分, 如 09:35); day 只有日期
+                    if "datetime" in ldf.columns:
+                        ldf["时间"] = pd.to_datetime(ldf["datetime"])
+                    else:
+                        ldf["时间"] = pd.to_datetime(ldf["day"])
                     ldf = ldf.rename(columns={"open": "开盘", "close": "收盘",
                                               "high": "最高", "low": "最低",
                                               "volume": "成交量"})
+                    # volume 单位已统一为"股" (fix_minute_volume_units.py 已修复
+                    # 2026-08-04~06 起的手单位; 历史为股) — 不做转换
                     if "amount" not in ldf.columns:
                         ldf["成交额"] = ldf["收盘"] * ldf["成交量"]
                     else:
@@ -95,7 +105,9 @@ class MinuteFetcher:
                     end_dt = pd.Timestamp(end_date)
                     ldf = ldf[ldf["时间"] <= end_dt + pd.Timedelta(days=1)]
                     if len(ldf) > 0:
-                        return self._clean(ldf[["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额"]])
+                        out = self._clean(ldf[["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额"]])
+                        self._local_cache[symbol] = out
+                        return out
             except Exception:
                 pass
 
@@ -333,11 +345,14 @@ class MinuteFetcher:
         remaining = float(order_qty)
         total_cost = 0.0
         filled = 0.0
+        carry = 0.0  # 小数份额累积 (小订单 ρ×V < 1股时累积)
         for _, bar in day_bars.iterrows():
             if remaining <= 0:
                 break
             bar_vol = float(bar["成交量"])
-            q = min(bar_vol * rho, remaining)
+            q = min(bar_vol * rho + carry, remaining)
+            carry = q - int(q)
+            q = int(q)
             if q <= 0:
                 continue
             price = float(bar["收盘"])  # 时段价 (5m收盘近似)
@@ -353,6 +368,90 @@ class MinuteFetcher:
             total_cost += remaining * last_price
             filled += remaining
         return float(total_cost / filled)
+
+    def get_pov_fills(self, symbol: str, date_str: str,
+                      order_qty: float, max_participation: float = 0.20,
+                      lookback_days: int = 20) -> Optional[dict]:
+        """
+        POV 逐时段成交明细 — 返回每个 5m 时段的成交 (时间/价格/数量)。
+
+        与 get_pov_price 同一执行逻辑, 额外记录时段级 fill:
+          fills: [{"time": "09:35", "price": ..., "qty": ...}, ...]
+
+        Returns:
+          {"price": 加权均价, "fills": [{time,price,qty}], "n_fills": n}
+          或 None (无数据/无法成交)
+        """
+        if order_qty <= 0:
+            return None
+        df = self.fetch(symbol, days=lookback_days + 5, end_date=date_str)
+        if df is None or len(df) == 0:
+            return None
+
+        date_dt = pd.Timestamp(date_str)
+        day_bars = df[df["时间"].dt.date == date_dt.date()]
+        if len(day_bars) == 0:
+            return None
+
+        # 预测日成交量: 执行日前 lookback_days 个交易日的平均成交量
+        hist = df[df["时间"].dt.date < date_dt.date()]
+        if len(hist) == 0:
+            return None
+        hist_daily = hist.groupby(hist["时间"].dt.date)["成交量"].sum()
+        pred_vol = float(hist_daily.tail(lookback_days).mean()) if len(hist_daily) else 0.0
+        if pred_vol <= 0:
+            return None
+
+        # 订单占比 < 0.1% (小订单): 对市场无冲击, 直接按当日 VWAP 成交
+        # (拆单反而会在尾盘堆积强制补单, 失真)
+        if order_qty / pred_vol < 0.001:
+            day_pv = float((day_bars["收盘"] * day_bars["成交量"]).sum())
+            day_v = float(day_bars["成交量"].sum())
+            if day_v <= 0:
+                return None
+            vwap_px = day_pv / day_v
+            return {"price": float(vwap_px),
+                    "fills": [{"time": str(day_bars["时间"].iloc[0].to_pydatetime().strftime("%H:%M")),
+                               "price": round(vwap_px, 4), "qty": int(order_qty)}],
+                    "n_fills": 1}
+
+        # 自适应参与率: 目标"一天内按市场节奏完成"
+        rho = min(max_participation, order_qty / pred_vol)
+        rho = max(rho, 0.001)
+
+        # 逐时段执行 (POV): 记录每个时段的成交时间/价格/数量
+        remaining = float(order_qty)
+        total_cost = 0.0
+        filled = 0.0
+        fills = []
+        carry = 0.0  # 小数份额累积 (小订单 ρ×V < 1股时累积)
+        for _, bar in day_bars.iterrows():
+            if remaining <= 0:
+                break
+            bar_vol = float(bar["成交量"])
+            q = min(bar_vol * rho + carry, remaining)
+            carry = q - int(q)  # 累积不足1股的小数部分
+            q = int(q)
+            if q <= 0:
+                continue
+            price = float(bar["收盘"])  # 时段价 (5m收盘近似)
+            total_cost += q * price
+            filled += q
+            remaining -= q
+            fills.append({"time": str(bar["时间"].to_pydatetime().strftime("%H:%M")),
+                          "price": round(price, 4), "qty": int(q)})
+
+        if filled <= 0:
+            return None
+        # 未完成部分: 按当日最后价补单 (模拟强制完成)
+        if remaining > 0:
+            last_price = float(day_bars["收盘"].iloc[-1])
+            total_cost += remaining * last_price
+            filled += remaining
+            fills.append({"time": "15:00", "price": round(last_price, 4),
+                          "qty": int(remaining), "force_fill": True})
+        return {"price": float(total_cost / filled), "fills": fills,
+                "n_fills": len(fills)}
 
     def get_execution_price(self, symbol: str, date_str: str,
                             algo: str = "vwap",

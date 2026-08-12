@@ -44,8 +44,9 @@ execution:
   commission_buy: 0.00025      # 买入手续费
   commission_sell: 0.00075     # 卖出手续费 (含印花税)
   signal_delay: 1              # T+1信号延迟
-  execution_price: vwap        # 成交价: vwap=次日VWAP拆单 (v24b验证进生产: fold+1.38pp, EXTEND+1.4pp)
-  vwap_residual_bps: 10        # VWAP残差滑点 (bps, 拆单无法完美命中VWAP)
+  execution_price: pov         # 回测成交价: pov=成交量比例拆单(v24e, 2022+分钟数据, 之前回退vwap)
+                               #   vwap=次日VWAP(旧) / open=次日开盘(更旧)
+  vwap_residual_bps: 10        # VWAP/POV残差滑点 (bps, 拆单无法完美命中均价)
   minute_mode: true            # 模拟盘执行: 用分钟线POV/VWAP/TWAP成交 (2026-08-12启用,
                                #   MinuteFetcher 已接入 data_store/minute_5m 全历史 5055只)
   execution_algo: pov          # 分钟执行算法: pov=成交量比例参与(跟随市场节奏, 推荐)

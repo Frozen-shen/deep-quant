@@ -34,11 +34,15 @@ class SimpleBacktest:
         self._monthly_sell = {}  # {YYYY-MM: amount}
         self._month_capital = initial_capital  # 月初净值, 用于计算换手率
 
-    def _exec_price(self, s, today, all_data):
-        """成交价: open=次日开盘 (原逻辑); vwap=次日VWAP (拆单基准价)。
+    def _exec_price(self, s, today, all_data, order_qty: float = 0.0,
+                    fill_times: list | None = None):
+        """成交价: open=次日开盘; vwap=次日VWAP; pov=成交量比例拆单 (POV)。
 
         残差滑点由 _apply_slippage 承担 (slippage_bps=vwap_residual_bps,
         买上浮/卖下沉, 方向正确); 此处只返回基准价。
+        pov 模式: 用 5m 分钟数据按市场成交量节奏拆单 (2022+ 数据可用;
+        无分钟数据 → 回退 vwap → open)。
+        fill_times: 可选 list, POV 成交后写入逐时段时间 ["09:35", ...]
         """
         if s not in all_data:
             return None
@@ -46,7 +50,13 @@ class SimpleBacktest:
         if len(dt) == 0:
             return None
         px = float(dt["open"].iloc[-1]) if "open" in dt.columns else float(dt["close"].iloc[-1])
-        if self.execution_price == "vwap":
+        if self.execution_price == "pov":
+            # POV: 需要订单量 (买入时由调用方先估 qty, 卖出用持仓数量)
+            pov_px = self._pov_price(s, today, order_qty, fill_times=fill_times)
+            if pov_px is not None and pov_px > 0:
+                return float(pov_px)
+            # fallthrough: POV 无分钟数据 → 回退 vwap
+        if self.execution_price in ("vwap", "pov"):
             vf = self.vwap_panel.get(s)
             if vf is not None and len(vf) > 0:
                 t = pd.Timestamp(today)
@@ -56,6 +66,23 @@ class SimpleBacktest:
                     if px <= 0:
                         px = float(dt["open"].iloc[-1]) if "open" in dt.columns else px
         return px
+
+    def _pov_price(self, s, today, order_qty: float, fill_times: list | None = None):
+        """POV 拆单成交价 (5m 分钟数据, 2022+ 可用; 无数据返回 None)。"""
+        if order_qty <= 0:
+            return None
+        try:
+            from data.minute_fetcher import MinuteFetcher
+            mf = MinuteFetcher()
+            date_str = str(pd.Timestamp(today).date())
+            res = mf.get_pov_fills(s, date_str, order_qty)
+            if res is None:
+                return None
+            if fill_times is not None:
+                fill_times.extend(f["time"] for f in res["fills"])
+            return res["price"]
+        except Exception:
+            return None
 
     @property
     def total_equity(self):
@@ -106,7 +133,9 @@ class SimpleBacktest:
             qty = pos.get("qty", 0)
             if qty <= 0 or s not in all_data:
                 continue
-            px = self._exec_price(s, today, all_data)
+            fill_times: list = []
+            px = self._exec_price(s, today, all_data, order_qty=qty,
+                                  fill_times=fill_times)
             if px is None:
                 continue
             px = self._apply_slippage(px, "SELL")  # ★ 卖出滑点
@@ -118,7 +147,8 @@ class SimpleBacktest:
             sells += 1
             trades.append({"date": str(today.date()), "symbol": s, "action": "SELL",
                            "price": px, "qty": qty, "commission": comm,
-                           "proceeds": proceeds, "cash_after": self.cash})
+                           "proceeds": proceeds, "cash_after": self.cash,
+                           "fill_times": fill_times})
 
         # ── 买 ──
         buy_list = decision.get("buy", [])
@@ -139,7 +169,16 @@ class SimpleBacktest:
                     cash_per = cash_pool / max(1, len(buy_list))  # 等权兜底
                 if cash_per <= 0:
                     continue
-                px = self._exec_price(s, today, all_data)
+                # 先估临时价 (vwap/open) 确定买入数量, POV 需要订单量
+                prov_px = self._exec_price(s, today, all_data)
+                if prov_px is None:
+                    continue
+                prov_qty = int(cash_per / prov_px / self.lot_size) * self.lot_size
+                if prov_qty < self.lot_size:
+                    continue
+                fill_times: list = []
+                px = self._exec_price(s, today, all_data, order_qty=prov_qty,
+                                      fill_times=fill_times)
                 if px is None:
                     continue
                 px = self._apply_slippage(px, "BUY")  # ★ 买入滑点
@@ -173,7 +212,8 @@ class SimpleBacktest:
                 buys += 1
                 trades.append({"date": str(today.date()), "symbol": s, "action": "BUY",
                                "price": px, "qty": qty, "commission": comm,
-                               "cost": total_cost, "cash_after": self.cash})
+                               "cost": total_cost, "cash_after": self.cash,
+                               "fill_times": fill_times})
 
         # 限制持仓数
         while len(self.positions) > self.top_k:
@@ -190,17 +230,20 @@ class SimpleBacktest:
         pos = self.positions.get(symbol)
         if pos is None:
             return None
-        px = self._exec_price(symbol, today, all_data)
+        qty = pos["qty"]
+        fill_times: list = []
+        px = self._exec_price(symbol, today, all_data, order_qty=qty,
+                              fill_times=fill_times)
         if px is None:
             return None
-        qty = pos["qty"]
         comm = calc_sell_commission(qty, px)
         proceeds = qty * px - comm
         self.cash += proceeds
         del self.positions[symbol]
         return {"date": str(today.date()), "symbol": symbol, "action": "SELL",
                 "price": px, "qty": qty, "commission": comm,
-                "proceeds": proceeds, "cash_after": self.cash}
+                "proceeds": proceeds, "cash_after": self.cash,
+                "fill_times": fill_times}
 
     def mark_to_market(self, close_prices: dict):
         """按收盘价计算总权益。"""
