@@ -46,6 +46,10 @@ execution:
   signal_delay: 1              # T+1信号延迟
   execution_price: vwap        # 成交价: vwap=次日VWAP拆单 (v24b验证进生产: fold+1.38pp, EXTEND+1.4pp)
   vwap_residual_bps: 10        # VWAP残差滑点 (bps, 拆单无法完美命中VWAP)
+  minute_mode: true            # 模拟盘执行: 用分钟线VWAP/TWAP成交 (2026-08-12启用,
+                               #   MinuteFetcher 已接入 data_store/minute_5m 全历史 5055只)
+  execution_algo: twap         # 分钟执行算法: twap=时间加权拆单(8段) / vwap=量加权
+  twap_slices: 8               # TWAP 拆分段数 (~每30分钟一段)
   turnover_limit_pct: 0.5      # 月单边换手≤50%
   rebalance_days: 20           # 调仓间隔 (交易日): v22 C1实验(周频5) 淘汰:
                                #   期换手上限12% vs 策略自然换手18-38% → 98%调仓被跳过,

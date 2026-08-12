@@ -61,18 +61,43 @@ class MinuteFetcher:
         """
         拉取单只股票的分钟线数据。
 
+        ★ 优先使用本地全历史缓存 data_store/minute_5m/ (baostock, 2022起,
+          5055只全覆盖), 列: day/open/high/low/close/volume/amount。
+          该目录无该股/数据不足时才走 akshare 网络拉取 (滚动60天)。
+
         Args:
           symbol: 股票代码 (如 "600519")
           days: 拉取最近多少天 (None=用cache_days)
           end_date: 截止日期 YYYYMMDD (None=今天)
 
         Returns:
-          DataFrame 或 None
+          DataFrame (统一列: 时间/开盘/收盘/最高/最低/成交量) 或 None
         """
         if days is None:
             days = self.cache_days
         if end_date is None:
             end_date = datetime.now().strftime("%Y%m%d")
+
+        # ── 本地全历史缓存 (baostock minute_5m, 2026-08-12 接入) ──
+        local_path = os.path.join(BASE_DIR, "data_store", "minute_5m", f"{symbol}.parquet")
+        if os.path.exists(local_path):
+            try:
+                ldf = pd.read_parquet(local_path)
+                if len(ldf) > 0 and "day" in ldf.columns:
+                    ldf["时间"] = pd.to_datetime(ldf["day"])
+                    ldf = ldf.rename(columns={"open": "开盘", "close": "收盘",
+                                              "high": "最高", "low": "最低",
+                                              "volume": "成交量"})
+                    if "amount" not in ldf.columns:
+                        ldf["成交额"] = ldf["收盘"] * ldf["成交量"]
+                    else:
+                        ldf["成交额"] = ldf["amount"]
+                    end_dt = pd.Timestamp(end_date)
+                    ldf = ldf[ldf["时间"] <= end_dt + pd.Timedelta(days=1)]
+                    if len(ldf) > 0:
+                        return self._clean(ldf[["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额"]])
+            except Exception:
+                pass
 
         cache_path = self._symbol_path(symbol)
 
