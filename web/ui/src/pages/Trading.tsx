@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Select, Space, Card, Segmented } from 'antd'
+import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
-import { fetchBroker, fetchBrokerTrades, fetchBacktestTrades, fetchUniverse } from '../api'
+import { fetchBroker, fetchBacktestTrades, fetchUniverse } from '../api'
 import { col } from '../lib/columns'
 import { fmtNum, fmtDateTime } from '../lib/format'
 import { actionTag } from '../lib/labels'
@@ -12,16 +12,13 @@ interface Position { symbol: string; qty: number; avg_cost: number; market_value
 interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string }
 
 export default function Trading() {
-  const [year, setYear] = useState<number>()
+  /** 换仓明细按实验年份筛选: all / 2025 / 2026 (EXTEND 覆盖区间) */
+  const [btYear, setBtYear] = useState<'all' | '2025' | '2026'>('all')
   const { data, isLoading, isError } = useQuery({
     queryKey: ['broker'], queryFn: fetchBroker, refetchInterval: 30_000,
   })
   const universe = useQuery({
     queryKey: ['universe'], queryFn: fetchUniverse, staleTime: 300_000,
-  })
-  const tradesQuery = useQuery({
-    queryKey: ['broker-trades', year], queryFn: () => fetchBrokerTrades(year),
-    enabled: !!year,
   })
   /** v24b 最优实验 (EXTEND 模拟考): 指标 + 净值曲线 + 调仓记录 */
   const btQuery = useQuery({
@@ -92,9 +89,12 @@ export default function Trading() {
 
   const connected = !!data?.connected
   const positions = (data?.positions ?? []) as Position[]
-  /** 选中年份时用该年全部成交（回测 2021-2024 / 模拟盘 2026），否则用 status 最近 50 条 */
-  const trades = (year ? tradesQuery.data?.trades ?? [] : (data?.trades ?? [])) as Trade[]
   const pnl = (p: Position) => (p.market_value ?? 0) - (p.avg_cost ?? 0) * (p.qty ?? 0)
+
+  /** 换仓明细按实验年份筛选 (EXTEND 2025-01~2026-06) */
+  const filteredTrades = btYear === 'all'
+    ? btTrades
+    : btTrades.filter((t: Trade) => t.date.startsWith(btYear))
 
   const active = bt?.active_returns ?? []
   const rebalances = bt?.rebalances ?? []
@@ -162,13 +162,27 @@ export default function Trading() {
         )}
       </Card>
 
-      {/* ═══ 换仓明细 ═══ */}
-      <Card size="small" title={`换仓明细（${btTrades.length} 笔）`} style={{ marginBottom: 16 }}>
-        {btTrades.length ? (
-          <Table rowKey={(_r, i) => `${i}`} dataSource={btTrades} columns={tradeCols} size="small"
+      {/* ═══ 换仓明细 (按实验年份筛选) ═══ */}
+      <Card size="small" title="换仓明细"
+        extra={<Space><Tag color="blue">{bt?.period ?? ''}</Tag><Tag>{bt?.n_rebalances ?? 0} 次调仓</Tag></Space>}
+        style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 12 }}>
+          <Segmented
+            options={[
+              { label: '全部', value: 'all' },
+              { label: '2025', value: '2025' },
+              { label: '2026', value: '2026' },
+            ]}
+            value={btYear} onChange={setBtYear} />
+          <Typography.Text type="secondary">
+            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，VWAP 成交·含佣金）
+          </Typography.Text>
+        </Space>
+        {filteredTrades.length ? (
+          <Table rowKey={(_r, i) => `${i}`} dataSource={filteredTrades} columns={tradeCols} size="small"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
         ) : (
-          <Empty description="暂无换仓记录" />
+          <Empty description="该年份无换仓记录" />
         )}
       </Card>
 
@@ -184,29 +198,6 @@ export default function Trading() {
             pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }} />
         ) : (
           <Empty description="暂无持仓" />
-        )}
-      </Card>
-
-      {/* ═══ 模拟盘成交历史 ═══ */}
-      <Card size="small" title="模拟盘成交历史">
-        <Space style={{ marginBottom: 12 }}>
-          <Select allowClear placeholder="按年份筛选" style={{ width: 160 }} value={year} onChange={setYear}
-            options={[
-              { value: 2021, label: '2021（回测）' },
-              { value: 2022, label: '2022（回测）' },
-              { value: 2023, label: '2023（回测）' },
-              { value: 2024, label: '2024（回测）' },
-              { value: 2025, label: '2025（TEST① 无交易）' },
-              { value: 2026, label: '2026（模拟盘）' },
-            ]} />
-          {year && <Typography.Text type="secondary">该年成交 {tradesQuery.data?.count ?? 0} 条</Typography.Text>}
-          {year === 2025 && <Tag color="orange">2025 年模拟盘无成交；v24b 实验的 2025 年换仓见上方卡片</Tag>}
-        </Space>
-        {trades.length ? (
-          <Table rowKey={(_r, i) => `${i}`} dataSource={trades} columns={tradeCols} size="small"
-            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
-        ) : (
-          <Empty description="暂无成交记录" />
         )}
       </Card>
     </div>
