@@ -79,6 +79,12 @@ def backtest_trades():
         return {"available": False, "count": 0, "trades": [],
                 "note": "walkforward_results_v24b_vwap.json 不存在"}
     trades = _reconstruct_v24b_trades(ev)
+    # 附带: 净值曲线 / 超额收益 / 调仓点 (供前端图表)
+    curve = ev.get("equity_curve") or []
+    active = ev.get("daily_active_returns") or []
+    rebalances = [
+        {"date": p["date"], "n_positions": len(p.get("positions", []))}
+        for p in (ev.get("positions_history") or []) if p.get("positions")]
     return {
         "available": True,
         "version": "v24b (VWAP执行+10bps残差)",
@@ -89,4 +95,7 @@ def backtest_trades():
         "n_rebalances": ev.get("n_rebalances"),
         "count": len(trades),
         "trades": trades,
+        "equity_curve": curve,          # [{date, equity}]
+        "active_returns": active,       # [float] 日超额收益 (与 equity_curve 同序)
+        "rebalances": rebalances,       # [{date, n_positions}]
     }
