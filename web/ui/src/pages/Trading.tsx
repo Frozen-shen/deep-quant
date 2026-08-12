@@ -200,7 +200,7 @@ export default function Trading() {
               { value: 2026, label: '2026（模拟盘）' },
             ]} />
           {year && <Typography.Text type="secondary">该年成交 {tradesQuery.data?.count ?? 0} 条</Typography.Text>}
-          {year === 2025 && <Tag color="orange">TEST① 分区纪律禁止交易，无成交记录</Tag>}
+          {year === 2025 && <Tag color="orange">2025 年模拟盘无成交；v24b 实验的 2025 年换仓见上方卡片</Tag>}
         </Space>
         {trades.length ? (
           <Table rowKey={(_r, i) => `${i}`} dataSource={trades} columns={tradeCols} size="small"

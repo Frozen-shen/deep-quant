@@ -47,26 +47,106 @@ def _load_v24b_extend() -> dict | None:
 
 
 def _reconstruct_v24b_trades(ev: dict) -> list[dict]:
-    """从相邻调仓点持仓差异还原买卖记录 (EXTEND 2025-01~2026-06, 18 次调仓)。
+    """按回测真实逻辑重建成交记录 (EXTEND 2025-01~2026-06, 18 次调仓)。
 
-    首调仓日 (前一次持仓为空) = 全部买入; 之后逐期 diff:
-      新增持仓 = BUY, 退出持仓 = SELL。
-    qty/price 置 0 (回测 JSON 无逐笔价格, 前端标注"换入/换出"即可)。
+    模拟规则 (与 run_walkforward_backtest 一致):
+      - 初始资金 100,000, top_k=30, 整手 100 股
+      - 成交价 = 调仓日 VWAP (v24b 为 VWAP 执行)
+      - 首次建仓等权分配; 之后 diff: 新增=买入, 退出=卖出 (数量=持仓)
+      - 佣金: 买 0.00025 / 卖 0.00075
+    说明: 回测 JSON 只存持仓列表 (无逐笔价格/数量), 本函数按上述规则
+    重建, 价格/数量为近似值 (非逐笔真实成交, 前端已注明)。
     """
+    import pandas as pd
+
+    BASE = Path(__file__).resolve().parents[3]
+    u_dir = BASE / "data_cache" / "unadjusted"
+    adj_dir = BASE / "data_store"
+
+    # 模块级 VWAP 缓存: {sym: DataFrame(date 索引 × vwap)} 或 None
+    _cache = getattr(_reconstruct_v24b_trades, "_vwap_cache", {})
+
+    def vwap(sym: str, date_str: str) -> float | None:
+        """单只股票单日 VWAP (未复权 amount/volume × 复权因子, 单位自动检测)。"""
+        nonlocal _cache
+        if sym not in _cache:
+            upath = u_dir / f"{sym}.parquet"
+            apath = adj_dir / f"{sym}.parquet"
+            if not (upath.exists() and apath.exists()):
+                _cache[sym] = None
+            else:
+                try:
+                    u = pd.read_parquet(upath, columns=["date", "close", "amount", "volume"])
+                    a = pd.read_parquet(apath, columns=["date", "close"])
+                    u["date"] = pd.to_datetime(u["date"])
+                    a["date"] = pd.to_datetime(a["date"])
+                    m = u.merge(a, on="date", suffixes=("_u", "_adj"), how="inner")
+                    m = m[(m["volume"] > 0) & (m["amount"] > 0) & (m["close_u"] > 0)]
+                    if len(m) == 0:
+                        _cache[sym] = None
+                    else:
+                        per = (m["amount"] / m["volume"]).median()
+                        med_close = m["close_u"].median()
+                        vol_factor = 100.0 if med_close * 50 < per < med_close * 200 else 1.0
+                        m["vwap"] = (m["amount"] / (m["volume"] * vol_factor)) * \
+                                    (m["close_adj"] / m["close_u"])
+                        m = m[m["vwap"].notna() & (m["vwap"] > 0)]
+                        _cache[sym] = m[["date", "vwap"]].set_index("date").sort_index() \
+                            if len(m) else None
+                except Exception:
+                    _cache[sym] = None
+        _reconstruct_v24b_trades._vwap_cache = _cache
+        vf = _cache.get(sym)
+        if vf is None or len(vf) == 0:
+            return None
+        t = pd.Timestamp(date_str)
+        sub = vf[vf.index <= t]
+        return float(sub["vwap"].iloc[-1]) if len(sub) else None
+
     pts = [p for p in ev.get("positions_history", []) if p.get("positions")]
     trades = []
+    cash = 100_000.0
+    holdings: dict[str, int] = {}
+    lot = 100
     prev: set[str] = set()
+
     for pt in pts:
         cur = set(pt["positions"])
         date = pt["date"]
-        for s in sorted(cur - prev):      # 新增持仓 → 买入
-            trades.append({"date": date, "symbol": s, "action": "BUY",
-                           "qty": 0, "price": 0.0, "commission": 0.0,
-                           "reason": "v24b实验"})
-        for s in sorted(prev - cur):      # 退出持仓 → 卖出
+        # 卖出: 退出的持仓 (数量=持仓, 价=VWAP, 卖佣 0.00075)
+        for s in sorted(prev - cur):
+            qty = holdings.get(s, 0)
+            if qty <= 0:
+                continue
+            px = vwap(s, date) or 0.0
+            commission = round(qty * px * 0.00075, 2) if px > 0 else 0.0
+            cash += qty * px - commission
             trades.append({"date": date, "symbol": s, "action": "SELL",
-                           "qty": 0, "price": 0.0, "commission": 0.0,
+                           "qty": qty, "price": round(px, 2), "commission": commission,
                            "reason": "v24b实验"})
+        # 买入: 新增持仓, 等权分配剩余现金 (留 1% 余量)
+        to_buy = sorted(cur - prev)
+        if to_buy:
+            per = cash * 0.99 / len(to_buy)
+            for s in to_buy:
+                px = vwap(s, date) or 0.0
+                if px <= 0:
+                    continue
+                qty = int(per / px / lot) * lot
+                if qty < lot:
+                    continue
+                cost = qty * px
+                if cost > cash * 0.99:
+                    qty = int(cash * 0.99 / px / lot) * lot
+                    cost = qty * px
+                if qty < lot:
+                    continue
+                commission = round(cost * 0.00025, 2)
+                cash -= cost + commission
+                holdings[s] = qty
+                trades.append({"date": date, "symbol": s, "action": "BUY",
+                               "qty": qty, "price": round(px, 2), "commission": commission,
+                               "reason": "v24b实验"})
         prev = cur
     return trades
 
