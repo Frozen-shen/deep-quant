@@ -1,335 +1,328 @@
 {
-  "meta": {
-    "generated_at": "2026-08-03 10:22:00",
-    "description": "P5 全因子组合验证报告",
-    "bt_config": {
-      "start": "2019-01-01",
-      "end": "2026-06-30",
-      "rebalance_days": 20,
-      "top_k": 30,
-      "ic_lookback_months": 12,
-      "initial_capital": 1000000,
-      "lot_size": 100,
-      "slippage_bps": 30,
-      "commission_buy": 0.00025,
-      "commission_sell": 0.00075
-    },
-    "thresholds": {
-      "price_volume": {
-        "min_abs_icir": 0.3,
-        "label": "价量因子"
-      },
-      "fundamental": {
-        "min_abs_icir": 0.15,
-        "label": "基本面因子"
-      },
-      "event": {
-        "min_abs_icir": 0.1,
-        "label": "事件因子",
-        "direction_consistent": true
-      },
-      "money_flow": {
-        "skip": true,
-        "label": "资金流因子 (历史不足, 跳过)"
-      }
-    }
+ "generated_at": "2026-08-12 09:23:26",
+ "source": "walkforward_results_v24b_vwap.json",
+ "verdict": "v24b-prod",
+ "note": "v24b (VWAP执行层) 生产权重: fold均值+10.10%, EXTEND+2.1%, Sharpe 1.26; 替换 2026-08-03 p5 (SKIP)",
+ "selected_factors": [
+  {
+   "name": "market_cap",
+   "icir": -1.4393,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
   },
-  "selected_factors": [
-    {
-      "name": "cord_30",
-      "icir": -0.6353,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 240
-    },
-    {
-      "name": "cord_20",
-      "icir": -0.5753,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "turnover_vol",
-      "icir": -0.5651,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "cord_60",
-      "icir": -0.5528,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "liq_ratio",
-      "icir": -0.5267,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 243
-    },
-    {
-      "name": "turnover_trend",
-      "icir": -0.4584,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "skew_20d",
-      "icir": -0.4442,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "cord_10",
-      "icir": -0.4204,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "imxd_30",
-      "icir": 0.3947,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "return_30d",
-      "icir": 0.3932,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "beta_30",
-      "icir": -0.3866,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 240
-    },
-    {
-      "name": "momentum_20d",
-      "icir": 0.3809,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 239
-    },
-    {
-      "name": "volatility_10d",
-      "icir": -0.3776,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "ma5_ma30_spread",
-      "icir": -0.3716,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 240
-    },
-    {
-      "name": "rev_mom_spread",
-      "icir": 0.3649,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 239
-    },
-    {
-      "name": "vol_price_sync",
-      "icir": -0.3607,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "imxd_20",
-      "icir": 0.3581,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 239
-    },
-    {
-      "name": "amplitude_5d",
-      "icir": -0.3531,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "imin_20",
-      "icir": -0.3505,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 239
-    },
-    {
-      "name": "klen",
-      "icir": -0.3476,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 243
-    },
-    {
-      "name": "volatility_20d",
-      "icir": -0.347,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "imax_30",
-      "icir": 0.3411,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "ma10_ma20_spread",
-      "icir": -0.3347,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "imin_30",
-      "icir": -0.3298,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "ma20_ma60_spread",
-      "icir": -0.3291,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "beta_20",
-      "icir": -0.3284,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "volatility_30d",
-      "icir": -0.328,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 240
-    },
-    {
-      "name": "lockup_pressure",
-      "icir": -0.3269,
-      "category": "event",
-      "weight_multiplier": 0.5,
-      "n_days": 5
-    },
-    {
-      "name": "ma5_ma20_spread",
-      "icir": -0.3262,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "sump_30",
-      "icir": -0.3242,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "ma3_ma20_spread",
-      "icir": -0.3227,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "sumd_30",
-      "icir": -0.3221,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "sumn_30",
-      "icir": 0.32,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 242
-    },
-    {
-      "name": "ma_bullish",
-      "icir": -0.3178,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "vma_60",
-      "icir": 0.3161,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 237
-    },
-    {
-      "name": "sharpe_20d",
-      "icir": 0.3132,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 241
-    },
-    {
-      "name": "imin_60",
-      "icir": -0.3119,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 231
-    },
-    {
-      "name": "imax_20",
-      "icir": 0.3089,
-      "category": "price_volume",
-      "weight_multiplier": 1.0,
-      "n_days": 239
-    },
-    {
-      "name": "preview_surprise",
-      "icir": 0.1793,
-      "category": "event",
-      "weight_multiplier": 1.0,
-      "n_days": 195
-    }
-  ],
-  "correlation_matrix": {},
-  "pruned_factors": {},
-  "backtest": {
-    "total_return": 0,
-    "annual_return": 0,
-    "benchmark_annual": 0,
-    "excess_annual": 0,
-    "sharpe": 0,
-    "ir": 0,
-    "max_drawdown": 0,
-    "calmar": 0,
-    "monthly_turnover": 0,
-    "cost_drag": 0,
-    "rebalance_count": 0,
-    "total_trades": 0
+  {
+   "name": "amihud_5d",
+   "icir": 1.4281,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
   },
-  "bootstrap": {},
-  "subsample": [],
-  "regime": [],
-  "verdict": "SKIP",
-  "verdict_reasons": [
-    "回测被跳过"
-  ]
+  {
+   "name": "amihud_20d",
+   "icir": 1.3861,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "amihud_illiq",
+   "icir": 1.3784,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "fund_pb",
+   "icir": -1.0792,
+   "category": "fundamental",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "fund_bp",
+   "icir": 1.0592,
+   "category": "fundamental",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "liq_ratio",
+   "icir": -1.0062,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "amplitude_5d",
+   "icir": -0.8247,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "amplitude_20d",
+   "icir": -0.7894,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "cord_20",
+   "icir": -0.771,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "intraday_range_20d",
+   "icir": -0.771,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "k_len",
+   "icir": -0.7696,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "corr_pv_10",
+   "icir": -0.7454,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_10d",
+   "icir": -0.74,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "cord_30",
+   "icir": -0.7392,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "cord_60",
+   "icir": -0.7331,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_20d",
+   "icir": -0.7279,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_30d",
+   "icir": -0.727,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volume_price_corr_20d",
+   "icir": -0.6841,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_5d",
+   "icir": -0.6711,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "high_low_ratio_5d",
+   "icir": -0.6581,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "skew_60d",
+   "icir": -0.6562,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_60d",
+   "icir": -0.6547,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "cord_10",
+   "icir": -0.6545,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "vma_60",
+   "icir": 0.6363,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volatility_90d",
+   "icir": -0.6303,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "turnover_vol",
+   "icir": -0.6302,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "fund_roe_ttm",
+   "icir": -0.6275,
+   "category": "fundamental",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "corr_pv_20",
+   "icir": -0.6267,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "cord_5",
+   "icir": -0.6045,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "aux_gdhs_change_pct",
+   "icir": -0.5994,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "volume_cv_20d",
+   "icir": -0.595,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "ma60_bias",
+   "icir": 0.5757,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "vol_adj_mom_60d",
+   "icir": -0.5682,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "turnover_max5",
+   "icir": -0.5555,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "channel_low_20",
+   "icir": -0.5491,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "return_30d",
+   "icir": 0.5449,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "imax_30",
+   "icir": 0.5427,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "imxd_30",
+   "icir": 0.54,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "imin_60",
+   "icir": -0.5354,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "fund_accruals",
+   "icir": -0.5242,
+   "category": "fundamental",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "sumd_60",
+   "icir": -0.5228,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "return_60d",
+   "icir": 0.5214,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "ma10_ma60_spread",
+   "icir": -0.5133,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "imxd_60",
+   "icir": 0.5106,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "vstd_60",
+   "icir": 0.5106,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "sump_60",
+   "icir": -0.5105,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "sumn_60",
+   "icir": 0.5099,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "vma_30",
+   "icir": 0.5091,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  },
+  {
+   "name": "return_90d",
+   "icir": 0.5077,
+   "category": "price_volume",
+   "weight_multiplier": 1.0
+  }
+ ],
+ "meta": {
+  "generated_at": "2026-08-12 09:23:26",
+  "description": "v24b 最优配置部署 (VWAP执行+10bps残差, pool_filter+vol_target, 15m分钟因子)",
+  "bt_config": {
+   "rebalance_days": 20,
+   "top_k": 30,
+   "initial_capital": 100000,
+   "lot_size": 100,
+   "slippage_bps": 30,
+   "commission_buy": 0.00025,
+   "commission_sell": 0.00075,
+   "vol_source": "daily",
+   "execution_price": "vwap",
+   "vwap_residual_bps": 10
+  },
+  "thresholds": {
+   "fold_min_hits": 3,
+   "fold_t_stat_min": 1.645
+  }
+ }
 }
