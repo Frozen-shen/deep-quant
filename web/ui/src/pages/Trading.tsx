@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Card, Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Select, Space, Tabs } from 'antd'
+import { Card, Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Select, Space } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { fetchBroker, fetchBrokerTrades, fetchBacktestTrades, fetchUniverse } from '../api'
 import { col } from '../lib/columns'
@@ -73,64 +73,60 @@ export default function Trading() {
         <Alert type="warning" showIcon message="模拟盘执行器未连接"
           description="请检查 execution/paper_executor 是否运行，或后端 broker 适配器配置" style={{ marginBottom: 16 }} />
       )}
-      <Tabs
-        items={[
-          {
-            key: 'paper',
-            label: '模拟盘实盘',
-            children: (<>
-              <Row gutter={12}>
-                <Col span={8}><StatCard title="现金" value={fmtNum(data?.balance?.cash, 0)} /></Col>
-                <Col span={8}><StatCard title="持仓数" value={positions.length} /></Col>
-                <Col span={8}><StatCard title="最近成交" value={(data?.trades ?? []).length} /></Col>
-              </Row>
-              {positions.length ? (
-                <Table rowKey="symbol" dataSource={positions} columns={posCols} size="small" style={{ marginTop: 16 }}
-                  pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }} />
-              ) : (
-                <Empty description="暂无持仓" style={{ marginTop: 24 }} />
-              )}
-              <Typography.Title level={5} style={{ marginTop: 24 }}>最近成交</Typography.Title>
-              <Space style={{ marginBottom: 12 }}>
-                <Select allowClear placeholder="按年份筛选" style={{ width: 160 }} value={year} onChange={setYear}
-                  options={[
-                    { value: 2021, label: '2021（回测）' },
-                    { value: 2022, label: '2022（回测）' },
-                    { value: 2023, label: '2023（回测）' },
-                    { value: 2024, label: '2024（回测）' },
-                    { value: 2025, label: '2025（TEST① 无交易）' },
-                    { value: 2026, label: '2026（模拟盘）' },
-                  ]} />
-                {year && <Typography.Text type="secondary">该年成交 {tradesQuery.data?.count ?? 0} 条</Typography.Text>}
-                {year === 2025 && <Tag color="orange">TEST① 分区（2025-01~2026-06）纪律禁止交易，无成交记录</Tag>}
-              </Space>
-              {trades.length ? (
-                <Table rowKey={(_r, i) => `${i}`} dataSource={trades} columns={tradeCols} size="small"
-                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
-              ) : (
-                <Empty description="暂无成交记录" />
-              )}
-            </>),
-          },
-          {
-            key: 'v24b',
-            label: 'v24b 最优实验',
-            children: (<>
-              {btQuery.isLoading ? <Spin /> : btQuery.data?.available === false ? (
-                <Empty description={btQuery.data?.note ?? '实验数据不可用'} />
-              ) : (
-                <>
-                  <Alert type="info" showIcon style={{ marginBottom: 12 }}
-                    message={`v24b（VWAP执行+10bps残差）· ${btQuery.data?.period ?? ''}`}
-                    description={`超额年化 ${btQuery.data?.excess_annual != null ? (btQuery.data.excess_annual as number).toFixed(1) + '%' : '—'} · Sharpe ${btQuery.data?.sharpe ?? '—'} · MaxDD ${btQuery.data?.max_drawdown ?? '—'}% · ${btQuery.data?.n_rebalances ?? 0} 次调仓 · ${btQuery.data?.count ?? 0} 笔换仓（还原自回测 JSON，非实盘成交）`} />
-                  <Table rowKey={(_r, i) => `${i}`} dataSource={btQuery.data?.trades ?? []} columns={tradeCols} size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
-                </>
-              )}
-            </>),
-          },
-        ]}
-      />
+
+      {/* ★ v24b 最优实验 (主视图): 指标 + 换仓记录 */}
+      <Typography.Title level={5} style={{ marginTop: 16 }}>v24b 最优实验（EXTEND 模拟考 2025-01~2026-06）</Typography.Title>
+      {btQuery.isLoading ? <Spin /> : btQuery.data?.available === false ? (
+        <Empty description={btQuery.data?.note ?? '实验数据不可用'} />
+      ) : (
+        <>
+          <Row gutter={12} style={{ marginBottom: 12 }}>
+            <Col span={6}><StatCard title="超额年化" value={btQuery.data?.excess_annual != null ? `${(btQuery.data.excess_annual as number).toFixed(1)}%` : '—'} /></Col>
+            <Col span={6}><StatCard title="Sharpe" value={btQuery.data?.sharpe ?? '—'} /></Col>
+            <Col span={6}><StatCard title="最大回撤" value={btQuery.data?.max_drawdown != null ? `${(btQuery.data.max_drawdown as number).toFixed(1)}%` : '—'} /></Col>
+            <Col span={6}><StatCard title="换仓笔数" value={btQuery.data?.count ?? 0} /></Col>
+          </Row>
+          <Alert type="info" showIcon style={{ marginBottom: 12 }}
+            message={`v24b（VWAP执行+10bps残差）· ${btQuery.data?.period ?? ''} · ${btQuery.data?.n_rebalances ?? 0} 次调仓`}
+            description="数据还原自回测 JSON（walkforward_results_v24b_vwap.json），非实盘成交" />
+          <Table rowKey={(_r, i) => `${i}`} dataSource={btQuery.data?.trades ?? []} columns={tradeCols} size="small"
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
+        </>
+      )}
+
+      {/* 模拟盘实盘: 持仓 + 最近成交 */}
+      <Typography.Title level={5} style={{ marginTop: 32 }}>模拟盘实盘</Typography.Title>
+      <Row gutter={12}>
+        <Col span={8}><StatCard title="现金" value={fmtNum(data?.balance?.cash, 0)} /></Col>
+        <Col span={8}><StatCard title="持仓数" value={positions.length} /></Col>
+        <Col span={8}><StatCard title="最近成交" value={(data?.trades ?? []).length} /></Col>
+      </Row>
+      {positions.length ? (
+        <Table rowKey="symbol" dataSource={positions} columns={posCols} size="small" style={{ marginTop: 16 }}
+          pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }} />
+      ) : (
+        <Empty description="暂无持仓" style={{ marginTop: 24 }} />
+      )}
+      <Typography.Title level={5} style={{ marginTop: 24 }}>最近成交</Typography.Title>
+      <Space style={{ marginBottom: 12 }}>
+        <Select allowClear placeholder="按年份筛选" style={{ width: 160 }} value={year} onChange={setYear}
+          options={[
+            { value: 2021, label: '2021（回测）' },
+            { value: 2022, label: '2022（回测）' },
+            { value: 2023, label: '2023（回测）' },
+            { value: 2024, label: '2024（回测）' },
+            { value: 2025, label: '2025（TEST① 无交易）' },
+            { value: 2026, label: '2026（模拟盘）' },
+          ]} />
+        {year && <Typography.Text type="secondary">该年成交 {tradesQuery.data?.count ?? 0} 条</Typography.Text>}
+        {year === 2025 && <Tag color="orange">TEST① 分区（2025-01~2026-06）纪律禁止交易，无成交记录</Tag>}
+      </Space>
+      {trades.length ? (
+        <Table rowKey={(_r, i) => `${i}`} dataSource={trades} columns={tradeCols} size="small"
+          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
+      ) : (
+        <Empty description="暂无成交记录" />
+      )}
     </div>
   )
 }
