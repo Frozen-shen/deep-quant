@@ -11,10 +11,10 @@ import storage  # noqa: E402
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 _adapter = get_adapter("paper")  # config.yaml broker.adapter 可切换 qmt
 
-# v24b 最优实验的 EXTEND 模拟考结果 (2026-08-12 部署为生产权重)
-# v24d (2026-08-12): 重跑版, 记录真实逐笔成交 (buy+sell, 含价格/数量/佣金)
+# v24e (2026-08-12): 最新生产实验 — POV 执行 + 修复后分钟数据 (volume单位统一股),
+# 含真实逐笔成交 + 每笔 POV 时段成交时间 (fill_times)
 V24B_RESULT = (Path(__file__).resolve().parents[3] / "data" / "ic_validation"
-               / "walkforward_results_v24d_trades.json")
+               / "walkforward_results_v24e_pov.json")
 
 
 @router.get("/status")
