@@ -280,15 +280,91 @@ class MinuteFetcher:
             return None
         return float(day_bars["收盘"].iloc[-1])
 
+    def get_pov_price(self, symbol: str, date_str: str,
+                      order_qty: float, max_participation: float = 0.20,
+                      lookback_days: int = 20) -> Optional[float]:
+        """
+        POV (Percent of Volume) 模拟成交价 — 跟随市场成交量节奏拆单。
+
+        参与率自适应: ρ = min(max_participation, order_qty / 预测日成交量)
+          - 大订单 (占日成交量比例高) → 高参与率, 尽快完成
+          - 小订单 → 低参与率, 全天分散跟随市场节奏
+          下限 0.001 (极小订单也给最小参与, 避免瞬间成交失真)
+
+        执行: 遍历当日每个 5m 时段,
+          下单量 = min(该时段实际成交量 × ρ, 剩余订单)
+        成交价 = Σ(时段下单量 × 时段价) / 总下单量 (量加权, 模拟自然成交)
+
+        Args:
+          symbol: 股票代码
+          date_str: 执行日期 "YYYY-MM-DD"
+          order_qty: 订单数量 (股)
+          max_participation: 参与率上限 (默认 20%)
+          lookback_days: 预测日成交量用的历史窗口 (交易日)
+
+        Returns:
+          POV 模拟成交价 (加权平均) 或 None (无数据/无法成交)
+        """
+        if order_qty <= 0:
+            return None
+        df = self.fetch(symbol, days=lookback_days + 5, end_date=date_str)
+        if df is None or len(df) == 0:
+            return None
+
+        date_dt = pd.Timestamp(date_str)
+        day_bars = df[df["时间"].dt.date == date_dt.date()]
+        if len(day_bars) == 0:
+            return None
+
+        # 预测日成交量: 执行日前 lookback_days 个交易日的平均成交量
+        hist = df[df["时间"].dt.date < date_dt.date()]
+        if len(hist) == 0:
+            return None
+        hist_daily = hist.groupby(hist["时间"].dt.date)["成交量"].sum()
+        pred_vol = float(hist_daily.tail(lookback_days).mean()) if len(hist_daily) else 0.0
+        if pred_vol <= 0:
+            return None
+
+        # 自适应参与率: 目标"一天内按市场节奏完成"
+        rho = min(max_participation, order_qty / pred_vol)
+        rho = max(rho, 0.001)
+
+        # 逐时段执行 (POV): 量大的时段多买, 量小的时段少买
+        remaining = float(order_qty)
+        total_cost = 0.0
+        filled = 0.0
+        for _, bar in day_bars.iterrows():
+            if remaining <= 0:
+                break
+            bar_vol = float(bar["成交量"])
+            q = min(bar_vol * rho, remaining)
+            if q <= 0:
+                continue
+            price = float(bar["收盘"])  # 时段价 (5m收盘近似)
+            total_cost += q * price
+            filled += q
+            remaining -= q
+
+        if filled <= 0:
+            return None
+        # 未完成部分: 按当日最后价补单 (模拟强制完成)
+        if remaining > 0:
+            last_price = float(day_bars["收盘"].iloc[-1])
+            total_cost += remaining * last_price
+            filled += remaining
+        return float(total_cost / filled)
+
     def get_execution_price(self, symbol: str, date_str: str,
-                            algo: str = "vwap") -> Optional[float]:
+                            algo: str = "vwap",
+                            order_qty: float = 0.0) -> Optional[float]:
         """
         统一执行价格接口 — 根据算法返回模拟成交价。
 
         Args:
           symbol: 股票代码
           date_str: 执行日期
-          algo: "open" / "close" / "vwap" / "twap"
+          algo: "open" / "close" / "vwap" / "twap" / "pov"
+          order_qty: 订单数量 (POV 需要, 其他算法可忽略)
 
         Returns:
           模拟成交价
@@ -299,6 +375,8 @@ class MinuteFetcher:
             return self.get_close_price(symbol, date_str)
         elif algo == "twap":
             return self.get_twap(symbol, date_str)
+        elif algo == "pov":
+            return self.get_pov_price(symbol, date_str, order_qty)
         else:  # vwap (default)
             return self.get_vwap(symbol, date_str)
 

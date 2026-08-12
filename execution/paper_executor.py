@@ -438,8 +438,9 @@ class PaperExecutor:
                         sym, "SELL", "rejected", reason))
                     continue
 
-            # ★ 统一执行价格 (分钟VWAP/TWAP 或 日线开盘价)
-            px = self._get_execution_price(sym, date_str, all_data)
+            # ★ 统一执行价格 (分钟VWAP/TWAP/POV 或 日线开盘价)
+            # POV: 用持仓数量作为订单量 (参与率自适应)
+            px = self._get_execution_price(sym, date_str, all_data, order_qty=qty)
             if px is None:
                 report.sell_rejected.append(OrderResult(
                     sym, "SELL", "rejected", RejectReason.NO_DATA.value))
@@ -481,20 +482,23 @@ class PaperExecutor:
                             sym, "BUY", "rejected", reason))
                         continue
 
-                # ★ 统一执行价格 (分钟VWAP/TWAP 或 日线开盘价)
-                px = self._get_execution_price(sym, date_str, all_data)
+                # ★ 统一执行价格 (分钟VWAP/TWAP/POV 或 日线开盘价)
+                # POV: 需先确定买入数量作为订单量 → 先用临时价估 qty, 再取 POV 价
+                prov_px = self._get_execution_price(sym, date_str, all_data)
+                if prov_px is None:
+                    report.buy_rejected.append(OrderResult(
+                        sym, "BUY", "rejected", RejectReason.NO_DATA.value))
+                    continue
+                # 计算买入数量 (手数对齐)
+                qty = int(cash_per / prov_px / self.lot_size) * self.lot_size
+                if qty < self.lot_size:
+                    continue
+                px = self._get_execution_price(sym, date_str, all_data, order_qty=qty)
                 if px is None:
                     report.buy_rejected.append(OrderResult(
                         sym, "BUY", "rejected", RejectReason.NO_DATA.value))
                     continue
                 px = self._apply_slippage(px, "BUY")
-
-                # 计算买入数量 (手数对齐)
-                qty = int(cash_per / px / self.lot_size) * self.lot_size
-                if qty < self.lot_size:
-                    report.buy_rejected.append(OrderResult(
-                        sym, "BUY", "rejected", RejectReason.LOT_SIZE.value))
-                    continue
 
                 cost = qty * px
 
@@ -674,14 +678,16 @@ class PaperExecutor:
         return price + slip if side == "BUY" else price - slip
 
     def _get_execution_price(self, symbol: str, date_str: str,
-                             all_data: dict = None) -> Optional[float]:
+                             all_data: dict = None,
+                             order_qty: float = 0.0) -> Optional[float]:
         """
-        获取执行价格 — 根据模式选择日线开盘价或分钟线VWAP/TWAP。
+        获取执行价格 — 根据模式选择日线开盘价或分钟线算法 (VWAP/TWAP/POV)。
 
         Args:
           symbol: 股票代码
           date_str: 执行日期
           all_data: 日线数据 (分钟模式不需要, 但保留兼容)
+          order_qty: 订单数量 (POV 算法需要, 其他算法忽略)
 
         Returns:
           执行价格或 None
@@ -690,7 +696,8 @@ class PaperExecutor:
             try:
                 from data.minute_fetcher import MinuteFetcher
                 mf = MinuteFetcher()
-                return mf.get_execution_price(symbol, date_str, self.execution_algo)
+                return mf.get_execution_price(symbol, date_str,
+                                              self.execution_algo, order_qty)
             except Exception as e:
                 print(f"  ⚠️ 分钟数据获取失败 {symbol}: {e}, 回退到日线")
                 # fall through to daily mode
