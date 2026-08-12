@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented } from 'antd'
+import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented, Tooltip } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
 import { fetchBroker, fetchBacktestTrades, fetchUniverse } from '../api'
@@ -9,7 +9,7 @@ import { actionTag } from '../lib/labels'
 import StatCard from '../components/StatCard'
 
 interface Position { symbol: string; qty: number; avg_cost: number; market_value: number }
-interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string }
+interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[] }
 
 export default function Trading() {
   /** 换仓明细按实验年份筛选: all / 2025 / 2026 (EXTEND 覆盖区间) */
@@ -112,7 +112,15 @@ export default function Trading() {
       ) },
   ]
   const tradeCols = [
-    col<Trade>('date', { title: '时间', width: 150, render: (v) => fmtDateTime(v as string) }),
+    { title: '时间', dataIndex: 'date', width: 150,
+      render: (v: string, r: Trade) => {
+        const ft = (r as any).fill_times as string[] | undefined
+        const base = fmtDateTime(v as string)
+        if (ft && ft.length > 1) {
+          return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft[0]} ~ ${ft[ft.length - 1]}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
+        }
+        return base
+      } },
     col<Trade>('symbol', { title: '代码', width: 90 }),
     { title: '名称', dataIndex: 'symbol', width: 130,
       render: (_v: unknown, r: Trade) => nameOf.get(r.symbol) ?? '—' },
