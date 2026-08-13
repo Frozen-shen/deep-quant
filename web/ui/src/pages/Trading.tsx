@@ -112,12 +112,17 @@ export default function Trading() {
       ) },
   ]
   const tradeCols = [
-    { title: '时间', dataIndex: 'date', width: 150,
+    { title: '时间', dataIndex: 'date', width: 170,
       render: (v: string, r: Trade) => {
         const ft = (r as any).fill_times as string[] | undefined
         const base = fmtDateTime(v as string)
         if (ft && ft.length > 1) {
-          return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft[0]} ~ ${ft[ft.length - 1]}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
+          // POV 多段拆单: 显示首末时段 + 段数
+          return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft.join(', ')}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
+        }
+        if (ft && ft.length === 1) {
+          // 单段成交 (小订单 VWAP): 显示成交时段
+          return <Tooltip title={`成交时段 ${ft[0]}`}><span>{base} <Tag color="green">{ft[0]}</Tag></span></Tooltip>
         }
         return base
       } },
@@ -187,7 +192,7 @@ export default function Trading() {
             ]}
             value={btYear} onChange={setBtYear} />
           <Typography.Text type="secondary">
-            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，VWAP 成交·含佣金）
+            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，POV 执行·含佣金，悬停时间列看成交时段）
           </Typography.Text>
         </Space>
         {filteredTrades.length ? (
