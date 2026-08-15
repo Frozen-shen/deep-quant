@@ -418,8 +418,10 @@ class MinuteFetcher:
             if day_v <= 0:
                 return None
             vwap_px = day_pv / day_v
+            # ★ 时间标记: 小订单成交价为"全天 VWAP" (全天分散, 无单一时刻),
+            # 不是第一根 bar 的时间 — 2026-08-15 修复 (旧代码填 09:35 误导为开盘成交)
             return {"price": float(vwap_px),
-                    "fills": [{"time": str(day_bars["时间"].iloc[0].to_pydatetime().strftime("%H:%M")),
+                    "fills": [{"time": "全天VWAP",
                                "price": round(vwap_px, 4), "qty": int(order_qty)}],
                     "n_fills": 1}
 

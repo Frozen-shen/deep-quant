@@ -100,6 +100,22 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
     trades = ev.get("trades", []) or []
     stock_pnl = aggregate_stock_pnl(trades)
 
+    # ── 逐笔成交增强 (2026-08-15) ──
+    # 1. equity_after: 成交后净值 (从 equity_curve 按日期映射; 调仓日所有成交
+    #    共享当日净值, 展示"这笔调仓后的账户净值")
+    # 2. fill_times 归一化: 旧数据小订单路径填 09:35 (误导为开盘成交),
+    #    统一为 全天VWAP (小订单按全天均价成交, 无单一时刻)
+    eq_by_date = {}
+    for p in eq:
+        eq_by_date[p["date"]] = p.get("equity")
+    for t in trades:
+        t_date = t.get("date", "")
+        if t_date in eq_by_date and "equity_after" not in t:
+            t["equity_after"] = eq_by_date[t_date]
+        ft = t.get("fill_times")
+        if ft and ft == ["09:35"]:
+            t["fill_times"] = ["全天VWAP"]
+
     return {"meta": meta, "metrics": metrics, "series": series, "folds": folds,
             "stock_pnl": stock_pnl, "trades": trades,
             "equity_curve": eq, "benchmark_curve": bench}

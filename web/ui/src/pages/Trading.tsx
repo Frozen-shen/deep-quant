@@ -78,30 +78,37 @@ export default function Trading() {
 
   const metricOf = (key: string) => metrics.find(m => m.key === key)?.value
 
+  /** 时间列渲染: POV 多段拆单 / 全天VWAP (小订单) / 单时段 */
+  const timeRender = (v: string, r: Trade) => {
+    const ft = (r as any).fill_times as string[] | undefined
+    const base = fmtDateTime(v as string)
+    if (ft && ft.length > 1) {
+      return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft.join(', ')}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
+    }
+    if (ft && ft.length === 1 && ft[0] === '全天VWAP') {
+      // 小订单 (<0.1% 日成交量): 按全天均价成交, 无单一时刻
+      return <Tooltip title="订单小于日成交量 0.1%, 按全天 VWAP 均价成交（非开盘机械买入）"><span>{base} <Tag color="green">全天VWAP</Tag></span></Tooltip>
+    }
+    if (ft && ft.length === 1) {
+      return <Tooltip title={`成交时段 ${ft[0]}`}><span>{base} <Tag color="green">{ft[0]}</Tag></span></Tooltip>
+    }
+    return base
+  }
+
   const tradeCols = [
-    { title: '时间', dataIndex: 'date', width: 170,
-      render: (v: string, r: Trade) => {
-        const ft = (r as any).fill_times as string[] | undefined
-        const base = fmtDateTime(v as string)
-        if (ft && ft.length > 1) {
-          // POV 多段拆单: 显示首末时段 + 段数
-          return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft.join(', ')}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
-        }
-        if (ft && ft.length === 1) {
-          // 单段成交 (小订单 VWAP): 显示成交时段
-          return <Tooltip title={`成交时段 ${ft[0]}`}><span>{base} <Tag color="green">{ft[0]}</Tag></span></Tooltip>
-        }
-        return base
-      } },
-    col<Trade>('symbol', { title: '代码', width: 90 }),
-    { title: '名称', dataIndex: 'symbol', width: 130,
+    { title: '时间', dataIndex: 'date', width: 170, sorter: (a: Trade, b: Trade) => a.date.localeCompare(b.date),
+      render: timeRender },
+    col<Trade>('symbol', { title: '代码', width: 90, sorter: true }),
+    { title: '名称', dataIndex: 'symbol', width: 130, sorter: (a: Trade, b: Trade) => nameOf(a.symbol).localeCompare(nameOf(b.symbol), 'zh-CN'),
       render: (_v: unknown, r: Trade) => nameOf(r.symbol) },
-    col<Trade>('action', { title: '方向', width: 90,
+    col<Trade>('action', { title: '方向', width: 90, sorter: true,
       render: (v) => { const t = actionTag(v); return <Tag color={t.color}>{t.text}</Tag> } }),
-    col<Trade>('qty', { title: '数量', width: 100, render: (v) => fmtNum(v as number, 0) }),
-    col<Trade>('price', { title: '价格', width: 110, render: (v) => fmtNum(v as number, 2) }),
-    col<Trade>('commission', { title: '佣金', width: 100, render: (v) => fmtNum(v as number, 2) }),
-    { title: '原因', dataIndex: 'reason', ellipsis: true,
+    col<Trade>('qty', { title: '数量', width: 100, sorter: true, render: (v) => fmtNum(v as number, 0) }),
+    col<Trade>('price', { title: '价格', width: 110, sorter: true, render: (v) => fmtNum(v as number, 2) }),
+    col<Trade>('commission', { title: '佣金', width: 100, sorter: true, render: (v) => fmtNum(v as number, 2) }),
+    { title: '成交后净值', dataIndex: 'equity_after', width: 130, sorter: (a: any, b: any) => (a.equity_after ?? 0) - (b.equity_after ?? 0),
+      render: (_v: unknown, r: any) => r.equity_after != null ? fmtNum(r.equity_after, 0) : '—' },
+    { title: '原因', dataIndex: 'reason', ellipsis: true, sorter: (a: Trade, b: Trade) => String(a.reason ?? '').localeCompare(String(b.reason ?? '')),
       render: (_v: unknown, r: Trade) => r.reason ?? (r.action === 'BUY' ? '建仓/加仓' : '调出/减仓') },
   ]
 
@@ -141,11 +148,11 @@ export default function Trading() {
             ]}
             value={btYear} onChange={setBtYear} />
           <Typography.Text type="secondary">
-            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，POV 执行·含佣金，悬停时间列看成交时段）
+            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，POV 执行·含佣金；全天VWAP=小订单按日均价成交；悬停时间列看明细）
           </Typography.Text>
         </Space>
         {filteredTrades.length ? (
-          <Table rowKey={(_r, i) => `${i}`} dataSource={filteredTrades} columns={tradeCols} size="small"
+          <Table rowKey={(r) => `${r.date}-${r.symbol}-${r.action}-${r.price}-${r.qty}`} dataSource={filteredTrades} columns={tradeCols} size="small"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
         ) : (
           <Empty description="该年份无换仓记录" />

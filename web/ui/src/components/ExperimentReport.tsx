@@ -84,12 +84,16 @@ export default function ExperimentReport({ detail, nameOf }: Props) {
           <Table size="small" rowKey={(r) => `${r.date}-${r.symbol}-${r.action}-${r.price}`}
             pagination={{ pageSize: 20 }} dataSource={trades}
             columns={[
-              { title: '日期', dataIndex: 'date' },
-              { title: '代码', dataIndex: 'symbol', render: (v) => `${nameOf(v)} ${v}` },
-              { title: '方向', dataIndex: 'action', render: (v) => <Tag color={v === 'BUY' ? 'red' : 'green'}>{v === 'BUY' ? '买入' : '卖出'}</Tag> },
-              { title: '价格', dataIndex: 'price', render: (v) => fmtNum(v, 2) },
-              { title: '数量', dataIndex: 'qty' },
-              { title: '佣金', dataIndex: 'commission', render: (v) => fmtNum(v, 2) },
+              { title: '日期', dataIndex: 'date', sorter: (a: any, b: any) => a.date.localeCompare(b.date) },
+              { title: '代码', dataIndex: 'symbol', sorter: (a: any, b: any) => a.symbol.localeCompare(b.symbol),
+                render: (v) => `${nameOf(v)} ${v}` },
+              { title: '方向', dataIndex: 'action', sorter: (a: any, b: any) => a.action.localeCompare(b.action),
+                render: (v) => <Tag color={v === 'BUY' ? 'red' : 'green'}>{v === 'BUY' ? '买入' : '卖出'}</Tag> },
+              { title: '价格', dataIndex: 'price', sorter: (a: any, b: any) => a.price - b.price, render: (v) => fmtNum(v, 2) },
+              { title: '数量', dataIndex: 'qty', sorter: (a: any, b: any) => a.qty - b.qty },
+              { title: '佣金', dataIndex: 'commission', sorter: (a: any, b: any) => a.commission - b.commission, render: (v) => fmtNum(v, 2) },
+              { title: '成交后净值', dataIndex: 'equity_after', sorter: (a: any, b: any) => (a.equity_after ?? 0) - (b.equity_after ?? 0),
+                render: (v) => v == null ? '—' : fmtNum(v, 0) },
             ]} />
         </Card>
       )}
