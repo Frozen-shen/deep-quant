@@ -103,8 +103,9 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
     # ── 逐笔成交增强 (2026-08-15) ──
     # 1. equity_after: 成交后净值 (从 equity_curve 按日期映射; 调仓日所有成交
     #    共享当日净值, 展示"这笔调仓后的账户净值")
-    # 2. fill_times 归一化: 旧数据小订单路径填 09:35 (误导为开盘成交),
-    #    统一为 全天VWAP (小订单按全天均价成交, 无单一时刻)
+    # 2. fill_times 归一化: 旧数据 (v24e 及之前) 小订单路径填 09:35 且按
+    #    全天VWAP成交 → 统一标记 全天VWAP(旧), 与新版随机时点市价区分。
+    #    新回测 (v26+) 小订单直接输出 市价@HH:MM, 不经过此归一化。
     eq_by_date = {}
     for p in eq:
         eq_by_date[p["date"]] = p.get("equity")

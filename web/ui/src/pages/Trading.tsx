@@ -78,7 +78,7 @@ export default function Trading() {
 
   const metricOf = (key: string) => metrics.find(m => m.key === key)?.value
 
-  /** 时间列渲染: POV 多段拆单 / 全天VWAP (小订单) / 单时段 */
+  /** 时间列渲染: POV 多段拆单 / 随机时点市价(小订单) / 全天VWAP(旧数据) / 单时段 */
   const timeRender = (v: string, r: Trade) => {
     const ft = (r as any).fill_times as string[] | undefined
     const base = fmtDateTime(v as string)
@@ -86,8 +86,13 @@ export default function Trading() {
       return <Tooltip title={`POV 拆单 ${ft.length} 段: ${ft.join(', ')}`}><span>{base} <Tag color="blue">{ft.length}段</Tag></span></Tooltip>
     }
     if (ft && ft.length === 1 && ft[0] === '全天VWAP') {
-      // 小订单 (<0.1% 日成交量): 按全天均价成交, 无单一时刻
-      return <Tooltip title="订单小于日成交量 0.1%, 按全天 VWAP 均价成交（非开盘机械买入）"><span>{base} <Tag color="green">全天VWAP</Tag></span></Tooltip>
+      // 旧数据 (v24e 及之前): 全天均价成交, 无单一时刻
+      return <Tooltip title="旧实验假设: 按全天 VWAP 均价成交"><span>{base} <Tag color="orange">全天VWAP(旧)</Tag></span></Tooltip>
+    }
+    if (ft && ft.length === 1 && ft[0].startsWith('市价@')) {
+      // 小订单 (<0.1% 日成交量): 随机时点市价单 — 模拟执行时间的不确定性
+      const t = ft[0].slice(3)
+      return <Tooltip title={`订单小于日成交量 0.1%, 模拟随机时点市价单成交 (${t}, 固定种子可复现)`}><span>{base} <Tag color="green">{t}</Tag></span></Tooltip>
     }
     if (ft && ft.length === 1) {
       return <Tooltip title={`成交时段 ${ft[0]}`}><span>{base} <Tag color="green">{ft[0]}</Tag></span></Tooltip>
@@ -148,7 +153,7 @@ export default function Trading() {
             ]}
             value={btYear} onChange={setBtYear} />
           <Typography.Text type="secondary">
-            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔，POV 执行·含佣金；全天VWAP=小订单按日均价成交；悬停时间列看明细）
+            筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔；小订单=随机时点市价单，大订单=POV 拆单；悬停时间列看明细）
           </Typography.Text>
         </Space>
         {filteredTrades.length ? (
