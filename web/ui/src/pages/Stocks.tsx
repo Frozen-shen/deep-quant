@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import ReactECharts from 'echarts-for-react'
 import { searchUniverse, fetchStock, fetchUniverse } from '../api'
+import { useExperiment } from '../experiment-context'
 
 interface Ohlc { date: string; open: number; high: number; low: number; close: number; volume?: number }
 
@@ -40,6 +41,13 @@ export default function Stocks() {
     queryKey: ['stock', symbol], queryFn: () => fetchStock(symbol as string),
     enabled: !!symbol,
   })
+  /** 当前选中实验的该股买卖点 (全局 Context) */
+  const { detail: expDetail } = useExperiment()
+
+  const tradesOfStock = useMemo(
+    () => (expDetail?.trades ?? []).filter((t: any) => t.symbol === symbol),
+    [expDetail, symbol],
+  )
 
   // 从 URL 参数进入（信号/持仓联动）时，行情加载后回填输入框
   useEffect(() => {
@@ -53,6 +61,13 @@ export default function Stocks() {
     })), [search.data])
 
   const ohlc = (detail.data?.ohlc ?? []) as Ohlc[]
+  /** 实验买卖标记 (backtrader 风格: 买入红▲ / 卖出绿▼) */
+  const buyMarks = tradesOfStock.filter((t: any) => t.action === 'BUY').map((t: any) => ({
+    name: `买入 ${t.date}`, coord: [t.date, t.price], itemStyle: { color: '#cf1322' },
+  }))
+  const sellMarks = tradesOfStock.filter((t: any) => t.action === 'SELL').map((t: any) => ({
+    name: `卖出 ${t.date}`, coord: [t.date, t.price], itemStyle: { color: '#3f8600' }, symbolRotate: 180,
+  }))
   const candleOption = {
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { data: ['K线', 'MA5', 'MA10', 'MA20', '成交量'] },
@@ -70,7 +85,11 @@ export default function Stocks() {
     ],
     dataZoom: [{ type: 'inside' }],
     series: [
-      { name: 'K线', type: 'candlestick', data: ohlc.map((o) => [o.open, o.close, o.low, o.high]) },
+      { name: 'K线', type: 'candlestick', data: ohlc.map((o) => [o.open, o.close, o.low, o.high]),
+        markPoint: (buyMarks.length || sellMarks.length) ? {
+          symbol: 'triangle', symbolSize: 11,
+          data: [...buyMarks, ...sellMarks],
+        } : undefined },
       { name: 'MA5', type: 'line', data: ma(ohlc, 5), showSymbol: false, smooth: true },
       { name: 'MA10', type: 'line', data: ma(ohlc, 10), showSymbol: false, smooth: true },
       { name: 'MA20', type: 'line', data: ma(ohlc, 20), showSymbol: false, smooth: true },
@@ -108,7 +127,10 @@ export default function Stocks() {
               return hit?.sector ? <Tag color="geekblue">{hit.sector}</Tag> : null
             })()}
           </Space>
-        )} style={{ marginTop: 16 }}>
+        )} style={{ marginTop: 16 }}
+        extra={tradesOfStock.length > 0 ? (
+          <Tag color="blue">{expDetail?.meta?.id ?? '实验'}: 买 {buyMarks.length} / 卖 {sellMarks.length}</Tag>
+        ) : undefined}>
           <ReactECharts option={candleOption} style={{ height: 480 }} />
         </Card>
       ) : (
