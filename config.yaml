@@ -90,6 +90,14 @@ minute_layer:
   min_icir: 0.3        # 分钟因子保留的 ICIR 门槛
   validate_folds: [4, 5]  # 独立验证使用的 fold 训练期
 
+# ── 回测模式 (2026-08-15: 唯一默认源, CLI 显式传参时覆盖) ──
+# 标准流程: py scripts/active/run_walkforward_backtest.py (零参数, 自动读本段)
+backtest:
+  mode: "folds"            # folds=方案C 5折Walk-Forward / rolling=滚动ICIR / dev=仅development
+  folds_only: true         # true=不执行终极 TEST (不消耗 TEST 锁, 日常验证)
+  liquid: true             # true=流动性PIT universe (全市场+过滤)
+  extend_val: ["2025-01-01", "2026-06-30"]   # fold 后扩展模拟考区间 (TEST① 毕业数据)
+
 # ── Fold 筛选 (方案C) ──
 fold:
   max_factors: 50          # 稳定因子数量上限 (v9实验: 40→50, 2026-08-07)

@@ -1963,9 +1963,9 @@ def main():
                         help="仅跑 Development")
     parser.add_argument("--test-only", action="store_true",
                         help="仅跑 TEST")
-    parser.add_argument("--folds", action="store_true",
+    parser.add_argument("--folds", action="store_true", default=None,
                         help="方案C: 5-fold Walk-Forward + 终极 TEST")
-    parser.add_argument("--folds-only", action="store_true",
+    parser.add_argument("--folds-only", action="store_true", default=None,
                         help="仅 5-fold 分析, 不执行终极 TEST (v8 新因子验证用, 不消耗 TEST 锁)")
     parser.add_argument("--force-partial-test", action="store_true",
                         help="显式确认在数据不完备时执行 TEST② (仅用于确认, 会消耗 TEST 锁)")
@@ -1973,7 +1973,7 @@ def main():
                         default=None,
                         help="fold 分析后, 用稳定因子权重在扩展区间做模拟考验证 "
                              "(如 2025-01-01 2026-06-30, TEST① 毕业数据; 不消耗任何 TEST 锁)")
-    parser.add_argument("--liquid", action="store_true",
+    parser.add_argument("--liquid", action="store_true", default=None,
                         help="使用流动性 PIT universe (全市场+过滤, 方案C推荐)")
     parser.add_argument("--unlock-test", action="store_true",
                         help="解锁终极 TEST (仅供已确认的重新验证)")
@@ -1984,6 +1984,26 @@ def main():
     args = parser.parse_args()
 
     config = load_config(os.path.join(BASE_DIR, "config.yaml"))
+
+    # ── 回测模式参数: config.yaml backtest 段为唯一默认源 (2026-08-15) ──
+    # CLI 显式传入时覆盖 config; 未传时用 config 默认 → 标准流程零参数启动,
+    # 防"每次手敲参数漏掉" (如 --folds-only 缺 --folds 静默降级为普通回测)。
+    _bt = config.get("backtest", {}) or {}
+    if args.folds is None:
+        args.folds = str(_bt.get("mode", "rolling")) == "folds"
+    if args.folds_only is None:
+        args.folds_only = bool(_bt.get("folds_only", True))
+    if args.liquid is None:
+        args.liquid = bool(_bt.get("liquid", False))
+    if args.extend_val is None and _bt.get("extend_val"):
+        ev = _bt["extend_val"]
+        if isinstance(ev, list) and len(ev) == 2:
+            args.extend_val = [str(ev[0]), str(ev[1])]
+    # 防呆: --folds-only 是 --folds 的修饰符, 单独使用静默降级是历史缺陷
+    if args.folds_only and not args.folds:
+        log.error("🚫 --folds-only 必须搭配 --folds 使用 (它是 folds 模式的修饰符, "
+                  "单独使用会静默走普通回测)。请加 --folds 或改 config backtest.mode=folds")
+        sys.exit(1)
 
     # ── 启动防护 (2026-08-09 防低级失误) ──
     # 1. config 完整性校验 (重复键检测)
