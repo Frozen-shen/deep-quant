@@ -77,3 +77,40 @@ export async function fetchBacktestTrades(): Promise<{
   const { data } = await api.get('/broker/backtest-trades')
   return data
 }
+
+// ── 实验注册表 (可插拔核心) ──
+export interface ExperimentRegistryItem {
+  id: string
+  kind: 'walkforward' | 'experiment'
+  name: string
+  generated_at: string
+  has_trades: boolean
+  summary: { excess_annual?: number | null; sharpe?: number | null; max_drawdown?: number | null; total_return?: number | null }
+}
+export interface MetricItem { key: string; label: string; value: number | string | null; format: 'pct' | 'num' | 'money' | 'str'; better: 'high' | 'low' }
+export interface SeriesItem { name: string; type: 'line' | 'bar'; x: string[]; y: number[] }
+export interface FoldResult { name: string; train?: string; val?: string; excess_annual?: number | null; sharpe?: number | null; max_drawdown?: number | null; ir?: number | null; avg_turnover?: number | null }
+export interface StockPnlItem { symbol: string; total_pnl: number; realized_pnl: number; n_round_trips: number; win_rate: number | null; buy_count: number; sell_count: number; open_qty: number; current_price?: number | null; unrealized_pnl?: number | null; avg_cost?: number | null }
+export interface ExperimentDetail {
+  meta: { id: string; kind: string; name: string; generated_at: string; description?: string }
+  metrics: MetricItem[]
+  series: SeriesItem[]
+  folds: FoldResult[]
+  stock_pnl: StockPnlItem[]
+  trades: any[]
+  equity_curve: Array<{ date: string; equity: number }>
+  benchmark_curve: Array<{ date: string; close: number }>
+}
+
+export async function fetchExperimentRegistry(): Promise<{ count: number; experiments: ExperimentRegistryItem[] }> {
+  const { data } = await api.get('/experiments/registry')
+  return data
+}
+export async function fetchExperimentDetail(id: string): Promise<ExperimentDetail> {
+  const { data } = await api.get(`/experiments/${id}`)
+  return data
+}
+export async function fetchPaperStockPnl(): Promise<{ items: StockPnlItem[]; count: number }> {
+  const { data } = await api.get('/paper/stock-pnl')
+  return data
+}

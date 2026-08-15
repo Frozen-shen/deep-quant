@@ -96,9 +96,6 @@ export default function Trading() {
     ? btTrades
     : btTrades.filter((t: Trade) => t.date.startsWith(btYear))
 
-  const active = bt?.active_returns ?? []
-  const rebalances = bt?.rebalances ?? []
-
   const posCols = [
     col<Position>('symbol', { title: '代码', width: 90 }),
     { title: '名称', dataIndex: 'symbol', width: 120,
@@ -150,7 +147,7 @@ export default function Trading() {
       <Card size="small" title="v24b 最优实验（EXTEND 模拟考 2025-01 ~ 2026-06）"
         extra={<Tag color="blue">{bt?.version ?? 'v24b'}</Tag>} style={{ marginBottom: 16 }}>
         {btQuery.isLoading ? <Spin /> : bt?.available === false ? (
-          <Empty description={bt?.note ?? '实验数据不可用'} />
+          <Empty description='实验数据不可用' />
         ) : (
           <>
             <Row gutter={[12, 12]}>
