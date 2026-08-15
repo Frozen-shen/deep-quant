@@ -1,0 +1,339 @@
+{
+  "meta": {
+    "generated_at": "2026-08-13 11:58:22",
+    "topks": [
+      5,
+      10,
+      15
+    ],
+    "n_stocks": 4998,
+    "n_factors": 204,
+    "universe": "liquid",
+    "baseline_top_k": 30,
+    "baseline_ref": "walkforward_results_v24e_pov.json",
+    "method": "fold 权重复用 (训练期ICIR一次, 组合层top_k各一遍)",
+    "elapsed_min": 30.2
+  },
+  "summary_rows": [
+    {
+      "top_k": 5,
+      "excess": 9.680000000000001,
+      "sharpe": 0.55,
+      "mdd": -27.119999999999997,
+      "ir": 0.31399999999999995,
+      "turnover": 48.94,
+      "median_amt": 19042.0,
+      "comm_ratio": 0.0864
+    },
+    {
+      "top_k": 10,
+      "excess": 7.500000000000002,
+      "sharpe": 0.6200000000000001,
+      "mdd": -24.7,
+      "ir": 0.268,
+      "turnover": 49.14,
+      "median_amt": 9215.0,
+      "comm_ratio": 0.15340000000000004
+    },
+    {
+      "top_k": 15,
+      "excess": 4.160000000000001,
+      "sharpe": 0.568,
+      "mdd": -18.82,
+      "ir": 0.16000000000000003,
+      "turnover": 34.239999999999995,
+      "median_amt": 3970.0,
+      "comm_ratio": 0.158
+    }
+  ],
+  "details": {
+    "5": {
+      "fold_results": {
+        "fold_1": {
+          "train": "2015-01-01~2019-12-31",
+          "val": "2020-01-01~2020-12-31",
+          "excess_annual": -21.7,
+          "annual_return": -0.2,
+          "sharpe": 0.18,
+          "ir": -0.22,
+          "max_drawdown": -38.6,
+          "avg_turnover": 48.5,
+          "n_rebalances": 13
+        },
+        "fold_2": {
+          "train": "2015-01-01~2020-12-31",
+          "val": "2021-01-01~2021-12-31",
+          "excess_annual": 16.8,
+          "annual_return": 43.0,
+          "sharpe": 1.16,
+          "ir": 0.46,
+          "max_drawdown": -20.2,
+          "avg_turnover": 46.2,
+          "n_rebalances": 13
+        },
+        "fold_3": {
+          "train": "2015-01-01~2021-12-31",
+          "val": "2022-01-01~2022-12-31",
+          "excess_annual": 4.7,
+          "annual_return": -7.0,
+          "sharpe": -0.23,
+          "ir": 0.15,
+          "max_drawdown": -25.7,
+          "avg_turnover": 50.0,
+          "n_rebalances": 13
+        },
+        "fold_4": {
+          "train": "2015-01-01~2022-12-31",
+          "val": "2023-01-01~2023-12-31",
+          "excess_annual": 43.2,
+          "annual_return": 49.5,
+          "sharpe": 1.26,
+          "ir": 1.03,
+          "max_drawdown": -17.2,
+          "avg_turnover": 50.0,
+          "n_rebalances": 13
+        },
+        "fold_5": {
+          "train": "2015-01-01~2023-12-31",
+          "val": "2024-01-01~2024-12-31",
+          "excess_annual": 5.4,
+          "annual_return": 10.1,
+          "sharpe": 0.38,
+          "ir": 0.15,
+          "max_drawdown": -33.9,
+          "avg_turnover": 50.0,
+          "n_rebalances": 13
+        }
+      },
+      "trades_stats": {
+        "fold_1": {
+          "n_trades": 17,
+          "median_amt": 16277.0,
+          "pct_lt_5000": 17.6,
+          "pct_lt_10000": 23.5,
+          "mean_comm_ratio": 0.321
+        },
+        "fold_2": {
+          "n_trades": 4,
+          "median_amt": 24483.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 0.0,
+          "mean_comm_ratio": 0.026
+        },
+        "fold_3": {
+          "n_trades": 5,
+          "median_amt": 17310.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 0.0,
+          "mean_comm_ratio": 0.032
+        },
+        "fold_4": {
+          "n_trades": 5,
+          "median_amt": 19261.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 0.0,
+          "mean_comm_ratio": 0.026
+        },
+        "fold_5": {
+          "n_trades": 5,
+          "median_amt": 19042.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 0.0,
+          "mean_comm_ratio": 0.027
+        }
+      }
+    },
+    "10": {
+      "fold_results": {
+        "fold_1": {
+          "train": "2015-01-01~2019-12-31",
+          "val": "2020-01-01~2020-12-31",
+          "excess_annual": -31.3,
+          "annual_return": -9.7,
+          "sharpe": -0.23,
+          "ir": -0.67,
+          "max_drawdown": -36.5,
+          "avg_turnover": 48.8,
+          "n_rebalances": 13
+        },
+        "fold_2": {
+          "train": "2015-01-01~2020-12-31",
+          "val": "2021-01-01~2021-12-31",
+          "excess_annual": 21.7,
+          "annual_return": 47.8,
+          "sharpe": 1.71,
+          "ir": 0.64,
+          "max_drawdown": -13.5,
+          "avg_turnover": 47.7,
+          "n_rebalances": 13
+        },
+        "fold_3": {
+          "train": "2015-01-01~2021-12-31",
+          "val": "2022-01-01~2022-12-31",
+          "excess_annual": 10.3,
+          "annual_return": -1.4,
+          "sharpe": 0.01,
+          "ir": 0.32,
+          "max_drawdown": -26.7,
+          "avg_turnover": 49.2,
+          "n_rebalances": 13
+        },
+        "fold_4": {
+          "train": "2015-01-01~2022-12-31",
+          "val": "2023-01-01~2023-12-31",
+          "excess_annual": 37.2,
+          "annual_return": 43.5,
+          "sharpe": 1.37,
+          "ir": 1.03,
+          "max_drawdown": -15.1,
+          "avg_turnover": 50.0,
+          "n_rebalances": 13
+        },
+        "fold_5": {
+          "train": "2015-01-01~2023-12-31",
+          "val": "2024-01-01~2024-12-31",
+          "excess_annual": -0.4,
+          "annual_return": 4.2,
+          "sharpe": 0.24,
+          "ir": 0.02,
+          "max_drawdown": -31.7,
+          "avg_turnover": 50.0,
+          "n_rebalances": 13
+        }
+      },
+      "trades_stats": {
+        "fold_1": {
+          "n_trades": 56,
+          "median_amt": 5582.0,
+          "pct_lt_5000": 39.3,
+          "pct_lt_10000": 96.4,
+          "mean_comm_ratio": 0.406
+        },
+        "fold_2": {
+          "n_trades": 56,
+          "median_amt": 6318.0,
+          "pct_lt_5000": 25.0,
+          "pct_lt_10000": 71.4,
+          "mean_comm_ratio": 0.196
+        },
+        "fold_3": {
+          "n_trades": 9,
+          "median_amt": 9215.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.058
+        },
+        "fold_4": {
+          "n_trades": 10,
+          "median_amt": 9556.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.054
+        },
+        "fold_5": {
+          "n_trades": 10,
+          "median_amt": 9499.0,
+          "pct_lt_5000": 0.0,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.053
+        }
+      }
+    },
+    "15": {
+      "fold_results": {
+        "fold_1": {
+          "train": "2015-01-01~2019-12-31",
+          "val": "2020-01-01~2020-12-31",
+          "excess_annual": -20.9,
+          "annual_return": 0.7,
+          "sharpe": 0.02,
+          "ir": -0.61,
+          "max_drawdown": -16.9,
+          "avg_turnover": 34.1,
+          "n_rebalances": 13
+        },
+        "fold_2": {
+          "train": "2015-01-01~2020-12-31",
+          "val": "2021-01-01~2021-12-31",
+          "excess_annual": 20.3,
+          "annual_return": 46.5,
+          "sharpe": 1.9,
+          "ir": 0.65,
+          "max_drawdown": -13.6,
+          "avg_turnover": 33.3,
+          "n_rebalances": 13
+        },
+        "fold_3": {
+          "train": "2015-01-01~2021-12-31",
+          "val": "2022-01-01~2022-12-31",
+          "excess_annual": 14.3,
+          "annual_return": 2.6,
+          "sharpe": 0.09,
+          "ir": 0.45,
+          "max_drawdown": -18.3,
+          "avg_turnover": 34.6,
+          "n_rebalances": 13
+        },
+        "fold_4": {
+          "train": "2015-01-01~2022-12-31",
+          "val": "2023-01-01~2023-12-31",
+          "excess_annual": 18.1,
+          "annual_return": 24.4,
+          "sharpe": 1.09,
+          "ir": 0.68,
+          "max_drawdown": -14.0,
+          "avg_turnover": 34.6,
+          "n_rebalances": 13
+        },
+        "fold_5": {
+          "train": "2015-01-01~2023-12-31",
+          "val": "2024-01-01~2024-12-31",
+          "excess_annual": -11.0,
+          "annual_return": -6.4,
+          "sharpe": -0.26,
+          "ir": -0.37,
+          "max_drawdown": -31.3,
+          "avg_turnover": 34.6,
+          "n_rebalances": 13
+        }
+      },
+      "trades_stats": {
+        "fold_1": {
+          "n_trades": 241,
+          "median_amt": 3970.0,
+          "pct_lt_5000": 80.1,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.179
+        },
+        "fold_2": {
+          "n_trades": 209,
+          "median_amt": 4918.0,
+          "pct_lt_5000": 52.6,
+          "pct_lt_10000": 99.5,
+          "mean_comm_ratio": 0.144
+        },
+        "fold_3": {
+          "n_trades": 225,
+          "median_amt": 3548.0,
+          "pct_lt_5000": 90.2,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.146
+        },
+        "fold_4": {
+          "n_trades": 217,
+          "median_amt": 4531.0,
+          "pct_lt_5000": 68.7,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.133
+        },
+        "fold_5": {
+          "n_trades": 221,
+          "median_amt": 3167.0,
+          "pct_lt_5000": 92.3,
+          "pct_lt_10000": 100.0,
+          "mean_comm_ratio": 0.188
+        }
+      }
+    }
+  }
+}

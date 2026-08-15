@@ -13,3 +13,6 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* 最新实验行高亮（Experiments 页） */
+.row-latest td { background: #f6ffed !important; }

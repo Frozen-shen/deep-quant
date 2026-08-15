@@ -73,7 +73,9 @@ class SimpleBacktest:
             return None
         try:
             from data.minute_fetcher import MinuteFetcher
-            mf = MinuteFetcher()
+            # 回测只用本地 minute_5m 全历史 (allow_network=False):
+            # 2022 前本地无数据 → None → 上层回退 VWAP/开盘, 不碰网络。
+            mf = MinuteFetcher(allow_network=False)
             date_str = str(pd.Timestamp(today).date())
             res = mf.get_pov_fills(s, date_str, order_qty)
             if res is None:

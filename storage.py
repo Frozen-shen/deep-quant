@@ -184,18 +184,22 @@ def record_trade(symbol: str, market: str, date: str, action: str,
 
 
 def get_trades(symbol: Optional[str] = None, limit: int = 50,
-               path: str = DB_PATH) -> List[Dict]:
-    """获取交易记录。"""
+               year: Optional[int] = None, path: str = DB_PATH) -> List[Dict]:
+    """获取交易记录（可筛选 symbol / 年份）。"""
     conn = get_db(path)
+    sql = "SELECT * FROM trades"
+    conds, args = [], []
     if symbol:
-        rows = conn.execute(
-            "SELECT * FROM trades WHERE symbol=? ORDER BY date DESC LIMIT ?",
-            (symbol, limit)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM trades ORDER BY date DESC LIMIT ?", (limit,)
-        ).fetchall()
+        conds.append("symbol=?")
+        args.append(symbol)
+    if year:
+        conds.append("substr(date, 1, 4)=?")
+        args.append(str(year))
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY date DESC LIMIT ?"
+    args.append(limit)
+    rows = conn.execute(sql, args).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

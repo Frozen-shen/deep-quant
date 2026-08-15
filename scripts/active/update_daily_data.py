@@ -1,7 +1,8 @@
 """
 增量数据更新脚本 — 每日收盘后拉取新日线数据并追加到 parquet 缓存
 
-数据源: 腾讯财经 API (web.ifzq.gtimg.cn), eastmoney 在当前网络环境不可用。
+数据源: 东财 (efinance, 经 eastmoney_proxy 代理) 为主, 腾讯财经兜底
+  (2026-08 腾讯源被封返回非 JSON, 东财直连被限流; 代理集成见 config.yaml eastmoney_proxy)
 
 用法:
   py scripts/active/update_daily_data.py              # 增量更新所有缓存股票
@@ -30,6 +31,10 @@ import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
+
+# 东财代理 (config.yaml eastmoney_proxy 段): 必须在 efinance 首次 import 前启用
+import eastmoney_proxy
+eastmoney_proxy.setup_from_config(BASE_DIR)
 
 from data.calendar import is_trading_day
 
@@ -204,26 +209,66 @@ def fetch_tencent(code: str, start_date: str, end_date: str,
     return df
 
 
+def fetch_eastmoney(code: str, start_date: str, end_date: str,
+                    adjust: str = "qfq") -> Optional[pd.DataFrame]:
+    """
+    从东财 API 拉取日线数据 (efinance, 经 eastmoney_proxy 代理)。
+
+    2026-08 起为主数据源 (腾讯被封)。efinance 返回列比腾讯全 (含 amount/turnover)。
+
+    Args:
+      code: 6位股票代码
+      start_date: YYYYMMDD
+      end_date: YYYYMMDD
+      adjust: 'qfq' 前复权, '' 不复权
+
+    Returns:
+      DataFrame 或 None
+    """
+    import efinance as ef
+
+    fqt = 1 if adjust == "qfq" else 0
+    df = ef.stock.get_quote_history(code, beg=start_date, end=end_date, klt=101, fqt=fqt)
+    if df is None or len(df) == 0:
+        return None
+
+    df = df.rename(columns={
+        "日期": "date", "开盘": "open", "收盘": "close", "最高": "high",
+        "最低": "low", "成交量": "volume", "成交额": "amount", "振幅": "amplitude",
+        "涨跌幅": "pct_change", "涨跌额": "change", "换手率": "turnover",
+    })
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.drop_duplicates(subset=["date"], keep="last")
+    df = df.sort_values("date").reset_index(drop=True)
+
+    available = [c for c in KEEP_COLS if c in df.columns]
+    return df[available].copy()
+
+
 def fetch_incremental(symbol: str, start_date: str, end_date: str,
                       adjust: str = "qfq") -> Optional[pd.DataFrame]:
     """
-    增量拉取单只股票的新数据 (腾讯数据源, 带重试)。
+    增量拉取单只股票的新数据。
+
+    数据源优先级: 东财(代理) → 腾讯(兜底)。2026-08 腾讯被封后主走东财。
 
     Returns:
       DataFrame 或 None (无新数据/拉取失败)
     """
-    for attempt in range(MAX_RETRIES):
-        try:
-            df = fetch_tencent(symbol, start_date, end_date, adjust)
-            if df is not None and len(df) > 0:
-                return df
-            return None  # 空数据不重试
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                wait = 2 ** (attempt + 1)
-                time.sleep(wait)
-            else:
-                log(f"拉取 {symbol} (adjust={adjust}) 失败: {e}", "WARN")
+    sources = [fetch_eastmoney, fetch_tencent]
+    for source in sources:
+        for attempt in range(MAX_RETRIES):
+            try:
+                df = source(symbol, start_date, end_date, adjust)
+                if df is not None and len(df) > 0:
+                    return df
+                break  # 空数据不重试, 换下一个源
+            except Exception as e:
+                if attempt < MAX_RETRIES - 1:
+                    wait = 2 ** (attempt + 1)
+                    time.sleep(wait)
+                else:
+                    log(f"拉取 {symbol} ({source.__name__}, adjust={adjust}) 失败: {e}", "WARN")
     return None
 
 

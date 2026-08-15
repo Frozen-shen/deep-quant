@@ -755,5 +755,101 @@
       }
     ],
     "weeks_decaying": 1
+  },
+  {
+    "timestamp": "2026-08-12T19:00:46.819218",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 14,
+        "ic_mean": -0.091715,
+        "ic_std": 0.033891,
+        "icir": -2.7062,
+        "pos_ratio": 0.0
+      },
+      {
+        "factor": "klen",
+        "n_days": 14,
+        "ic_mean": -0.225346,
+        "ic_std": 0.228401,
+        "icir": -0.9866,
+        "pos_ratio": 0.2143
+      },
+      {
+        "factor": "amplitude_5d",
+        "n_days": 14,
+        "ic_mean": -0.286973,
+        "ic_std": 0.294047,
+        "icir": -0.9759,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 14,
+        "ic_mean": -0.267624,
+        "ic_std": 0.275142,
+        "icir": -0.9727,
+        "pos_ratio": 0.2143
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 14,
+        "ic_mean": -0.286604,
+        "ic_std": 0.301145,
+        "icir": -0.9517,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "volatility_30d",
+        "n_days": 14,
+        "ic_mean": -0.292861,
+        "ic_std": 0.311621,
+        "icir": -0.9398,
+        "pos_ratio": 0.2143
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 14,
+        "ic_mean": -0.132824,
+        "ic_std": 0.153636,
+        "icir": -0.8645,
+        "pos_ratio": 0.4286
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 14,
+        "ic_mean": -0.036181,
+        "ic_std": 0.050874,
+        "icir": -0.7112,
+        "pos_ratio": 0.2857
+      },
+      {
+        "factor": "sharpe_20d",
+        "n_days": 14,
+        "ic_mean": 0.176156,
+        "ic_std": 0.255039,
+        "icir": 0.6907,
+        "pos_ratio": 0.5714
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 14,
+        "ic_mean": -0.124471,
+        "ic_std": 0.186313,
+        "icir": -0.6681,
+        "pos_ratio": 0.2857
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [
+      {
+        "factor": "skew_20d",
+        "current_ic": -0.005686,
+        "baseline_ic": -0.036107,
+        "ratio": 0.1575
+      }
+    ],
+    "weeks_decaying": 1
   }
 ]

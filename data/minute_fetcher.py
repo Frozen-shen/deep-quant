@@ -44,9 +44,13 @@ class MinuteFetcher:
     """分钟级行情数据获取器。"""
 
     def __init__(self, period: str = DEFAULT_PERIOD,
-                 cache_days: int = DEFAULT_CACHE_DAYS):
+                 cache_days: int = DEFAULT_CACHE_DAYS,
+                 allow_network: bool = True):
         self.period = period
         self.cache_days = cache_days
+        # 回测场景置 False: 本地无数据直接返回 None (由调用方回退 VWAP/开盘),
+        # 不尝试网络拉取 (2022 前日期 akshare 拉不到, 只会失败刷屏)。
+        self.allow_network = allow_network
         # 本地 5m 全历史缓存 (回测大量调用时避免重复读 parquet)
         self._local_cache: Dict[str, Optional[pd.DataFrame]] = {}
         _ensure_cache_dir()
@@ -127,6 +131,10 @@ class MinuteFetcher:
                         return self._clean(cached)
             except Exception:
                 cached = None
+
+        # ── 无网络模式 (回测): 本地全历史+滚动缓存都没有 → 直接返回 ──
+        if not self.allow_network:
+            return self._clean(cached) if cached is not None else None
 
         # ── 确定拉取范围 ──
         end_dt = pd.Timestamp(end_date)

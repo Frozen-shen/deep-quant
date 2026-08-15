@@ -12,7 +12,7 @@ export default function StatCard({ title, value, precision = 0, suffix, prefix, 
   return (
     <Card size="small">
       <Statistic title={title} value={value as number} precision={precision}
-        suffix={suffix} prefix={prefix} valueStyle={color ? { color } : undefined} />
+        suffix={suffix} prefix={prefix} styles={{ content: color ? { color } : undefined }} />
     </Card>
   )
 }

@@ -4,7 +4,7 @@ import { useQuery, useQueries } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
 import { fetchExperimentDetail, fetchUniverse, fetchExperiments } from '../api'
 import type { ExperimentRegistryItem } from '../api'
-import { fmtNum, fmtPct, fmtDateTime, truncate } from '../lib/format'
+import { fmtNum, fmtDateTime, truncate } from '../lib/format'
 import { partitionColors } from '../lib/labels'
 import { useExperiment } from '../experiment-context'
 import ExperimentReport from '../components/ExperimentReport'
@@ -115,7 +115,7 @@ export default function Experiments() {
                       if (v === null || v === undefined) return '—'
                       const key = r.key as string
                       const isPct = compareMetrics.find(c => c[0] === key)?.[2] === 'pct'
-                      const text = isPct ? fmtPct(v) : fmtNum(v, 2)
+                      const text = isPct ? `${v.toFixed(2)}%` : fmtNum(v, 2)
                       return <span style={{ color: r._best === id ? '#389e0d' : undefined, fontWeight: r._best === id ? 600 : 400 }}>{text}</span>
                     },
                   })),
@@ -147,7 +147,7 @@ export default function Experiments() {
               <div style={{ fontSize: 12, color: '#888' }}>{e.generated_at}</div>
               {e.summary?.excess_annual != null && (
                 <div style={{ marginTop: 8 }}>
-                  年化超额 <b>{fmtPct(e.summary.excess_annual)}</b> · Sharpe <b>{e.summary.sharpe != null ? fmtNum(e.summary.sharpe, 2) : '—'}</b> · 回撤 <b>{e.summary.max_drawdown != null ? fmtPct(e.summary.max_drawdown) : '—'}</b>
+                  年化超额 <b>{(e.summary.excess_annual as number).toFixed(1)}%</b> · Sharpe <b>{e.summary.sharpe != null ? fmtNum(e.summary.sharpe, 2) : '—'}</b> · 回撤 <b>{(e.summary.max_drawdown as number).toFixed(1)}%</b>
                 </div>
               )}
             </Card>

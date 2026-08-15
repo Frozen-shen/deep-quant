@@ -37,7 +37,8 @@ shares_fetch:
 execution:
   initial_capital: 100000
   lot_size: 100
-  top_k: 30                    # 持仓数量
+  top_k: 10                    # 持仓数量 (2026-08-13 敏感性实验: 5=+9.7%/Sharpe0.55,
+                               #   10=+7.5%/0.62最优, 15=+4.2%/0.57; 10-30万个人资金)
   max_positions: 40            # 最大持仓上限
   max_single_pct: 0.25         # 单票仓位上限
   slippage_bps: 30             # 滑点 (小盘股30bp)

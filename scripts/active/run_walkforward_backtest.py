@@ -346,7 +346,13 @@ def precompute_factor_panels(all_data: dict, factor_names: list,
             cols = {sym: sdf[fn] for sym, sdf in per_stock.items()
                     if fn in sdf.columns}
             if cols:
-                panels[fn] = pd.DataFrame(cols, index=idx, dtype=np.float32)
+                # 对齐到全市场股票列 (与分钟/基本面/aux面板同处理): 个别
+                # 股票因子计算失败会缺席该面板 → 必须 reindex 统一列集,
+                # 否则 compute_icir_weights 的 column_stack 因列数不一致崩溃
+                # (2026-08-13 实测: 4946 vs 4998)。
+                panels[fn] = pd.DataFrame(
+                    cols, index=idx, dtype=np.float32
+                ).reindex(columns=sorted(all_data.keys()))
             if (fi + 1) % 40 == 0 or fi == len(factor_names) - 1:
                 log.info("  面板: %d/%d 因子", fi + 1, len(factor_names))
     finally:
@@ -1323,13 +1329,13 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
 
     # ★ 方案B v24: VWAP 拆单模式下, 滑点假设 = 残差滑点 (拆单无法完美命中
     # VWAP, 但远低于一次性开盘市价单的 30bps; 买上浮/卖下沉由 _apply_slippage
-    # 按方向处理)
+    # 按方向处理)。POV (v24e) 同用残差滑点 (POV 已按市场节奏分散)。
     exec_price = bt_config.get("execution_price", "open")
     slip = bt_config["slippage_bps"]
-    if exec_price == "vwap":
+    if exec_price in ("vwap", "pov"):
         slip = bt_config.get("vwap_residual_bps", slip)
-        log.info("  VWAP执行模式: 基准价=次日VWAP, 残差滑点=%dbps (原开盘+%dbps)",
-                 slip, bt_config["slippage_bps"])
+        log.info("  %s执行模式: 残差滑点=%dbps (原开盘+%dbps)",
+                 exec_price.upper(), slip, bt_config["slippage_bps"])
 
     bt = SimpleBacktest(
         initial_capital=bt_config["initial_capital"],
@@ -1340,10 +1346,10 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
         execution_price=exec_price,
         vwap_residual_bps=bt_config.get("vwap_residual_bps", 0),
     )
-    # ★ 方案B v24: VWAP 执行价模式 → 构建日 VWAP 面板 (懒加载, 未复权×复权因子)
-    if bt.execution_price == "vwap" and not bt.vwap_panel:
+    # ★ vwap/pov 执行价模式 → 构建日 VWAP 面板 (pov 无分钟数据时回退 vwap)
+    if bt.execution_price in ("vwap", "pov") and not bt.vwap_panel:
         bt.vwap_panel = _build_vwap_panel(sorted(all_data.keys()))
-    if bt.execution_price == "vwap" and not bt.vwap_panel:
+    if bt.execution_price in ("vwap", "pov") and not bt.vwap_panel:
         log.warning("  [%s] vwap 面板为空, 回退 open 执行价", label)
     rules = TradingRules()
     # hold_thresh 与调仓周期联动 (路线C v22): 月频30天 / 周频~10天,

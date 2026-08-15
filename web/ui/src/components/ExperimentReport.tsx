@@ -8,7 +8,9 @@ interface Props { detail: ExperimentDetail; nameOf: (s: string) => string }
 
 function metricText(m: MetricItem): string {
   if (m.value === null || m.value === undefined) return '—'
-  if (m.format === 'pct') return fmtPct(m.value as number)
+  // 注意: 后端 walkforward JSON 的 pct 指标是百分数原值 (如 -0.2 = -0.2%),
+  // 不能走 fmtPct (它会 ×100)。fmtPct 仅用于小数比率 (如 daily_return)。
+  if (m.format === 'pct') return `${(m.value as number).toFixed(2)}%`
   if (m.format === 'str') return String(m.value)
   return fmtNum(m.value as number, 2)
 }
@@ -54,9 +56,9 @@ export default function ExperimentReport({ detail, nameOf }: Props) {
             columns={[
               { title: 'Fold', dataIndex: 'name' },
               { title: '验证期', dataIndex: 'val' },
-              { title: '年化超额', dataIndex: 'excess_annual', render: (v) => v == null ? '—' : fmtPct(v) },
+              { title: '年化超额', dataIndex: 'excess_annual', render: (v) => v == null ? '—' : `${(v as number).toFixed(1)}%` },
               { title: 'Sharpe', dataIndex: 'sharpe', render: (v) => v == null ? '—' : fmtNum(v, 2) },
-              { title: '最大回撤', dataIndex: 'max_drawdown', render: (v) => v == null ? '—' : fmtPct(v) },
+              { title: '最大回撤', dataIndex: 'max_drawdown', render: (v) => v == null ? '—' : `${(v as number).toFixed(1)}%` },
               { title: 'IR', dataIndex: 'ir', render: (v) => v == null ? '—' : fmtNum(v, 2) },
             ]} />
         </Card>
