@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react'
-import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented, Tooltip } from 'antd'
+import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented, Tooltip, Tabs } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
-import { fetchBroker, fetchBacktestTrades, fetchUniverse } from '../api'
+import { fetchBroker, fetchUniverse, fetchPaperStockPnl } from '../api'
 import { col } from '../lib/columns'
-import { fmtNum, fmtDateTime } from '../lib/format'
+import { fmtNum, fmtPct, fmtDateTime } from '../lib/format'
 import { actionTag } from '../lib/labels'
 import StatCard from '../components/StatCard'
+import EquityTriptych from '../components/EquityTriptych'
+import PnlBarChart from '../components/PnlBarChart'
+import { useExperiment } from '../experiment-context'
 
 interface Position { symbol: string; qty: number; avg_cost: number; market_value: number }
 interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[] }
@@ -20,44 +23,21 @@ export default function Trading() {
   const universe = useQuery({
     queryKey: ['universe'], queryFn: fetchUniverse, staleTime: 300_000,
   })
-  /** v24b 最优实验 (EXTEND 模拟考): 指标 + 净值曲线 + 调仓记录 */
-  const btQuery = useQuery({
-    queryKey: ['backtest-trades'], queryFn: fetchBacktestTrades, staleTime: 300_000,
-  })
+  const paperPnl = useQuery({ queryKey: ['paper-stock-pnl'], queryFn: fetchPaperStockPnl, refetchInterval: 60_000 })
+  /** 当前选中实验 (全局 Context, URL ?exp= 同步) */
+  const { expId, detail, detailLoading } = useExperiment()
+
   /** symbol → 股票名称 映射 */
   const nameOf = useMemo(() => {
     const m = new Map<string, string>()
     for (const s of universe.data?.stocks ?? []) m.set(s.symbol, s.name)
-    return m
+    return (sym: string) => m.get(sym) ?? sym
   }, [universe.data])
 
-  const bt = btQuery.data
-  const curve = bt?.equity_curve ?? []
-  const btTrades = bt?.trades ?? []
-
-  /** 净值曲线图: 净值(左轴) + 累计超额(右轴) */
-  const equityOption = useMemo(() => {
-    const dates = curve.map((p) => p.date)
-    const equities = curve.map((p) => p.equity)
-    // 累计收益: 从净值反推 (起始=0)
-    const base = equities[0] ?? 100000
-    const cumExcess = equities.map((e) => (e / base - 1) * 100)
-    return {
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['组合净值', '累计收益 %'] },
-      grid: { left: 60, right: 60, top: 40, bottom: 40 },
-      xAxis: { type: 'category', data: dates, boundaryGap: false },
-      yAxis: [
-        { type: 'value', name: '净值', scale: true },
-        { type: 'value', name: '累计%', axisLabel: { formatter: '{value}%' } },
-      ],
-      series: [
-        { name: '组合净值', type: 'line', data: equities, showSymbol: false, lineStyle: { width: 2 } },
-        { name: '累计收益 %', type: 'line', yAxisIndex: 1, data: cumExcess, showSymbol: false,
-          lineStyle: { width: 1.5, type: 'dashed' } },
-      ],
-    }
-  }, [curve])
+  const btTrades = (detail?.trades ?? []) as Trade[]
+  const curve = detail?.equity_curve ?? []
+  const bench = detail?.benchmark_curve ?? []
+  const metrics = detail?.metrics ?? []
 
   /** 调仓时间线: 每次调仓的买卖笔数 */
   const rebalanceOption = useMemo(() => {
@@ -96,18 +76,8 @@ export default function Trading() {
     ? btTrades
     : btTrades.filter((t: Trade) => t.date.startsWith(btYear))
 
-  const posCols = [
-    col<Position>('symbol', { title: '代码', width: 90 }),
-    { title: '名称', dataIndex: 'symbol', width: 120,
-      render: (_v: unknown, r: Position) => nameOf.get(r.symbol) ?? '—' },
-    col<Position>('qty', { title: '数量', width: 100, render: (v) => fmtNum(v as number, 0) }),
-    col<Position>('avg_cost', { title: '成本价', width: 120, render: (v) => fmtNum(v as number, 2) }),
-    col<Position>('market_value', { title: '市值', width: 140, render: (v) => fmtNum(v as number, 2) }),
-    { title: '浮动盈亏', dataIndex: 'pnl', width: 160,
-      render: (_v: unknown, r: Position) => (
-        <span style={{ color: pnl(r) >= 0 ? '#cf1322' : '#3f8600' }}>{fmtNum(pnl(r), 2)}</span>
-      ) },
-  ]
+  const metricOf = (key: string) => metrics.find(m => m.key === key)?.value
+
   const tradeCols = [
     { title: '时间', dataIndex: 'date', width: 170,
       render: (v: string, r: Trade) => {
@@ -125,7 +95,7 @@ export default function Trading() {
       } },
     col<Trade>('symbol', { title: '代码', width: 90 }),
     { title: '名称', dataIndex: 'symbol', width: 130,
-      render: (_v: unknown, r: Trade) => nameOf.get(r.symbol) ?? '—' },
+      render: (_v: unknown, r: Trade) => nameOf(r.symbol) },
     col<Trade>('action', { title: '方向', width: 90,
       render: (v) => { const t = actionTag(v); return <Tag color={t.color}>{t.text}</Tag> } }),
     col<Trade>('qty', { title: '数量', width: 100, render: (v) => fmtNum(v as number, 0) }),
@@ -135,51 +105,33 @@ export default function Trading() {
       render: (_v: unknown, r: Trade) => r.reason ?? (r.action === 'BUY' ? '建仓/加仓' : '调出/减仓') },
   ]
 
-  return (
+  /** Tab 1: 回测实验成交 (跟随全局实验选择器) */
+  const backtestTab = (
     <div>
-      <Typography.Title level={4}>交易监控（{data?.adapter} · {connected ? '已连接' : '未连接'}）</Typography.Title>
-      {!connected && (
-        <Alert type="warning" showIcon message="模拟盘执行器未连接"
-          description="请检查 execution/paper_executor 是否运行，或后端 broker 适配器配置" style={{ marginBottom: 16 }} />
+      {detailLoading ? <Spin /> : !detail ? (
+        <Empty description="未选择实验（请在顶部选择器选择）" />
+      ) : (
+        <>
+          <Row gutter={[12, 12]}>
+            <Col span={6}><StatCard title="超额年化" value={metricOf('excess_annual') != null ? `${(metricOf('excess_annual') as number).toFixed(1)}%` : '—'} /></Col>
+            <Col span={6}><StatCard title="Sharpe" value={metricOf('sharpe') ?? '—'} /></Col>
+            <Col span={6}><StatCard title="最大回撤" value={metricOf('max_drawdown') != null ? `${(metricOf('max_drawdown') as number).toFixed(1)}%` : '—'} /></Col>
+            <Col span={6}><StatCard title="成交笔数" value={btTrades.length} /></Col>
+          </Row>
+          <Row gutter={16} style={{ marginTop: 16 }}>
+            <Col span={14}>
+              <Typography.Text strong>净值与回撤（vs 中证1000）</Typography.Text>
+              <EquityTriptych equity={curve} benchmark={bench} />
+            </Col>
+            <Col span={10}>
+              <Typography.Text strong>调仓分布（买卖笔数/次）</Typography.Text>
+              <ReactECharts option={rebalanceOption} style={{ height: 280 }} notMerge />
+            </Col>
+          </Row>
+        </>
       )}
 
-      {/* ═══ v24b 最优实验 (主视图) ═══ */}
-      <Card size="small" title="v24b 最优实验（EXTEND 模拟考 2025-01 ~ 2026-06）"
-        extra={<Tag color="blue">{bt?.version ?? 'v24b'}</Tag>} style={{ marginBottom: 16 }}>
-        {btQuery.isLoading ? <Spin /> : bt?.available === false ? (
-          <Empty description='实验数据不可用' />
-        ) : (
-          <>
-            <Row gutter={[12, 12]}>
-              <Col span={6}><StatCard title="超额年化" value={bt?.excess_annual != null ? `${(bt.excess_annual as number).toFixed(1)}%` : '—'} /></Col>
-              <Col span={6}><StatCard title="Sharpe" value={bt?.sharpe ?? '—'} /></Col>
-              <Col span={6}><StatCard title="最大回撤" value={bt?.max_drawdown != null ? `${(bt.max_drawdown as number).toFixed(1)}%` : '—'} /></Col>
-              <Col span={6}><StatCard title="换仓笔数" value={bt?.count ?? 0} /></Col>
-            </Row>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 4 }}>
-              {bt?.period ?? ''} · {bt?.n_rebalances ?? 0} 次调仓 · 回测数据（非实盘成交）
-              {bt?.source === 'real'
-                ? <Tag color="green" style={{ marginLeft: 8 }}>真实逐笔成交</Tag>
-                : <Tag color="orange" style={{ marginLeft: 8 }}>近似重建（旧 JSON 无逐笔）</Tag>}
-            </Typography.Paragraph>
-            <Row gutter={16}>
-              <Col span={14}>
-                <Typography.Text strong>净值曲线</Typography.Text>
-                <ReactECharts option={equityOption} style={{ height: 280 }} notMerge />
-              </Col>
-              <Col span={10}>
-                <Typography.Text strong>调仓分布（买卖笔数/次）</Typography.Text>
-                <ReactECharts option={rebalanceOption} style={{ height: 280 }} notMerge />
-              </Col>
-            </Row>
-          </>
-        )}
-      </Card>
-
-      {/* ═══ 换仓明细 (按实验年份筛选) ═══ */}
-      <Card size="small" title="换仓明细"
-        extra={<Space><Tag color="blue">{bt?.period ?? ''}</Tag><Tag>{bt?.n_rebalances ?? 0} 次调仓</Tag></Space>}
-        style={{ marginBottom: 16 }}>
+      <Card size="small" title="换仓明细" style={{ marginTop: 16 }}>
         <Space style={{ marginBottom: 12 }}>
           <Segmented
             options={[
@@ -199,21 +151,65 @@ export default function Trading() {
           <Empty description="该年份无换仓记录" />
         )}
       </Card>
+    </div>
+  )
 
-      {/* ═══ 模拟盘实盘 ═══ */}
-      <Card size="small" title="模拟盘实盘" style={{ marginBottom: 16 }}>
-        <Row gutter={12} style={{ marginBottom: 12 }}>
-          <Col span={8}><StatCard title="现金" value={fmtNum(data?.balance?.cash, 0)} /></Col>
-          <Col span={8}><StatCard title="持仓数" value={positions.length} /></Col>
-          <Col span={8}><StatCard title="最近成交" value={(data?.trades ?? []).length} /></Col>
-        </Row>
+  /** Tab 2: 模拟盘实盘 */
+  const paperTab = (
+    <div>
+      <Row gutter={12} style={{ marginBottom: 12 }}>
+        <Col span={8}><StatCard title="现金" value={fmtNum(data?.balance?.cash, 0)} /></Col>
+        <Col span={8}><StatCard title="持仓数" value={positions.length} /></Col>
+        <Col span={8}><StatCard title="最近成交" value={(data?.trades ?? []).length} /></Col>
+      </Row>
+      <Card size="small" title="模拟盘个股盈亏（已实现+浮动）" style={{ marginBottom: 16 }}>
+        <PnlBarChart items={(paperPnl.data?.items ?? []).map(i => ({ symbol: i.symbol, total_pnl: i.total_pnl + (i.unrealized_pnl ?? 0) }))} nameOf={nameOf} />
+      </Card>
+      <Card size="small" title="个股盈亏明细" style={{ marginBottom: 16 }}>
+        <Table size="small" rowKey="symbol" dataSource={paperPnl.data?.items ?? []} pagination={{ pageSize: 15 }}
+          columns={[
+            { title: '代码', dataIndex: 'symbol', render: (v) => `${nameOf(v)} ${v}` },
+            { title: '已实现盈亏', dataIndex: 'total_pnl', sorter: (a: any, b: any) => a.total_pnl - b.total_pnl,
+              render: (v: number) => <span style={{ color: v > 0 ? '#cf1322' : v < 0 ? '#3f8600' : undefined }}>{fmtNum(v, 2)}</span> },
+            { title: '浮动盈亏', dataIndex: 'unrealized_pnl', render: (v) => v == null ? '—' : <span style={{ color: v > 0 ? '#cf1322' : v < 0 ? '#3f8600' : undefined }}>{fmtNum(v, 2)}</span> },
+            { title: '回合数', dataIndex: 'n_round_trips' },
+            { title: '胜率', dataIndex: 'win_rate', render: (v) => v == null ? '—' : fmtPct(v) },
+          ]} />
+      </Card>
+      <Card size="small" title="当前持仓">
         {positions.length ? (
-          <Table rowKey="symbol" dataSource={positions} columns={posCols} size="small"
-            pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }} />
+          <Table rowKey="symbol" dataSource={positions} size="small"
+            pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
+            columns={[
+              col<Position>('symbol', { title: '代码', width: 90 }),
+              { title: '名称', dataIndex: 'symbol', width: 120,
+                render: (_v: unknown, r: Position) => nameOf(r.symbol) },
+              col<Position>('qty', { title: '数量', width: 100, render: (v) => fmtNum(v as number, 0) }),
+              col<Position>('avg_cost', { title: '成本价', width: 120, render: (v) => fmtNum(v as number, 2) }),
+              col<Position>('market_value', { title: '市值', width: 140, render: (v) => fmtNum(v as number, 2) }),
+              { title: '浮动盈亏', dataIndex: 'pnl', width: 160,
+                render: (_v: unknown, r: Position) => (
+                  <span style={{ color: pnl(r) >= 0 ? '#cf1322' : '#3f8600' }}>{fmtNum(pnl(r), 2)}</span>
+                ) },
+            ]} />
         ) : (
           <Empty description="暂无持仓" />
         )}
       </Card>
+    </div>
+  )
+
+  return (
+    <div>
+      <Typography.Title level={4}>成交明细{expId ? `（实验: ${expId}）` : ''}</Typography.Title>
+      {!connected && (
+        <Alert type="warning" showIcon message="模拟盘执行器未连接"
+          description="请检查 execution/paper_executor 是否运行，或后端 broker 适配器配置" style={{ marginBottom: 16 }} />
+      )}
+      <Tabs defaultActiveKey="backtest" items={[
+        { key: 'backtest', label: '回测实验成交', children: backtestTab },
+        { key: 'paper', label: '模拟盘实盘成交', children: paperTab },
+      ]} />
     </div>
   )
 }
