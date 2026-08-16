@@ -156,3 +156,38 @@ def pead_panel(symbols: list, all_data: dict, calendar: list) -> pd.DataFrame:
             events.append((idx[pos + 20], drift))
         out[s] = events
     return _to_panel(out, calendar)
+
+
+def industry_momentum_panel(symbols: list, all_data: dict,
+                            industry_map: dict, calendar: list,
+                            lookback: int = 60) -> pd.DataFrame:
+    """行业动量面板: 行业过去 lookback 日收益 → 每日截面 z-score → 个股映射。
+
+    无行业映射的股票为 NaN (下游自然降级)。"""
+    idx = pd.DatetimeIndex(calendar)
+    # 行业等权日收益
+    ind_rets = {}
+    for s in symbols:
+        df = all_data.get(s)
+        ind = industry_map.get(s)
+        if df is None or ind is None or len(df) < 2:
+            continue
+        d = pd.to_datetime(df["date"])
+        r = pd.Series(df["close"].values, index=d).pct_change().reindex(idx)
+        ind_rets.setdefault(ind, []).append(r)
+    if not ind_rets:
+        return pd.DataFrame(index=idx, dtype=np.float32)
+    ind_panel = pd.DataFrame(
+        {k: pd.concat(v, axis=1).mean(axis=1) for k, v in ind_rets.items()})
+    # 滚动 lookback 日累计收益 (对数近似, 避免复利偏差)
+    cum = np.log1p(ind_panel.fillna(0.0)).rolling(lookback, min_periods=10).sum()
+    # 每日截面 z-score
+    mu = cum.mean(axis=1)
+    sd = cum.std(axis=1)
+    z = cum.sub(mu, axis=0).div(sd.replace(0, np.nan), axis=0)
+    out = pd.DataFrame(np.nan, index=idx, columns=sorted(symbols), dtype=np.float32)
+    for s in symbols:
+        ind = industry_map.get(s)
+        if ind in z.columns:
+            out[s] = z[ind].astype(np.float32)
+    return out

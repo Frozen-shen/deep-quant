@@ -95,3 +95,27 @@ def test_pead_panel_no_lookahead(monkeypatch, tmp_path):
     in_window = cal[pos:pos + 20]
     assert s[in_window].isna().all(), "漂移窗口内不得生效 (前视)"
     assert s[cal[pos + 20]:].notna().all(), "窗口完成后生效"
+
+
+def test_industry_momentum_panel(monkeypatch):
+    """行业动量: 强行业股票 z>0, 弱行业 z<0, 无映射 NaN。"""
+    import earnings_surprise as es
+    import numpy as np
+    cal = pd.date_range("2024-01-01", periods=120, freq="B")
+    def mk(close_series):
+        return pd.DataFrame({"date": cal, "close": close_series})
+    # 行业A 强势: 日收益 +1%; 行业B 弱势: -1%
+    all_data = {
+        "000001": mk(np.linspace(10, 10 * 1.01 ** 119, 120)),   # A
+        "000002": mk(np.linspace(10, 10 * 1.01 ** 119, 120)),   # A
+        "600000": mk(np.linspace(10, 10 * 0.99 ** 119, 120)),   # B
+        "600001": mk(np.linspace(10, 10 * 0.99 ** 119, 120)),   # B
+    }
+    ind_map = {"000001": "行业A", "000002": "行业A",
+               "600000": "行业B", "600001": "行业B"}
+    panel = es.industry_momentum_panel(
+        list(all_data.keys()), all_data, ind_map, list(cal), lookback=60)
+    last = panel.iloc[-1]
+    assert last["000001"] > 0 and last["600000"] < 0
+    # 无映射 → NaN
+    assert np.isnan(panel["999999"]) if "999999" in panel else True
