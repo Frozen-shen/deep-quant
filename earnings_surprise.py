@@ -27,7 +27,7 @@ def load_eps_series(symbol: str) -> pd.DataFrame | None:
         return None
     out = pd.DataFrame({
         "eps": pd.to_numeric(df[EPS_COL], errors="coerce"),
-        "report_date": pd.to_datetime(df["日期"]),
+        "report_date": pd.to_datetime(df["日期"], errors="coerce"),
     }).dropna()
     out = out.sort_values("report_date").drop_duplicates(
         subset=["report_date"], keep="last")
@@ -120,7 +120,11 @@ def earn_accel_panel(symbols: list, calendar: list) -> pd.DataFrame:
 
 
 def pead_panel(symbols: list, all_data: dict, calendar: list) -> pd.DataFrame:
-    """公告漂移面板: 公告后 20 交易日市场调整累计收益, 持续到下一公告。"""
+    """公告漂移面板: 公告后 20 交易日市场调整累计收益。
+
+    PIT-safe: 漂移窗口完成后 (公告日+20 交易日) 才生效, 持续到下一窗口完成;
+    窗口内任何决策时点不暴露未来收益 (略滞后但保因果)。
+    """
     idx = pd.DatetimeIndex(calendar)
     # 等权市场日收益
     mkt_ret = {}
@@ -149,6 +153,6 @@ def pead_panel(symbols: list, all_data: dict, calendar: list) -> pd.DataFrame:
             if pos + 20 >= len(idx) or pos >= len(idx):
                 continue
             drift = float(cum.iloc[pos + 20] - cum.iloc[pos])
-            events.append((ann, drift))
+            events.append((idx[pos + 20], drift))
         out[s] = events
     return _to_panel(out, calendar)
