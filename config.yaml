@@ -106,7 +106,7 @@ fold:
 # ── 组合层优化 (v9b) ──
 portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v9b实验) / risk_parity=风险平价 (P0)
 
-# ── 多风格 sleeve (2026-08-16 实验; enabled=false 时与 v27 完全一致) ──
+# ── 多风格 sleeve (2026-08-16 实验; enabled=false 时公式与 v27 一致 (float64 计算路径, 差异 ≤1e-7 量级)) ──
 styles:
   enabled: false
   budgets:                 # 组合分 = (1-Σbudget)×核心 + Σ budget×sleeve分

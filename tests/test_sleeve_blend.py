@@ -96,7 +96,7 @@ def _panels():
     return panels, cal
 
 
-def test_score_stocks_no_sleeve_unchanged():
+def test_score_stocks_no_sleeve_formula_unchanged():
     """无 sleeve 时与单通道旧实现数值一致。"""
     from run_walkforward_backtest import score_stocks
     panels, cal = _panels()
@@ -190,3 +190,27 @@ def test_build_extend_sleeve_weights():
 def test_build_extend_sleeve_weights_no_styles():
     from run_walkforward_backtest import build_extend_sleeve_weights
     assert build_extend_sleeve_weights({}, None) is None
+
+
+# ── F2: sleeve 模式与一次性 TEST 互斥守卫 ──
+
+
+def test_assert_sleeve_mode_allowed():
+    from run_walkforward_backtest import assert_sleeve_mode_allowed
+    import pytest
+    assert_sleeve_mode_allowed(None, True, False)  # 未启用: 不拦
+    assert_sleeve_mode_allowed({"sleeves": {}}, True, True)  # folds-only: 不拦
+    with pytest.raises(RuntimeError):
+        assert_sleeve_mode_allowed({"sleeves": {}}, True, False)
+
+
+# ── F4: load_styles_config 预算校验覆盖全部键 ──
+
+
+def test_load_styles_config_extra_budget_key_counted():
+    from run_walkforward_backtest import load_styles_config
+    import pytest
+    cfg = _base_styles()
+    cfg["styles"]["budgets"] = {"momentum": 0.8, "growth": 0.1, "value": 0.3}
+    with pytest.raises(ValueError):
+        load_styles_config(cfg)

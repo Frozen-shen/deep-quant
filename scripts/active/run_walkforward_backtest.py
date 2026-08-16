@@ -284,19 +284,29 @@ def load_styles_config(config: dict) -> dict | None:
     if not cfg.get("enabled"):
         return None
     budgets = cfg.get("budgets") or {}
-    for name in SLEEVE_BUDGET_ORDER:
-        b = float(budgets.get(name, 0.0))
+    for name, raw in budgets.items():
+        try:
+            b = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"styles.budgets.{name} 必须为数值且在 [0,1], got {raw!r}")
         if not 0.0 <= b <= 1.0:
             raise ValueError(f"styles.budgets.{name} 必须在 [0,1], got {b}")
     for name in (cfg.get("sleeves") or {}):
         if name not in budgets:
             raise ValueError(f"styles.budgets 缺少 sleeve '{name}' 的预算")
-    if sum(float(budgets.get(n, 0.0)) for n in SLEEVE_BUDGET_ORDER) > 1.0:
+    if sum(float(v) for v in budgets.values()) > 1.0:
         raise ValueError("styles.budgets 合计不得超过 1.0 (core 隐含 1-Σ)")
     for name, scfg in (cfg.get("sleeves") or {}).items():
         if not scfg.get("factors"):
             raise ValueError(f"styles.sleeves.{name}.factors 为空")
     return cfg
+
+
+def assert_sleeve_mode_allowed(styles_cfg, args_folds: bool, args_folds_only: bool) -> None:
+    """sleeve 启用时禁止消耗一次性 TEST: folds 且非 folds-only → RuntimeError。"""
+    if styles_cfg and args_folds and not args_folds_only:
+        raise RuntimeError("多风格 sleeve 模式仅支持 --folds-only + --extend-val")
 
 
 def split_sleeve_factors(factor_names: list, styles_cfg: dict):
@@ -1304,7 +1314,8 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
 
     sleeve_weights: [{"name","weights","budget"}, ...]
       composite = (1-Σbudget)×主分 + Σ budget×sleeve分 (各通道内部分别归一)。
-    sleeve_weights=None 时行为与 v27 逐位一致 (回归测试钉住)。
+    sleeve_weights=None 时公式与 v27 一致 (float64 计算路径, 与 v27 float32
+    的期望差异 ≤1e-7 量级, 排序影响可忽略; 真实 A/B 由实验 A 对照 v27 存档验证)。
     """
     if not weights:
         return {}
@@ -2629,9 +2640,15 @@ def main():
             }
             # ── 多风格 sleeve (config styles 段, enabled=false → None=v27 行为) ──
             styles_cfg = load_styles_config(config)
+            try:
+                assert_sleeve_mode_allowed(styles_cfg, args.folds, args.folds_only)
+            except RuntimeError:
+                log.error("🚫 多风格 sleeve 模式仅支持 --folds-only + --extend-val; "
+                          "styles.enabled=true 时禁止执行一次性 TEST (模型与验证不一致会消耗 TEST 锁)。")
+                sys.exit(1)
             if styles_cfg:
                 log.info("  多风格 sleeve: %s (budgets=%s)",
-                         ", ".join(styles_cfg["sleeves"].keys()),
+                         ", ".join((styles_cfg.get("sleeves") or {}).keys()),
                          styles_cfg.get("budgets"))
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
@@ -2819,9 +2836,11 @@ def main():
     try:
         from experiment_tracker import log_experiment
         _styles = config.get("styles") or {}
+        _partition = ("test" if "test" in results
+                      else "development" + ("+extend_val" if "extend_val" in results else ""))
         log_experiment(
             script_name="run_walkforward_backtest",
-            partition="development+extend_val",
+            partition=_partition,
             config={"top_k": bt_config.get("top_k"),
                     "styles_enabled": bool(_styles.get("enabled")),
                     "styles_budgets": _styles.get("budgets"),
