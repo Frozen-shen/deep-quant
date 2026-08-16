@@ -2,6 +2,7 @@
 import sys, os
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE)
+sys.path.insert(0, os.path.join(BASE, "scripts", "active"))
 import pandas as pd
 import numpy as np
 
@@ -121,3 +122,22 @@ def test_industry_momentum_panel(monkeypatch):
     # 无映射 → NaN: 列存在且全 NaN (契约)
     assert "999999" in panel.columns
     assert panel["999999"].isna().all()
+
+
+def test_merge_surprise_panels_counts(monkeypatch):
+    """merge_surprise_panels: 仅合并 factor_names 中含有的新因子。"""
+    from run_walkforward_backtest import merge_surprise_panels
+    import earnings_surprise as es
+    panels = {}
+    monkeypatch.setattr(es, "sue_panel",
+                        lambda syms, cal: pd.DataFrame(
+                            {"600000": [0.5, 0.5, 0.5]},
+                            index=pd.date_range("2024-01-01", periods=3, freq="B")))
+    monkeypatch.setattr(es, "earn_accel_panel", lambda syms, cal: pd.DataFrame())
+    monkeypatch.setattr(es, "pead_panel", lambda syms, cal, all_data: pd.DataFrame())
+    monkeypatch.setattr(es, "industry_momentum_panel",
+                        lambda syms, all_data, imap, cal, lookback: pd.DataFrame())
+    idx = pd.DatetimeIndex(pd.date_range("2024-01-01", periods=3, freq="B"))
+    n = merge_surprise_panels(panels, ["sue_std", "fund_ocf_ps"],
+                              idx, ["600000"], {"600000": None}, {})
+    assert n == 1 and "sue_std" in panels
