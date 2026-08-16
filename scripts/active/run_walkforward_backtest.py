@@ -274,6 +274,65 @@ def _style_budget_weights(weights: dict, style_cap: float = 0.4) -> dict:
     return out
 
 
+# ── 多风格 sleeve 配置 (2026-08-16, config styles 段) ──
+SLEEVE_BUDGET_ORDER = ("momentum", "growth")
+
+
+def load_styles_config(config: dict) -> dict | None:
+    """styles 段: enabled=false/缺失 → None (行为与 v27 完全一致)。"""
+    cfg = config.get("styles") or {}
+    if not cfg.get("enabled"):
+        return None
+    budgets = cfg.get("budgets") or {}
+    for name in SLEEVE_BUDGET_ORDER:
+        b = float(budgets.get(name, 0.0))
+        if not 0.0 <= b <= 1.0:
+            raise ValueError(f"styles.budgets.{name} 必须在 [0,1], got {b}")
+    if sum(float(budgets.get(n, 0.0)) for n in SLEEVE_BUDGET_ORDER) > 1.0:
+        raise ValueError("styles.budgets 合计不得超过 1.0 (core 隐含 1-Σ)")
+    for name, scfg in (cfg.get("sleeves") or {}).items():
+        if not scfg.get("factors"):
+            raise ValueError(f"styles.sleeves.{name}.factors 为空")
+    return cfg
+
+
+def split_sleeve_factors(factor_names: list, styles_cfg: dict):
+    """核心池 = 全部因子 - sleeve 因子; 返回 (core_names, {name: [factors]})。
+
+    接受完整 config (含 styles 键) 或 styles 子段 (load_styles_config 返回值)。
+    """
+    if "sleeves" not in styles_cfg:
+        styles_cfg = styles_cfg.get("styles") or {}
+    sleeves = {}
+    sleeve_set = set()
+    for name, scfg in (styles_cfg.get("sleeves") or {}).items():
+        fs = [f for f in scfg.get("factors", []) if f in factor_names]
+        sleeves[name] = fs
+        sleeve_set.update(fs)
+    core = [f for f in factor_names if f not in sleeve_set]
+    return core, sleeves
+
+
+def parse_budget_combos(s: str) -> list:
+    """'0.25/0.15,0.2/0.2' → [[('momentum',0.25),('growth',0.15)], ...]"""
+    combos = []
+    for part in s.split(","):
+        vals = [p.strip() for p in part.split("/")]
+        if len(vals) != len(SLEEVE_BUDGET_ORDER):
+            raise ValueError(
+                f"预算组合需 {len(SLEEVE_BUDGET_ORDER)} 个值 (mom/growth): '{part}'")
+        combo = [(SLEEVE_BUDGET_ORDER[i], float(vals[i]))
+                 for i in range(len(SLEEVE_BUDGET_ORDER))]
+        if any(not 0.0 <= v <= 1.0 for _, v in combo):
+            raise ValueError(f"预算值须在 [0,1]: '{part}'")
+        if sum(v for _, v in combo) > 1.0:
+            raise ValueError(f"预算合计不得超过 1.0: '{part}'")
+        combos.append(combo)
+    if not combos:
+        raise ValueError("预算组合列表不能为空")
+    return combos
+
+
 def _industry_neutralize(df: pd.DataFrame, industry_map: dict) -> pd.DataFrame:
     """行业截面中性化: 每个日期, 行业内 z-score (组内标准化)。
 
