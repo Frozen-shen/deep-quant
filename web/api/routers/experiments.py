@@ -136,6 +136,9 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
         seg_eq_map = {}
         for p in seg_eq:
             seg_eq_map[p["date"]] = p.get("equity")
+        # 逐笔收益 (FIFO 配对, 阶段内独立): 买入=负佣金, 卖出=相对买入成本的盈亏
+        # (含买入佣金摊入成本 + 卖出佣金; 2026-08-16 换仓明细"本次收益"列)
+        _lots: dict[str, list[list]] = {}
         for t in seg_trades:
             t["segment"] = seg_key  # fold_1..5 / extend_val
             t_date = t.get("date", "")
@@ -145,6 +148,35 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
                 ft = t.get("fill_times")
                 if ft and ft == ["09:35"]:
                     t["fill_times"] = ["全天VWAP"]
+            # ── trade_pnl ──
+            sym = t.get("symbol", "")
+            action = (t.get("action") or "").upper()
+            qty = float(t.get("qty") or 0)
+            price = float(t.get("price") or 0)
+            comm = float(t.get("commission") or 0)
+            if qty <= 0 or price <= 0:
+                t["trade_pnl"] = None
+                continue
+            if action == "BUY":
+                # 买入佣金均摊进每股成本
+                _lots.setdefault(sym, []).append([price + comm / qty, qty])
+                t["trade_pnl"] = round(-comm, 2)  # 买入显示为负佣金成本
+            elif action == "SELL":
+                remaining = qty
+                pnl = 0.0
+                lot_list = _lots.setdefault(sym, [])
+                while remaining > 0 and lot_list:
+                    lot_cost, lot_qty = lot_list[0]
+                    take = min(remaining, lot_qty)
+                    pnl += (price - lot_cost) * take
+                    remaining -= take
+                    lot_list[0][1] -= take
+                    if lot_list[0][1] <= 0:
+                        lot_list.pop(0)
+                pnl -= comm  # 卖出佣金
+                t["trade_pnl"] = round(pnl, 2)  # 卖出=相对买入成本的盈亏
+            else:
+                t["trade_pnl"] = None
         all_trades.extend(seg_trades)
     all_trades.sort(key=lambda t: t.get("date", ""))
     trades = all_trades

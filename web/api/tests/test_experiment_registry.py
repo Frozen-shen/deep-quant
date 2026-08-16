@@ -136,6 +136,15 @@ def test_trades_merge_all_folds_and_extend():
         assert len(s["equity"]) > 100, f"{s['key']} 净值曲线点数不足"
         assert s["label"]
         assert s["n_trades"] > 0
+    # 逐笔收益: 买入=-佣金(<=0), 卖出=FIFO配对盈亏(有值)
+    for t in trades:
+        assert "trade_pnl" in t, "每笔成交应有 trade_pnl"
+        if t["action"] == "BUY":
+            assert t["trade_pnl"] is not None and t["trade_pnl"] <= 0
+        elif t["action"] == "SELL":
+            assert t["trade_pnl"] is not None
+    assert any(t["action"] == "SELL" and t["trade_pnl"] > 0 for t in trades), "应有盈利卖出"
+    assert any(t["action"] == "SELL" and t["trade_pnl"] < 0 for t in trades), "应有亏损卖出"
 
 
 def test_legacy_endpoint_kept():

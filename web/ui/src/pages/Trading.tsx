@@ -12,7 +12,7 @@ import PnlBarChart from '../components/PnlBarChart'
 import { useExperiment } from '../experiment-context'
 
 interface Position { symbol: string; qty: number; avg_cost: number; market_value: number }
-interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[]; segment?: string }
+interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[]; segment?: string; trade_pnl?: number | null }
 
 export default function Trading() {
   /** 换仓明细按年份筛选 (动态: 从实验 trades 提取实际年份, 默认全部) */
@@ -158,6 +158,18 @@ export default function Trading() {
       render: (v) => { const t = actionTag(v); return <Tag color={t.color}>{t.text}</Tag> } }),
     col<Trade>('qty', { title: '数量', width: 100, sorter: true, render: (v) => fmtNum(v as number, 0) }),
     col<Trade>('price', { title: '价格', width: 110, sorter: true, render: (v) => fmtNum(v as number, 2) }),
+    { title: '本次收益', dataIndex: 'trade_pnl', width: 130,
+      sorter: (a: any, b: any) => (a.trade_pnl ?? 0) - (b.trade_pnl ?? 0),
+      render: (_v: unknown, r: Trade) => {
+        const p = (r as any).trade_pnl
+        if (p === null || p === undefined) return '—'
+        // 买入 = 负佣金成本 (灰色); 卖出 = 该笔相对买入成本的盈亏 (红涨绿跌)
+        if (r.action === 'BUY') {
+          return <span style={{ color: '#888' }}>{fmtNum(p, 2)}</span>
+        }
+        const color = p > 0 ? '#cf1322' : p < 0 ? '#3f8600' : undefined
+        return <span style={{ color }}>{fmtNum(p, 2)}</span>
+      } },
     col<Trade>('commission', { title: '佣金', width: 100, sorter: true, render: (v) => fmtNum(v as number, 2) }),
     { title: '成交后净值', dataIndex: 'equity_after', width: 130, sorter: (a: any, b: any) => (a.equity_after ?? 0) - (b.equity_after ?? 0),
       render: (_v: unknown, r: any) => r.equity_after != null ? fmtNum(r.equity_after, 0) : '—' },
