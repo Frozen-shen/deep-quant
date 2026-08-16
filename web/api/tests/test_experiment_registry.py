@@ -129,6 +129,13 @@ def test_trades_merge_all_folds_and_extend():
     assert dates == sorted(dates)
     # 每笔都有成交后净值
     assert all("equity_after" in t for t in trades)
+    # 各阶段净值曲线 (供前端年份切换): fold_1..5 + extend_val 齐全
+    segs = d.get("segments", [])
+    assert {s["key"] for s in segs} == {"fold_1", "fold_2", "fold_3", "fold_4", "fold_5", "extend_val"}
+    for s in segs:
+        assert len(s["equity"]) > 100, f"{s['key']} 净值曲线点数不足"
+        assert s["label"]
+        assert s["n_trades"] > 0
 
 
 def test_legacy_endpoint_kept():

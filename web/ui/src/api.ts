@@ -100,6 +100,17 @@ export interface ExperimentDetail {
   trades: any[]
   equity_curve: Array<{ date: string; equity: number }>
   benchmark_curve: Array<{ date: string; close: number }>
+  segments: Array<{
+    key: string
+    label: string
+    val: string
+    equity: Array<{ date: string; equity: number }>
+    benchmark: Array<{ date: string; close: number }>
+    excess_annual?: number | null
+    sharpe?: number | null
+    max_drawdown?: number | null
+    n_trades: number
+  }>
 }
 
 export async function fetchExperimentRegistry(): Promise<{ count: number; experiments: ExperimentRegistryItem[] }> {

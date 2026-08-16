@@ -103,20 +103,44 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
     # 实际 fold_1~5 (2020-2024) 也有逐笔成交, 合并后按日期排序全量展示。
     legacy_fills = str(meta.get("generated_at", "")) < "2026-08-15"
     all_trades = []
+    # 各阶段净值曲线 + 基准 (供前端按年份/阶段切换净值图, 2026-08-16)
+    segments = []
     for seg_key in [k for k in results if k.startswith("fold_")] + ["extend_val"]:
         seg = results.get(seg_key) or {}
         seg_trades = seg.get("trades", []) or []
+        # 阶段净值曲线 (主数据: series 中"组合净值"画线)
+        seg_eq = seg.get("equity_curve") or []
+        if seg_eq:
+            # 该阶段基准曲线 (与阶段净值同基)
+            seg_period = seg.get("period", "")
+            sp_s, _, sp_e = (seg_period.split(" ~ ") + ["", ""])[:3]
+            seg_bench = build_benchmark_curve(sp_s or "2020-01-01", sp_e or "2026-06-30")
+            seg_base = seg_bench[0]["close"] if seg_bench else None
+            eq0 = seg_eq[0].get("equity", 100000.0)
+            segments.append({
+                "key": seg_key,
+                "label": "模拟考" if seg_key == "extend_val" else seg_key.replace("fold_", "Fold"),
+                "val": seg.get("val", ""),
+                "equity": [{"date": p["date"], "equity": p["equity"]} for p in seg_eq],
+                "benchmark": ([{"date": b["date"],
+                                "close": round(b["close"] / seg_base * eq0, 2)}
+                               for b in seg_bench] if seg_base else []),
+                "excess_annual": seg.get("excess_annual"),
+                "sharpe": seg.get("sharpe"),
+                "max_drawdown": seg.get("max_drawdown"),
+                "n_trades": len(seg_trades),
+            })
         if not seg_trades:
             continue
         # 每阶段自己的 equity_curve → equity_after 映射
-        seg_eq = {}
-        for p in (seg.get("equity_curve") or []):
-            seg_eq[p["date"]] = p.get("equity")
+        seg_eq_map = {}
+        for p in seg_eq:
+            seg_eq_map[p["date"]] = p.get("equity")
         for t in seg_trades:
             t["segment"] = seg_key  # fold_1..5 / extend_val
             t_date = t.get("date", "")
-            if t_date in seg_eq and "equity_after" not in t:
-                t["equity_after"] = seg_eq[t_date]
+            if t_date in seg_eq_map and "equity_after" not in t:
+                t["equity_after"] = seg_eq_map[t_date]
             if legacy_fills:
                 ft = t.get("fill_times")
                 if ft and ft == ["09:35"]:
@@ -128,7 +152,7 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
 
     return {"meta": meta, "metrics": metrics, "series": series, "folds": folds,
             "stock_pnl": stock_pnl, "trades": trades,
-            "equity_curve": eq, "benchmark_curve": bench}
+            "equity_curve": eq, "benchmark_curve": bench, "segments": segments}
 
 
 def _exp_meta(path: Path, d: dict) -> dict:
@@ -154,7 +178,7 @@ def _exp_schema(path: Path, d: dict) -> dict:
     param_str = json.dumps(params, ensure_ascii=False)[:200] if params else ""
     return {"meta": {**meta, "description": param_str}, "metrics": metrics,
             "series": [], "folds": [], "stock_pnl": [], "trades": [],
-            "equity_curve": [], "benchmark_curve": []}
+            "equity_curve": [], "benchmark_curve": [], "segments": []}
 
 
 def _registry() -> list[dict]:

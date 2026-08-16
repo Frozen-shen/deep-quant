@@ -17,6 +17,8 @@ interface Trade { date: string; symbol: string; action: string; qty: number; pri
 export default function Trading() {
   /** 换仓明细按年份筛选 (动态: 从实验 trades 提取实际年份, 默认全部) */
   const [btYear, setBtYear] = useState<string>('all')
+  /** 净值图阶段切换: fold_1..5 / extend_val (默认模拟考=最新) */
+  const [segKey, setSegKey] = useState<string>('extend_val')
   /** 换仓明细按股票搜索筛选 (代码/名称, 空=全部) */
   const [btSymbol, setBtSymbol] = useState<string>('')
   const { data, isLoading, isError } = useQuery({
@@ -40,6 +42,12 @@ export default function Trading() {
   const curve = detail?.equity_curve ?? []
   const bench = detail?.benchmark_curve ?? []
   const metrics = detail?.metrics ?? []
+  const segments = detail?.segments ?? []
+
+  /** 当前选中阶段的净值/基准曲线 (segments 由后端提供, 各 fold 独立) */
+  const seg = segments.find(s => s.key === segKey) ?? segments[segments.length - 1]
+  const segCurve = seg?.equity?.length ? seg.equity : curve
+  const segBench = seg?.benchmark?.length ? seg.benchmark : bench
 
   /** 调仓时间线: 每次调仓的买卖笔数 */
   const rebalanceOption = useMemo(() => {
@@ -170,8 +178,17 @@ export default function Trading() {
           </Row>
           <Row gutter={16} style={{ marginTop: 16 }}>
             <Col span={14}>
-              <Typography.Text strong>净值与回撤（vs 中证1000）</Typography.Text>
-              <EquityTriptych equity={curve} benchmark={bench} />
+              <Space style={{ marginBottom: 8 }} wrap>
+                <Typography.Text strong>净值与回撤（vs 中证1000）</Typography.Text>
+                {segments.length > 1 && (
+                  <Segmented
+                    size="small"
+                    options={segments.map(s => ({ label: s.label, value: s.key }))}
+                    value={segKey}
+                    onChange={(v) => setSegKey(String(v))} />
+                )}
+              </Space>
+              <EquityTriptych equity={segCurve} benchmark={segBench} />
             </Col>
             <Col span={10}>
               <Typography.Text strong>调仓分布（买卖笔数/次）</Typography.Text>
