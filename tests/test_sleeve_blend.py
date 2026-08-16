@@ -139,3 +139,22 @@ def test_score_stocks_sleeve_blend_math():
     expect = 0.6 * z1 + 0.25 * zm + 0.15 * zg
     for k in s:
         assert abs(s[k] - expect[k]) < 1e-9, f"{k}: {s[k]} vs {expect[k]}"
+
+
+# ── Task 3: sleeve_median_weights 纯函数 ──
+
+
+def test_sleeve_median_weights_fallback():
+    """|median|<0.02 用 fallback_weight 正号; 否则用 median ICIR。"""
+    from run_walkforward_backtest import sleeve_median_weights
+    icirs = {
+        "momentum": {"m1": [0.05, 0.06, 0.04, 0.05, 0.05],
+                     "m2": [0.01, -0.01, 0.0, 0.0, 0.0]},
+        "growth": {"g1": [0.0, 0.0, 0.0, 0.0, 0.0]},
+    }
+    cfg = {"momentum": {"fallback_weight": 0.1},
+           "growth": {"fallback_weight": 0.1}}
+    out = sleeve_median_weights(icirs, cfg)
+    assert abs(out["momentum"]["m1"] - 0.05) < 1e-9
+    assert out["momentum"]["m2"] == 0.1   # median≈0 → fallback
+    assert out["growth"]["g1"] == 0.1     # 全 0 → fallback

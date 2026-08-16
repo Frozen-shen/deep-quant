@@ -1504,6 +1504,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  universe_fn=get_universe,
                  use_regime: bool = False,
                  portfolio_constraints: dict | None = None,
+                 sleeve_weights: list | None = None,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3,
                  weight_mode: str = "equal",
@@ -1519,6 +1520,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
       双变量检测结果调整因子权重 (含动量崩溃保护)。
     portfolio_constraints: 组合后置约束 dict (config.yaml portfolio_constraints
       段: max_single_pct/max_industry_pct/max_turnover), None=不启用。
+    sleeve_weights: 多风格 sleeve 列表 [{"name","weights","budget"}, ...],
+      与 fixed_weights 配套 (fold 模式), None=单通道 (v27 行为)。
     minute_weights: 方案B 分钟叠加层权重 {min_factor: icir}, None=不叠加。
     minute_lambda: 叠加权重 λ (综合分 = 主分 + λ×分钟分)。
     pool_filter_cfg: 股票池分域配置 (config.yaml pool_filter 段,
@@ -1674,6 +1677,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
 
             # 评分
             scores = score_stocks(factor_panels, weights, today,
+                                  sleeve_weights=sleeve_weights,
                                   minute_weights=minute_weights,
                                   minute_lambda=minute_lambda)
 
@@ -1963,6 +1967,34 @@ FOLD_T_STAT_MIN = 1.645    # 统计显著标准: |ICIR|*sqrt(n_obs) >= 1.645 (�
 FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合); 可由 config fold.max_factors 覆盖
 
 
+def _sleeve_sig(ic_stats: dict) -> set:
+    """与核心同口径的显著因子: |ICIR|>=FOLD_ICIR_MIN 且 t 统计 >= FOLD_T_STAT_MIN。"""
+    sig = set()
+    for fn, st in ic_stats.items():
+        n_obs = st.get("n_obs", 0)
+        t_stat = abs(st["icir"]) * np.sqrt(n_obs) if n_obs > 0 else 0.0
+        if t_stat >= FOLD_T_STAT_MIN and abs(st["icir"]) >= FOLD_ICIR_MIN:
+            sig.add(fn)
+    return sig
+
+
+def sleeve_median_weights(sleeve_icirs: dict, sleeves_cfg: dict) -> dict:
+    """每 sleeve 因子 5 折 ICIR 中位数 → 权重; |median|<0.02 用 fallback_weight。
+
+    fallback 符号取正 (成长因子 p6 全样本 ICIR 均为正; 2026-08-16)。
+    """
+    out = {}
+    for name, icirs in sleeve_icirs.items():
+        scfg = (sleeves_cfg or {}).get(name, {}) or {}
+        fb = float(scfg.get("fallback_weight", 0.1))
+        w = {}
+        for fn, arr in icirs.items():
+            med = float(np.median(arr)) if arr else 0.0
+            w[fn] = med if abs(med) >= 0.02 else fb
+        out[name] = w
+    return out
+
+
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
@@ -1973,7 +2005,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       weight_mode: str = "equal",
                       pool_filter_cfg: dict | None = None,
                       vol_target_cfg: dict | None = None,
-                      trend_timing_cfg: dict | None = None) -> dict:
+                      trend_timing_cfg: dict | None = None,
+                      styles_cfg: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -2005,9 +2038,18 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
             log.info("  分钟叠加层: %d 个因子, λ=%.2f (fold 4-5 验证期)",
                      len(ml_weights), ml_lambda)
 
+    core_names = factor_names
+    sleeves = {}
+    if styles_cfg:
+        core_names, sleeves = split_sleeve_factors(factor_names, styles_cfg)
+        log.info("  sleeve 模式: 核心 %d 因子 + %s",
+                 len(core_names),
+                 ", ".join(f"{n}({len(fs)} 因子)" for n, fs in sleeves.items()))
+
     fold_results = {}
-    factor_hits = {fn: 0 for fn in factor_names}
-    factor_icirs = {fn: [] for fn in factor_names}
+    factor_hits = {fn: 0 for fn in core_names}
+    factor_icirs = {fn: [] for fn in core_names}
+    sleeve_icirs = {}
 
     # 验证期首调仓日: 固定权重只需在训练期末计算一次
     for fi, fold in enumerate(FOLDS):
@@ -2028,15 +2070,39 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
 
         weights, ic_stats = compute_icir_weights(
             factor_panels, close_panel, calendar, cal_idx,
-            val_first, factor_names, train_start=ts, train_end=te,
+            val_first, core_names, train_start=ts, train_end=te,
             universe_fn=universe_fn)
+
+        # ── sleeve 权重估计 (独立通道, 2026-08-16) ──
+        fold_sleeve_weights = {}
+        if sleeves:
+            for sname, sfs in sleeves.items():
+                s_weights, s_stats = compute_icir_weights(
+                    factor_panels, close_panel, calendar, cal_idx,
+                    val_first, sfs, train_start=ts, train_end=te,
+                    universe_fn=universe_fn)
+                min_hits = int(styles_cfg["sleeves"][sname].get("min_hits", 3))
+                if min_hits > 0:
+                    s_weights = {fn: w for fn, w in s_weights.items()
+                                 if fn in _sleeve_sig(s_stats)}
+                else:
+                    # min_hits=0 (成长): 保留 |icir|>=MIN_ICIR 的因子, 符号随 ICIR
+                    s_weights = {fn: w for fn, w in s_weights.items()
+                                 if abs(w) >= MIN_ICIR}
+                fold_sleeve_weights[sname] = s_weights
+                for fn in sfs:
+                    st = s_stats.get(fn)
+                    sleeve_icirs.setdefault(sname, {}).setdefault(fn, []).append(
+                        float(st["icir"]) if st is not None else 0.0)
+                log.info("  sleeve[%s] 本折权重: %d 因子", sname, len(s_weights))
+
         n_sel = len(weights)
         log.info("  训练期因子: %d/%d 入选 |ICIR|>=%.2f",
-                 n_sel, len(factor_names), FOLD_ICIR_MIN)
+                 n_sel, len(core_names), FOLD_ICIR_MIN)
 
         # 记录每个因子的 fold 命中 (统计显著标准: |ICIR|*sqrt(n) >= 1.645)
         sig_factors = set()
-        for fn in factor_names:
+        for fn in core_names:
             st = ic_stats.get(fn)
             if st is not None:
                 factor_icirs[fn].append(st["icir"])
@@ -2064,6 +2130,11 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         r = run_backtest(all_data, factor_panels, close_panel, calendar,
                          cal_idx, factor_names, bt_config, vs, ve,
                          label=f"VAL{fi+1}", fixed_weights=weights,
+                         sleeve_weights=([{
+                             "name": sname,
+                             "weights": fold_sleeve_weights.get(sname) or {},
+                             "budget": float(styles_cfg["budgets"][sname]),
+                         } for sname in sleeves] if sleeves else None),
                          universe_fn=universe_fn, use_regime=use_regime,
                          portfolio_constraints=portfolio_constraints,
                          minute_weights=ml_weights if fi >= 3 else None,
@@ -2083,7 +2154,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     # ── 稳定因子筛选 (统计显著 ≥3/5 folds + 方向一致 + 数量上限) ──
     # 方向一致性: 因子在 ≥3/5 folds 中 ICIR 符号相同 (防止正负抵消)
     cand = []
-    for fn in factor_names:
+    for fn in core_names:
         if factor_hits[fn] < FOLD_MIN_HITS or not factor_icirs[fn]:
             continue
         arr = np.array(factor_icirs[fn])
@@ -2101,7 +2172,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     log.info("")
     log.info("=" * 60)
     log.info("  稳定因子: %d/%d (≥%d folds 显著+方向一致, top%d)",
-             len(stable), len(factor_names), FOLD_MIN_HITS,
+             len(stable), len(core_names), FOLD_MIN_HITS,
              limit)
     if stable:
         top = sorted(stable_icir.items(), key=lambda kv: -abs(kv[1]))[:15]
@@ -2116,6 +2187,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         "stable_factors": stable,
         "stable_factor_icir_median": {
             k: round(v, 4) for k, v in stable_icir.items()},
+        "sleeve_median_weights": (
+            sleeve_median_weights(sleeve_icirs, styles_cfg.get("sleeves", {}))
+            if styles_cfg else {}),
     }
 
 
