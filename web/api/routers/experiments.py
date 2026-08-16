@@ -98,27 +98,33 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
             "ir": f.get("ir"), "avg_turnover": f.get("avg_turnover"),
         })
 
-    trades = ev.get("trades", []) or []
-    stock_pnl = aggregate_stock_pnl(trades)
-
-    # ── 逐笔成交增强 (2026-08-15) ──
-    # 1. equity_after: 成交后净值 (从 equity_curve 按日期映射; 调仓日所有成交
-    #    共享当日净值, 展示"这笔调仓后的账户净值")
-    # 2. fill_times 归一化 (仅旧数据): v24e 及之前 (generated_at < 2026-08-15)
-    #    小订单路径填 09:35 且按全天VWAP成交 (装饰性标记) → 统一改为 全天VWAP(旧)。
-    #    2026-08-15 起确定性 POV 重写后, 09:35 是真实首bar成交, 不归一化。
-    eq_by_date = {}
-    for p in eq:
-        eq_by_date[p["date"]] = p.get("equity")
+    # ── 全部成交: 合并 folds + extend_val, 标注归属阶段 (2026-08-16) ──
+    # 之前只取 extend_val 的 trades, 前端只能看到 2025 之后的成交;
+    # 实际 fold_1~5 (2020-2024) 也有逐笔成交, 合并后按日期排序全量展示。
     legacy_fills = str(meta.get("generated_at", "")) < "2026-08-15"
-    for t in trades:
-        t_date = t.get("date", "")
-        if t_date in eq_by_date and "equity_after" not in t:
-            t["equity_after"] = eq_by_date[t_date]
-        if legacy_fills:
-            ft = t.get("fill_times")
-            if ft and ft == ["09:35"]:
-                t["fill_times"] = ["全天VWAP"]
+    all_trades = []
+    for seg_key in [k for k in results if k.startswith("fold_")] + ["extend_val"]:
+        seg = results.get(seg_key) or {}
+        seg_trades = seg.get("trades", []) or []
+        if not seg_trades:
+            continue
+        # 每阶段自己的 equity_curve → equity_after 映射
+        seg_eq = {}
+        for p in (seg.get("equity_curve") or []):
+            seg_eq[p["date"]] = p.get("equity")
+        for t in seg_trades:
+            t["segment"] = seg_key  # fold_1..5 / extend_val
+            t_date = t.get("date", "")
+            if t_date in seg_eq and "equity_after" not in t:
+                t["equity_after"] = seg_eq[t_date]
+            if legacy_fills:
+                ft = t.get("fill_times")
+                if ft and ft == ["09:35"]:
+                    t["fill_times"] = ["全天VWAP"]
+        all_trades.extend(seg_trades)
+    all_trades.sort(key=lambda t: t.get("date", ""))
+    trades = all_trades
+    stock_pnl = aggregate_stock_pnl(trades)
 
     return {"meta": meta, "metrics": metrics, "series": series, "folds": folds,
             "stock_pnl": stock_pnl, "trades": trades,

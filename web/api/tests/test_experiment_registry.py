@@ -55,13 +55,14 @@ def test_experiment_detail_schema():
     # stock_pnl 字段完整
     sp = d["stock_pnl"][0]
     assert set(["symbol", "total_pnl", "n_round_trips", "win_rate"]) <= set(sp.keys())
-    # 逐笔成交增强: 成交后净值 + 时间归一化 (旧数据 09:35 → 全天VWAP 标记)
+    # 逐笔成交增强: 成交后净值 + 时间归一化 (旧数据单段 09:35 → 全天VWAP 标记;
+    # 多段 POV 拆单是真实逐时段明细, 首段 09:35 保留)
     t0 = d["trades"][0]
     assert "equity_after" in t0 and t0["equity_after"] is not None
     for t in d["trades"]:
         ft = t.get("fill_times")
         if ft:
-            assert all(f != "09:35" for f in ft), "fill_times 不应再有 09:35"
+            assert ft != ["09:35"], "旧数据单段 09:35 应归一化为全天VWAP"
             assert all(f != "早盘市价" for f in ft), "不应再有旧的早盘市价标记"
 
 
@@ -110,6 +111,24 @@ def test_schema_missing_generated_at_treated_as_legacy():
 def test_experiment_detail_404():
     resp = client.get("/api/experiments/not_exist_xyz")
     assert resp.status_code == 404
+
+
+def test_trades_merge_all_folds_and_extend():
+    """全历史合并: folds (2020-2024) + extend_val (2025-2026) 的成交都在。"""
+    resp = client.get("/api/experiments/walkforward_results_v27_singlecap20_lowturnover")
+    assert resp.status_code == 200
+    d = resp.json()
+    trades = d["trades"]
+    assert len(trades) >= 200, "应合并 5 fold + extend_val 的全历史成交"
+    segs = {t.get("segment") for t in trades}
+    assert segs == {"fold_1", "fold_2", "fold_3", "fold_4", "fold_5", "extend_val"}
+    years = {t["date"][:4] for t in trades}
+    assert years == {"2020", "2021", "2022", "2023", "2024", "2025", "2026"}
+    # 按日期升序
+    dates = [t["date"] for t in trades]
+    assert dates == sorted(dates)
+    # 每笔都有成交后净值
+    assert all("equity_after" in t for t in trades)
 
 
 def test_legacy_endpoint_kept():

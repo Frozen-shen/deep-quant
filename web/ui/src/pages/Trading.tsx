@@ -12,11 +12,11 @@ import PnlBarChart from '../components/PnlBarChart'
 import { useExperiment } from '../experiment-context'
 
 interface Position { symbol: string; qty: number; avg_cost: number; market_value: number }
-interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[] }
+interface Trade { date: string; symbol: string; action: string; qty: number; price: number; commission?: number; reason?: string; fill_times?: string[]; segment?: string }
 
 export default function Trading() {
-  /** 换仓明细按实验年份筛选: all / 2025 / 2026 (EXTEND 覆盖区间) */
-  const [btYear, setBtYear] = useState<'all' | '2025' | '2026'>('all')
+  /** 换仓明细按年份筛选 (动态: 从实验 trades 提取实际年份, 默认全部) */
+  const [btYear, setBtYear] = useState<string>('all')
   /** 换仓明细按股票搜索筛选 (代码/名称, 空=全部) */
   const [btSymbol, setBtSymbol] = useState<string>('')
   const { data, isLoading, isError } = useQuery({
@@ -76,6 +76,13 @@ export default function Trading() {
     value: s, label: `${s} ${nameOf(s)}`,
   })), [tradeSymbols, nameOf])
 
+  /** 动态年份选项: 从实验 trades 提取实际覆盖年份 (2020-2026) */
+  const yearOptions = useMemo(() => {
+    const years = new Set<string>()
+    for (const t of btTrades) years.add(t.date.slice(0, 4))
+    return ['all', ...[...years].sort()]
+  }, [btTrades])
+
   if (isLoading) return <Spin />
   if (isError) return <Alert type="error" message="执行状态不可用" />
 
@@ -83,12 +90,27 @@ export default function Trading() {
   const positions = (data?.positions ?? []) as Position[]
   const pnl = (p: Position) => (p.market_value ?? 0) - (p.avg_cost ?? 0) * (p.qty ?? 0)
 
-  /** 换仓明细筛选: 年份 (EXTEND 2025-01~2026-06) + 股票 (代码/名称) 叠加 */
+  /** 换仓明细筛选: 年份 (动态) + 股票 (代码/名称) 叠加 */
   const filteredTrades = btTrades.filter((t: Trade) => {
     if (btYear !== 'all' && !t.date.startsWith(btYear)) return false
     if (btSymbol && t.symbol !== btSymbol) return false
     return true
   })
+
+  /** 阶段标签映射: fold_1..5 → 2020..2024 验证期, extend_val → 模拟考 */
+  const segmentTag = (seg?: string) => {
+    if (!seg) return null
+    const map: Record<string, { text: string; color: string }> = {
+      fold_1: { text: 'Fold1·2020', color: 'default' },
+      fold_2: { text: 'Fold2·2021', color: 'default' },
+      fold_3: { text: 'Fold3·2022', color: 'default' },
+      fold_4: { text: 'Fold4·2023', color: 'default' },
+      fold_5: { text: 'Fold5·2024', color: 'default' },
+      extend_val: { text: '模拟考', color: 'blue' },
+    }
+    const m = map[seg]
+    return m ? <Tag color={m.color} style={{ marginLeft: 4 }}>{m.text}</Tag> : null
+  }
 
   const metricOf = (key: string) => metrics.find(m => m.key === key)?.value
 
@@ -115,8 +137,10 @@ export default function Trading() {
   }
 
   const tradeCols = [
-    { title: '时间', dataIndex: 'date', width: 170, sorter: (a: Trade, b: Trade) => a.date.localeCompare(b.date),
-      render: timeRender },
+    { title: '时间', dataIndex: 'date', width: 220, sorter: (a: Trade, b: Trade) => a.date.localeCompare(b.date),
+      render: (v: string, r: Trade) => (
+        <span>{timeRender(v, r)}{segmentTag(r.segment)}</span>
+      ) },
     col<Trade>('symbol', { title: '代码', width: 90, sorter: true }),
     { title: '名称', dataIndex: 'symbol', width: 130, sorter: (a: Trade, b: Trade) => nameOf(a.symbol).localeCompare(nameOf(b.symbol), 'zh-CN'),
       render: (_v: unknown, r: Trade) => nameOf(r.symbol) },
@@ -162,10 +186,9 @@ export default function Trading() {
           <Segmented
             options={[
               { label: '全部', value: 'all' },
-              { label: '2025', value: '2025' },
-              { label: '2026', value: '2026' },
+              ...yearOptions.filter(y => y !== 'all').map(y => ({ label: y, value: y })),
             ]}
-            value={btYear} onChange={setBtYear} />
+            value={btYear} onChange={(v) => setBtYear(String(v))} />
           <AutoComplete
             style={{ width: 260 }}
             placeholder="按股票代码/名称筛选（如 600519 或 茅台）"
