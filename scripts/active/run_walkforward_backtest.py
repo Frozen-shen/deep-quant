@@ -1269,23 +1269,47 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
     return weights, ic_stats
 
 
+def _weighted_z_composite(cross: pd.DataFrame, weights: dict) -> np.ndarray:
+    """cross (n × 因子) → 因子内 z-score 后按权重加权和, 除以 Σ|w| (长度 n)。"""
+    names = [n for n in weights if n in cross.columns]
+    vals = cross[names].to_numpy(dtype=np.float64)
+    n, m = vals.shape
+    w = np.array([weights[n] for n in names], dtype=np.float64)
+    comp = np.zeros(n)
+    for fi in range(m):
+        col = vals[:, fi]
+        mask = ~np.isnan(col)
+        if mask.sum() < 10:
+            continue
+        mu = np.nanmean(col)
+        sd = np.nanstd(col)
+        if sd < 1e-9:
+            continue
+        z = np.where(mask, (col - mu) / sd, 0.0)
+        comp += w[fi] * z
+    denom = np.sum(np.abs(w))
+    if denom < 1e-9:
+        return comp
+    return comp / denom
+
+
 def score_stocks(factor_panels: dict, weights: dict, t_date,
+                 sleeve_weights: list | None = None,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3) -> dict:
-    """用动态 ICIR 权重对 t_date 当日截面打分 (z-score 加权)。
+    """ICIR 加权 z-score 打分, 支持多 sleeve 预算混合 (2026-08-16)。
 
-    方案B: minute_weights 提供时, 综合分 = 主分 + λ×分钟因子加权分。
-    分钟因子分独立 z-score (不参与主因子归一化, 避免尺度污染)。
+    sleeve_weights: [{"name","weights","budget"}, ...]
+      composite = (1-Σbudget)×主分 + Σ budget×sleeve分 (各通道内部分别归一)。
+    sleeve_weights=None 时行为与 v27 逐位一致 (回归测试钉住)。
     """
     if not weights:
         return {}
-    factor_names = list(weights.keys())
-    w = np.array([weights[n] for n in factor_names])
-    abs_w = np.sum(np.abs(w))
+    abs_w = np.sum(np.abs(list(weights.values())))
     if abs_w < 1e-9:
         return {}
+    factor_names = list(weights.keys())
 
-    # 当日截面: index=股票, columns=因子
     cols = {}
     for n in factor_names:
         p = factor_panels[n]
@@ -1293,31 +1317,39 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
             cols[n] = p.loc[t_date]
     if not cols:
         return {}
-    cross = pd.DataFrame(cols)  # (n_stocks × n_factors)
+    cross = pd.DataFrame(cols)
 
-    # 覆盖率 >= 50%
     n_f = cross.shape[1]
     cov = cross.notna().sum(axis=1)
     cross = cross[cov >= n_f * 0.5]
     if len(cross) < 10:
         return {}
 
-    vals = cross.to_numpy()  # (n_valid, n_factors)
-    composite = np.zeros(len(cross))
-    for fi in range(n_f):
-        col = vals[:, fi]
-        m = ~np.isnan(col)
-        if m.sum() < 10:
-            continue
-        mu = np.nanmean(col)
-        sd = np.nanstd(col)
-        if sd < 1e-9:
-            continue
-        z = np.where(m, (col - mu) / sd, 0.0)
-        composite += w[fi] * z
-    composite /= abs_w
+    base = _weighted_z_composite(cross, weights)
+    core_budget = 1.0
+    sleeve_sum = 0.0
+    if sleeve_weights:
+        for sw in sleeve_weights:
+            s_w = sw.get("weights") or {}
+            s_budget = float(sw.get("budget", 0.0))
+            if not s_w or s_budget <= 0:
+                continue
+            s_cols = {}
+            for n in s_w:
+                p = factor_panels.get(n)
+                if p is not None and t_date in p.index:
+                    s_cols[n] = p.loc[t_date]
+            if not s_cols:
+                continue
+            s_cross = pd.DataFrame(s_cols).reindex(cross.index)
+            s_comp = _weighted_z_composite(s_cross, s_w)
+            # 无该 sleeve 数据的股票 s_comp=0 → 仅主分生效 (自然降级)
+            s_comp = np.nan_to_num(s_comp, nan=0.0)
+            sleeve_sum = sleeve_sum + s_budget * s_comp
+            core_budget -= s_budget
+    composite = core_budget * base + sleeve_sum
 
-    # ── 方案B: 分钟因子叠加层 ──
+    # ── 方案B: 分钟因子叠加层 (语义不变) ──
     if minute_weights:
         m_names = list(minute_weights.keys())
         m_w = np.array([minute_weights[n] for n in m_names])
@@ -1329,24 +1361,8 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
                 if p is not None and t_date in p.index:
                     m_cols[n] = p.loc[t_date]
             if m_cols:
-                m_cross = pd.DataFrame(m_cols)
-                # 与主分相同的股票对齐
-                m_cross = m_cross.reindex(cross.index)
-                m_vals = m_cross.to_numpy()
-                m_comp = np.zeros(len(cross))
-                for fi in range(len(m_names)):
-                    col = m_vals[:, fi]
-                    m = ~np.isnan(col)
-                    if m.sum() < 10:
-                        continue
-                    mu = np.nanmean(col)
-                    sd = np.nanstd(col)
-                    if sd < 1e-9:
-                        continue
-                    z = np.where(m, (col - mu) / sd, 0.0)
-                    m_comp += m_w[fi] * z
-                m_comp /= m_abs
-                # 无分钟数据的股票 m_comp=0 → 仅主分生效 (自然降级)
+                m_cross = pd.DataFrame(m_cols).reindex(cross.index)
+                m_comp = _weighted_z_composite(m_cross, minute_weights)
                 m_comp = np.nan_to_num(m_comp, nan=0.0)
                 composite = composite + minute_lambda * m_comp
 
