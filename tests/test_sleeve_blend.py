@@ -158,3 +158,13 @@ def test_sleeve_median_weights_fallback():
     assert abs(out["momentum"]["m1"] - 0.05) < 1e-9
     assert out["momentum"]["m2"] == 0.1   # median≈0 → fallback
     assert out["growth"]["g1"] == 0.1     # 全 0 → fallback
+
+
+def test_load_styles_config_missing_budget_raises():
+    """sleeve 存在但 budgets 缺键 → ValueError (提前失败, 防 fold 循环 KeyError)。"""
+    from run_walkforward_backtest import load_styles_config
+    import pytest
+    cfg = _base_styles()
+    cfg["styles"]["budgets"] = {"momentum": 0.25}  # growth sleeve 缺预算
+    with pytest.raises(ValueError):
+        load_styles_config(cfg)

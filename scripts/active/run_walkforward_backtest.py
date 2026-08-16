@@ -288,6 +288,9 @@ def load_styles_config(config: dict) -> dict | None:
         b = float(budgets.get(name, 0.0))
         if not 0.0 <= b <= 1.0:
             raise ValueError(f"styles.budgets.{name} 必须在 [0,1], got {b}")
+    for name in (cfg.get("sleeves") or {}):
+        if name not in budgets:
+            raise ValueError(f"styles.budgets 缺少 sleeve '{name}' 的预算")
     if sum(float(budgets.get(n, 0.0)) for n in SLEEVE_BUDGET_ORDER) > 1.0:
         raise ValueError("styles.budgets 合计不得超过 1.0 (core 隐含 1-Σ)")
     for name, scfg in (cfg.get("sleeves") or {}).items():
@@ -2133,7 +2136,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          sleeve_weights=([{
                              "name": sname,
                              "weights": fold_sleeve_weights.get(sname) or {},
-                             "budget": float(styles_cfg["budgets"][sname]),
+                             "budget": float((styles_cfg.get("budgets") or {})
+                                             .get(sname, 0.0)),
                          } for sname in sleeves] if sleeves else None),
                          universe_fn=universe_fn, use_regime=use_regime,
                          portfolio_constraints=portfolio_constraints,
