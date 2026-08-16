@@ -22,8 +22,7 @@ akshare 接口: ak.stock_zh_a_hist_min_em(symbol, period="5", ...)
 import os
 import sys
 import time
-import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -41,6 +40,25 @@ def _ensure_cache_dir():
     os.makedirs(MINUTE_CACHE_DIR, exist_ok=True)
 
 
+def latest_local_minute_date(data_dir: str, sample: int = 10) -> Optional[date]:
+    """分钟数据目录最新交易日 (抽样 N 个文件, 取最小最新日期, 保守)。
+
+    陈旧度守卫用: 判断本地分钟数据覆盖到哪个日期。
+    """
+    if not os.path.isdir(data_dir):
+        return None
+    files = [f for f in os.listdir(data_dir) if f.endswith(".parquet")][:sample]
+    dates = []
+    for f in files:
+        try:
+            df = pd.read_parquet(os.path.join(data_dir, f), columns=["day"])
+            if len(df) > 0:
+                dates.append(pd.to_datetime(df["day"]).max().date())
+        except Exception:
+            continue
+    return min(dates) if dates else None
+
+
 class MinuteFetcher:
     """分钟级行情数据获取器。"""
 
@@ -52,8 +70,10 @@ class MinuteFetcher:
         # 回测场景置 False: 本地无数据直接返回 None (由调用方回退 VWAP/开盘),
         # 不尝试网络拉取 (2022 前日期 akshare 拉不到, 只会失败刷屏)。
         self.allow_network = allow_network
-        # 本地 5m 全历史缓存 (回测大量调用时避免重复读 parquet)
-        self._local_cache: Dict[str, Optional[pd.DataFrame]] = {}
+        # 本地 5m 全历史缓存 (回测大量调用时避免重复读 parquet)。
+        # 键含 end_date: 同一 symbol 不同截止日各存一份, 防止首次 end_date
+        # 截断后的 df 被后续更晚日期的调用命中 (2026-08-15 修复)。
+        self._local_cache: Dict[tuple, Optional[pd.DataFrame]] = {}
         _ensure_cache_dir()
 
     # ════════════════════════════════════════
@@ -86,8 +106,9 @@ class MinuteFetcher:
             end_date = datetime.now().strftime("%Y%m%d")
 
         # ── 本地全历史缓存 (baostock minute_5m, 2026-08-12 接入) ──
-        if symbol in self._local_cache:
-            return self._local_cache[symbol]
+        cache_key = (symbol, str(end_date))
+        if cache_key in self._local_cache:
+            return self._local_cache[cache_key]
         local_path = os.path.join(BASE_DIR, "data_store", "minute_5m", f"{symbol}.parquet")
         if os.path.exists(local_path):
             try:
@@ -111,7 +132,7 @@ class MinuteFetcher:
                     ldf = ldf[ldf["时间"] <= end_dt + pd.Timedelta(days=1)]
                     if len(ldf) > 0:
                         out = self._clean(ldf[["时间", "开盘", "收盘", "最高", "最低", "成交量", "成交额"]])
-                        self._local_cache[symbol] = out
+                        self._local_cache[cache_key] = out
                         return out
             except Exception:
                 pass
@@ -133,8 +154,10 @@ class MinuteFetcher:
             except Exception:
                 cached = None
 
-        # ── 无网络模式 (回测): 本地全历史+滚动缓存都没有 → 直接返回 ──
-        if not self.allow_network:
+        # ── 无网络模式 (回测 allow_network=False / 全局离线守卫): ──
+        #    本地全历史+滚动缓存都没有 → 直接返回 None/缓存, 不尝试网络。
+        from netgate import is_offline
+        if not self.allow_network or is_offline():
             return self._clean(cached) if cached is not None else None
 
         # ── 确定拉取范围 ──
@@ -303,86 +326,31 @@ class MinuteFetcher:
 
     def get_pov_price(self, symbol: str, date_str: str,
                       order_qty: float, max_participation: float = 0.20,
-                      lookback_days: int = 20) -> Optional[float]:
+                      lookback_days: int = 20, start_bar: int = 0) -> Optional[float]:
         """
-        POV (Percent of Volume) 模拟成交价 — 跟随市场成交量节奏拆单。
+        POV (Percent of Volume) 模拟成交价 — 委托 get_pov_fills 取均价。
 
-        参与率自适应: ρ = min(max_participation, order_qty / 预测日成交量)
-          - 大订单 (占日成交量比例高) → 高参与率, 尽快完成
-          - 小订单 → 低参与率, 全天分散跟随市场节奏
-          下限 0.001 (极小订单也给最小参与, 避免瞬间成交失真)
-
-        执行: 遍历当日每个 5m 时段,
-          下单量 = min(该时段实际成交量 × ρ, 剩余订单)
-        成交价 = Σ(时段下单量 × 时段价) / 总下单量 (量加权, 模拟自然成交)
-
-        Args:
-          symbol: 股票代码
-          date_str: 执行日期 "YYYY-MM-DD"
-          order_qty: 订单数量 (股)
-          max_participation: 参与率上限 (默认 20%)
-          lookback_days: 预测日成交量用的历史窗口 (交易日)
-
-        Returns:
-          POV 模拟成交价 (加权平均) 或 None (无数据/无法成交)
+        与 get_pov_fills 共享同一实现 (2026-08-15 统一), 保证回测引擎
+        (走 get_pov_fills) 与模拟盘 (走 get_pov_price) 定价完全一致。
+        start_bar: 从当日第几根 5m bar 开始执行 (0=开盘即执行, L2 overlay 用)。
         """
-        if order_qty <= 0:
-            return None
-        df = self.fetch(symbol, days=lookback_days + 5, end_date=date_str)
-        if df is None or len(df) == 0:
-            return None
-
-        date_dt = pd.Timestamp(date_str)
-        day_bars = df[df["时间"].dt.date == date_dt.date()]
-        if len(day_bars) == 0:
-            return None
-
-        # 预测日成交量: 执行日前 lookback_days 个交易日的平均成交量
-        hist = df[df["时间"].dt.date < date_dt.date()]
-        if len(hist) == 0:
-            return None
-        hist_daily = hist.groupby(hist["时间"].dt.date)["成交量"].sum()
-        pred_vol = float(hist_daily.tail(lookback_days).mean()) if len(hist_daily) else 0.0
-        if pred_vol <= 0:
-            return None
-
-        # 自适应参与率: 目标"一天内按市场节奏完成"
-        rho = min(max_participation, order_qty / pred_vol)
-        rho = max(rho, 0.001)
-
-        # 逐时段执行 (POV): 量大的时段多买, 量小的时段少买
-        remaining = float(order_qty)
-        total_cost = 0.0
-        filled = 0.0
-        carry = 0.0  # 小数份额累积 (小订单 ρ×V < 1股时累积)
-        for _, bar in day_bars.iterrows():
-            if remaining <= 0:
-                break
-            bar_vol = float(bar["成交量"])
-            q = min(bar_vol * rho + carry, remaining)
-            carry = q - int(q)
-            q = int(q)
-            if q <= 0:
-                continue
-            price = float(bar["收盘"])  # 时段价 (5m收盘近似)
-            total_cost += q * price
-            filled += q
-            remaining -= q
-
-        if filled <= 0:
-            return None
-        # 未完成部分: 按当日最后价补单 (模拟强制完成)
-        if remaining > 0:
-            last_price = float(day_bars["收盘"].iloc[-1])
-            total_cost += remaining * last_price
-            filled += remaining
-        return float(total_cost / filled)
+        res = self.get_pov_fills(symbol, date_str, order_qty,
+                                 max_participation=max_participation,
+                                 lookback_days=lookback_days, start_bar=start_bar)
+        return res["price"] if res else None
 
     def get_pov_fills(self, symbol: str, date_str: str,
                       order_qty: float, max_participation: float = 0.20,
-                      lookback_days: int = 20) -> Optional[dict]:
+                      lookback_days: int = 20, start_bar: int = 0) -> Optional[dict]:
         """
         POV 逐时段成交明细 — 返回每个 5m 时段的成交 (时间/价格/数量)。
+
+        ★ 2026-08-15 修正 (L0): 所有订单统一走纯 POV 拆单, 不再对
+        小订单特判随机时点。小订单 ρ=0.001 下, 几百股的订单在开盘后
+        前 2-3 根 bar 内自然成交完 — 因果 (只用已发生 bar)、确定性、
+        可复现, 与模拟盘 get_pov_price 同源。
+        start_bar: 从当日第几根 bar 开始执行 (0=开盘即执行; L2 overlay
+        用日内规则决定时点)。
 
         与 get_pov_price 同一执行逻辑, 额外记录时段级 fill:
           fills: [{"time": "09:35", "price": ..., "qty": ...}, ...]
@@ -411,23 +379,6 @@ class MinuteFetcher:
         if pred_vol <= 0:
             return None
 
-        # 订单占比 < 0.1% (小订单): 对市场无冲击 → 市价单成交。
-        # ★ 2026-08-15 修正: 旧假设"按全天VWAP成交"是事后价格(前视偏差);
-        # 固定早盘市价也机械 (不可能每次都恰好早盘成交)。真实执行是不确定
-        # 的 → 用固定种子在当日 5m bar 中随机选一个时点成交 (可复现,
-        # 无前视偏差), 成交价 = 该 bar 收盘价, 残差滑点由 _apply_slippage 承担。
-        if order_qty / pred_vol < 0.001:
-            if len(day_bars) == 0:
-                return None
-            rng = random.Random(f"{symbol}-{date_str}")
-            bar = day_bars.iloc[rng.randrange(len(day_bars))]
-            early_px = float(bar["收盘"])
-            bar_time = str(bar["时间"].to_pydatetime().strftime("%H:%M"))
-            return {"price": float(early_px),
-                    "fills": [{"time": f"市价@{bar_time}",
-                               "price": round(early_px, 4), "qty": int(order_qty)}],
-                    "n_fills": 1}
-
         # 自适应参与率: 目标"一天内按市场节奏完成"
         rho = min(max_participation, order_qty / pred_vol)
         rho = max(rho, 0.001)
@@ -438,7 +389,7 @@ class MinuteFetcher:
         filled = 0.0
         fills = []
         carry = 0.0  # 小数份额累积 (小订单 ρ×V < 1股时累积)
-        for _, bar in day_bars.iterrows():
+        for _, bar in day_bars.iloc[start_bar:].iterrows():
             if remaining <= 0:
                 break
             bar_vol = float(bar["成交量"])
@@ -468,7 +419,8 @@ class MinuteFetcher:
 
     def get_execution_price(self, symbol: str, date_str: str,
                             algo: str = "vwap",
-                            order_qty: float = 0.0) -> Optional[float]:
+                            order_qty: float = 0.0,
+                            start_bar: int = 0) -> Optional[float]:
         """
         统一执行价格接口 — 根据算法返回模拟成交价。
 
@@ -477,6 +429,7 @@ class MinuteFetcher:
           date_str: 执行日期
           algo: "open" / "close" / "vwap" / "twap" / "pov"
           order_qty: 订单数量 (POV 需要, 其他算法可忽略)
+          start_bar: POV 从第几根 5m bar 开始执行 (L2 overlay 用, 0=开盘)
 
         Returns:
           模拟成交价
@@ -488,7 +441,8 @@ class MinuteFetcher:
         elif algo == "twap":
             return self.get_twap(symbol, date_str)
         elif algo == "pov":
-            return self.get_pov_price(symbol, date_str, order_qty)
+            return self.get_pov_price(symbol, date_str, order_qty,
+                                      start_bar=start_bar)
         else:  # vwap (default)
             return self.get_vwap(symbol, date_str)
 

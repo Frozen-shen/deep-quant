@@ -1,10 +1,12 @@
 """
-scripts/fetch_baostock_minute.py — 用 baostock 批量拉取全市场分钟线数据
+scripts/fetch_baostock_minute.py — 全市场分钟线批量拉取
 
-数据源: baostock (免费, 无需注册, 历史深度 2022-至今)
+数据源 (2026-08-16 起): 东财为主 (fetch_one_em, 经 eastmoney_proxy/cheapproxy
+  网关转发, config.yaml eastmoney_proxy 段), baostock 保留为 legacy 选项
+  (--source bs)。
   - 频率: 5分钟 / 15分钟
-  - 列: date, time, code, open, high, low, close, volume, amount
-  - 前复权
+  - 列: datetime, day, open, high, low, close, volume(股), amount
+  - 前复权 (东财 fqt=1 / baostock adjustflag=2), 两源 schema 统一可混存
 
 缓存: data_store/minute_15m/{symbol}.parquet 或 data_store/minute_5m/{symbol}.parquet
 
@@ -16,6 +18,8 @@ scripts/fetch_baostock_minute.py — 用 baostock 批量拉取全市场分钟线
   py scripts/fetch_baostock_minute.py --offset 1200 --max 600
   py scripts/fetch_baostock_minute.py --offset 1800 --max 600
   py scripts/fetch_baostock_minute.py --offset 2400            # 剩余全部
+  py scripts/fetch_baostock_minute.py --since 5 --symbols 600519,000858
+      # 增量: 只补最近 5 个交易日并合并去重 (daily_pipeline 盘后调用)
 
 预计耗时 (15分钟线, 2022-2026):
   单进程: ~11.5s/只 × 3000 ≈ 9.5 小时
@@ -223,6 +227,19 @@ def fetch_one(bs, symbol: str, freq: str, start: str, end: str,
     return df[["datetime", "day", "open", "high", "low", "close", "volume", "amount"]].reset_index(drop=True)
 
 
+def merge_minute_incremental(existing, new) -> pd.DataFrame:
+    """已有缓存 + 增量帧合并: 按 datetime 去重 (保留最新), 按时间排序。
+
+    existing: 已落盘的分钟 parquet 内容 (统一列 datetime/day/open/...), 可为 None/空。
+    new: 本次拉取的增量帧 (同 schema)。
+    """
+    if existing is None or len(existing) == 0:
+        return new.reset_index(drop=True)
+    df = pd.concat([existing, new], ignore_index=True)
+    df = df.drop_duplicates(subset=["datetime"], keep="last")
+    return df.sort_values("datetime").reset_index(drop=True)
+
+
 def fetch_index(args, freq: str) -> int:
     """拉取单只指数分钟线 → data/cache/index_<name>_<freq>m.parquet.
 
@@ -300,21 +317,34 @@ def main():
     parser.add_argument("--force", action="store_true",
                         help="强制重新拉取 (忽略缓存)")
     parser.add_argument("--proxy", type=str, default=None,
-                        help="SOCKS5 代理 host:port (如 127.0.0.1:7897), 用于换出口 IP")
-    parser.add_argument("--source", type=str, default="bs", choices=["bs", "em"],
-                        help="数据源: bs=baostock (默认), em=东财 (走 --proxy 时生效)")
+                        help="SOCKS5 代理 host:port (如 127.0.0.1:7897), "
+                             "仅 baostock 源使用 (换出口 IP)")
+    parser.add_argument("--source", type=str, default="em", choices=["bs", "em"],
+                        help="数据源: em=东财 (默认, 走 eastmoney_proxy 网关), "
+                             "bs=baostock (legacy)")
     parser.add_argument("--index", type=str, default=None,
                         help="拉取单只指数分钟线 (如 000852=中证1000), "
                              "保存到 data/cache/<name>_<freq>m.parquet")
+    parser.add_argument("--since", type=int, default=None,
+                        help="增量模式: 只补最近 N 个交易日 (与已有缓存合并去重; "
+                             "无缓存股票回退拉最近 N*2 自然日)")
+    parser.add_argument("--symbols", type=str, default=None,
+                        help="指定股票列表 (逗号分隔, 如 600519,000858; "
+                             "忽略 --offset/--max, 供管线盘后增量调用)")
     args = parser.parse_args()
 
     # ── 指数模式: 单只, 存 data/cache/index_*.parquet ──
     if args.index:
         return fetch_index(args, args.freq)
 
-    if args.source == "em" and not args.proxy:
-        print("--source em 需要 --proxy (东财直连被墙, 走 SOCKS5)")
-        return
+    if args.source == "em":
+        # 东财源统一走 cheapproxy 网关 (config.yaml eastmoney_proxy 段);
+        # install_patch 替换 requests.Session → _em_get 的懒加载 session 自动生效
+        try:
+            import eastmoney_proxy
+            eastmoney_proxy.setup_from_config(BASE_DIR)
+        except Exception as _e:
+            print(f"  [WARN] 东财网关初始化失败: {_e}")
 
     if args.proxy:
         setup_proxy(args.proxy)
@@ -323,17 +353,22 @@ def main():
     cache_dir = get_cache_dir(freq)
     os.makedirs(cache_dir, exist_ok=True)
 
-    universe = get_universe()
-    total = len(universe)
+    if args.symbols:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        total = len(symbols)
+    else:
+        universe = get_universe()
+        total = len(universe)
+        # 分片
+        symbols = universe[args.offset:]
+        if args.max:
+            symbols = symbols[:args.max]
 
-    # 分片
-    symbols = universe[args.offset:]
-    if args.max:
-        symbols = symbols[:args.max]
-
-    print(f"═══ Baostock {freq}分钟线拉取 ═══")
-    print(f"  宇宙: {total} 只, 本次: {len(symbols)} 只 (offset={args.offset})")
-    print(f"  日期: {args.start} ~ {args.end}")
+    mode = "增量" if args.since else "全量"
+    print(f"═══ Baostock {freq}分钟线拉取 ({mode}) ═══")
+    print(f"  宇宙: {total} 只, 本次: {len(symbols)} 只"
+          f"{'' if args.symbols else f' (offset={args.offset})'}")
+    print(f"  日期: {args.start} ~ {args.end}" + (f", 增量补 {args.since} 交易日" if args.since else ""))
     print(f"  缓存: {cache_dir}")
     print(f"  强制: {args.force}")
     print()
@@ -356,8 +391,27 @@ def main():
     for i, code in enumerate(symbols):
         cache_path = os.path.join(cache_dir, f"{code}.parquet")
 
-        # 缓存检查
-        if not args.force and os.path.exists(cache_path):
+        # 增量模式: 读已有缓存, 从本地最大日期往前缓冲 10 天续拉到今天
+        existing_df = None
+        start, end = args.start, args.end
+        if args.since:
+            if os.path.exists(cache_path):
+                try:
+                    existing_df = pd.read_parquet(cache_path)
+                except Exception:
+                    existing_df = None
+            if existing_df is not None and len(existing_df) > 0 \
+                    and "day" in existing_df.columns:
+                max_day = pd.to_datetime(existing_df["day"]).max()
+                start = (max_day - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+            else:
+                existing_df = None
+                start = (pd.Timestamp.now()
+                         - pd.Timedelta(days=args.since * 2)).strftime("%Y-%m-%d")
+            end = pd.Timestamp.now().strftime("%Y-%m-%d")
+
+        # 缓存检查 (全量模式: 已有足够数据跳过)
+        if not args.force and not args.since and os.path.exists(cache_path):
             try:
                 existing = pd.read_parquet(cache_path)
                 if len(existing) > 100:  # 至少有几天数据
@@ -369,10 +423,12 @@ def main():
         # 拉取
         try:
             if args.source == "em":
-                df = fetch_one_em(code, freq, args.start, args.end)
+                df = fetch_one_em(code, freq, start, end)
             else:
                 bs_sym = to_baostock_symbol(code)
-                df = fetch_one(bs, bs_sym, freq, args.start, args.end)
+                df = fetch_one(bs, bs_sym, freq, start, end)
+            if args.since:
+                df = merge_minute_incremental(existing_df, df)
             if len(df) > 0:
                 df.to_parquet(cache_path, index=False)
                 success += 1

@@ -133,6 +133,15 @@ def load_bt_config() -> dict:
         # 执行价模式 (方案B v24): open=次日开盘 / vwap=次日VWAP拆单
         "execution_price": str(cfg.get("execution", {}).get("execution_price", "open")),
         "vwap_residual_bps": int(cfg.get("execution", {}).get("vwap_residual_bps", 0)),
+        # 组合层换手参数 (2026-08-16: config portfolio 段 bt_* 键覆盖,
+        # 缺省保持原硬编码值, 供换手压降实验用)
+        "n_drop": int(cfg.get("portfolio", {}).get("bt_n_drop", 10)),
+        "hold_thresh": int(cfg.get("portfolio", {}).get("bt_hold_thresh", 0)),
+        "sell_rank_buffer": int(cfg.get("portfolio", {}).get("bt_sell_rank_buffer", 3)),
+        "buy_confirm_days": int(cfg.get("portfolio", {}).get("bt_buy_confirm_days", 1)),
+        "cost_threshold": float(cfg.get("portfolio", {}).get("bt_cost_threshold", 0.08)),
+        # 风格预算 (v29): 同家族因子 |权重| 之和上限
+        "style_cap": float(cfg.get("fold", {}).get("style_cap", 0.4)),
     }
 
 
@@ -140,12 +149,46 @@ def load_bt_config() -> dict:
 #  面板构建
 # ═══════════════════════════════════════════════════════════
 
-def build_calendar(all_data: dict) -> list:
-    """全局交易日历 (所有股票日期的并集, 排序)。"""
-    all_dates = set()
+def build_calendar(all_data: dict, min_coverage: int = 100) -> list:
+    """全局交易日历 (所有股票日期的并集, 过滤后排序)。
+
+    ★ 2026-08-15: 双重过滤脏日期 —
+    ① 周末 (A股不存在周末交易);
+    ② 覆盖 <min_coverage 只的日期: 春节等假期只有退市股有脏行
+    (如 2026-02-19/20/23 仅 000540/002450 有数据), 正常交易日 4900+。
+    """
+    from collections import Counter
+    date_counter = Counter()
     for df in all_data.values():
-        all_dates.update(pd.to_datetime(df["date"]).dt.normalize().tolist())
-    return sorted(all_dates)
+        dts = pd.to_datetime(df["date"]).dt.normalize().tolist()
+        date_counter.update(d for d in dts if d.weekday() < 5)
+    return sorted(d for d, n in date_counter.items() if n >= min_coverage)
+
+
+def turnover_period_cap(monthly_cap: float, rebalance_days: int) -> float:
+    """期换手上限。
+
+    ★ 2026-08-15 修复 (选项A): 月频 (>=20 交易日) 的"期"≈一个月,
+    期上限直接用月上限, 不再乘 rebalance_days/21 自我压线 — 旧公式对
+    月频(20)给出 0.5×20/21≈47.6%, 与策略正常换手 50% 恰好冲突, 导致
+    每个调仓日全部被换手约束跳过 (2026-08-15 的 folds 回测只交易了
+    建仓日一天)。短周期 (周频等) 仍按天数比例缩放, 保持公平对比。
+    """
+    if rebalance_days >= 20:
+        return monthly_cap
+    return monthly_cap * (rebalance_days / 21.0)
+
+
+def safe_mark_to_market(equity_fn, positions: dict, close_prices: dict,
+                        prev_equity: float) -> float:
+    """防御性计价: 有持仓但当日无任何有效收盘价时沿用前值。
+
+    ★ 2026-08-15 修复: 原逻辑 close_prices 为空时持仓按 0 计价,
+    净值塌陷为纯现金 (日历污染日)。空仓时仍正常计价 (cash 场景)。
+    """
+    if not close_prices and positions:
+        return prev_equity
+    return equity_fn(close_prices)
 
 
 def build_close_panel(all_data: dict, calendar: list) -> pd.DataFrame:
@@ -157,19 +200,78 @@ def build_close_panel(all_data: dict, calendar: list) -> pd.DataFrame:
     return panel.reindex(pd.DatetimeIndex(calendar))
 
 
+_industry_map_cache: dict | None = None
+
+
 def _load_industry_map() -> dict:
-    """加载行业映射 {code: industry} (新浪行业快照)。
+    """加载行业映射 {6位代码: industry} (新浪行业快照, 键去 sh/sz 前缀)。
 
     近似 PIT: 行业分类为最新快照 (换行业股票占比极小, 影响可接受)。
+    模块级缓存 (调仓日重复调用避免反复读盘)。
     """
+    global _industry_map_cache
+    if _industry_map_cache is not None:
+        return _industry_map_cache
     path = os.path.join(BASE_DIR, "data_store", "aux_industry", "industry_map.parquet")
     if not os.path.exists(path):
-        return {}
+        _industry_map_cache = {}
+        return _industry_map_cache
     try:
         df = pd.read_parquet(path)
-        return dict(zip(df["code"].astype(str), df["industry"].astype(str)))
+        codes = (df["code"].astype(str)
+                 .str.replace("sh", "", regex=False)
+                 .str.replace("sz", "", regex=False))
+        _industry_map_cache = dict(zip(codes, df["industry"].astype(str)))
     except Exception:
-        return {}
+        _industry_map_cache = {}
+    return _industry_map_cache
+
+
+def _industry_cap_weights(weights: dict, industry_map: dict,
+                          max_industry_pct: float) -> dict:
+    """行业权重封顶: 同行业权重之和超上限时按比例缩减。
+
+    ★ 2026-08-16 (v28): 行业中性从"记日志"改为"实际执行"。
+    无行业映射的股票不参与约束 (保留原权重)。
+    """
+    if not weights or max_industry_pct <= 0:
+        return weights
+    out = dict(weights)
+    by_ind: dict = {}
+    for s, w in out.items():
+        ind = industry_map.get(s)
+        if ind:
+            by_ind.setdefault(ind, []).append(s)
+    for syms in by_ind.values():
+        total = sum(out[s] for s in syms)
+        if total > max_industry_pct:
+            scale = max_industry_pct / total
+            for s in syms:
+                out[s] *= scale
+    return out
+
+
+def _style_budget_weights(weights: dict, style_cap: float = 0.4) -> dict:
+    """风格预算: 同因子家族 (名称去 `_Nd` 后缀) 的 |权重| 之和超 style_cap
+    时按比例缩减, 符号保留。
+
+    ★ 2026-08-16 (v29): 防一族同质因子 (如 amihud_*/volatility_*) 垄断
+    权重 — 2020 年小盘风格逆风失效的根因。
+    """
+    import re
+    if not weights or style_cap <= 0:
+        return weights
+    out = dict(weights)
+    fam: dict = {}
+    for f in out:
+        fam.setdefault(re.sub(r'_\d+d$', '', f), []).append(f)
+    for fns in fam.values():
+        total = sum(abs(out[f]) for f in fns)
+        if total > style_cap:
+            scale = style_cap / total
+            for f in fns:
+                out[f] *= scale
+    return out
 
 
 def _industry_neutralize(df: pd.DataFrame, industry_map: dict) -> pd.DataFrame:
@@ -268,6 +370,18 @@ def apply_portfolio_constraints(scores: dict, constraints: dict) -> dict:
     log.warning("组合约束: 等权 %.1f%% > 单票上限 %.1f%%, %d 只均缩放到上限 "
                 "(剩余仓位留现金)", ew * 100, max_single * 100, n)
     return {k: max_single for k in scores}
+
+
+def _cap_single_weights(weights: dict, max_single_pct: float) -> dict:
+    """个股权重封顶: 超限个股缩到上限, 其余保持不变 (不重归一化, 剩余留现金)。
+
+    ★ 2026-08-16 (v27): inv_vol/risk_parity 已给出相对权重时, 约束只做
+    封顶, 不破坏相对比例。
+    """
+    if not weights or max_single_pct <= 0:
+        return weights
+    return {k: (min(v, max_single_pct) if v > 0 else v)
+            for k, v in weights.items()}
 
 
 def precompute_factor_panels(all_data: dict, factor_names: list,
@@ -918,6 +1032,30 @@ def rank_corr_cols(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return out
 
 
+BENCH_RET_CLIP = 0.5      # 等权基准单日收益截断上限 (±50%, 超过视为脏数据)
+BENCH_MIN_COVERAGE = 100  # 日期覆盖股票数下限 (<此数视为假交易日, 剔除)
+
+
+def _benchmark_daily_ret(all_data: dict, min_coverage: int = BENCH_MIN_COVERAGE):
+    """全市场等权日收益序列 (单股单日收益截断 ±50% + 低覆盖日期剔除)。
+
+    ★ 2026-08-15: 退市股脏价格会把等权基准炸飞。
+    ① 单股单日收益 clip ±50% (A股真实日涨跌上限 ±30%);
+    ② 春节等假期只有 1-2 只退市股有脏行, skipna mean 会把这 2 只当
+    "全市场" → 覆盖 < min_coverage 的日期整体剔除 (正常交易日 4900+)。
+    """
+    daily_rets = {}
+    for sym, df in all_data.items():
+        s = df.set_index(pd.to_datetime(df["date"]))["close"]
+        s = s[s > 0]
+        r = s.pct_change()
+        daily_rets[sym] = r.clip(-BENCH_RET_CLIP, BENCH_RET_CLIP)
+    panel = pd.DataFrame(daily_rets)
+    coverage = panel.notna().sum(axis=1)
+    panel = panel[coverage >= min_coverage]
+    return panel.mean(axis=1, skipna=True)
+
+
 def _equal_weight_benchmark(start: str, end: str,
                             all_data: dict):
     """
@@ -927,15 +1065,7 @@ def _equal_weight_benchmark(start: str, end: str,
     Returns: pd.Series of close prices (index=date) or None
     """
     try:
-        # 每日等权收益: 所有股票当日 close 的日收益均值
-        daily_rets = {}
-        for sym, df in all_data.items():
-            s = df.set_index(pd.to_datetime(df["date"]))["close"]
-            s = s[s > 0]
-            r = s.pct_change()
-            daily_rets[sym] = r
-        panel = pd.DataFrame(daily_rets)
-        eqw = panel.mean(axis=1, skipna=True)
+        eqw = _benchmark_daily_ret(all_data)
         eqw = eqw[(eqw.index >= pd.Timestamp(start)) &
                   (eqw.index <= pd.Timestamp(end))]
         eqw = eqw.dropna()
@@ -1352,14 +1482,19 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
     if bt.execution_price in ("vwap", "pov") and not bt.vwap_panel:
         log.warning("  [%s] vwap 面板为空, 回退 open 执行价", label)
     rules = TradingRules()
+    # 组合层参数从 config 读 (2026-08-16, 换手压降实验可改 config):
     # hold_thresh 与调仓周期联动 (路线C v22): 月频30天 / 周频~10天,
     # 避免周频下 PortfolioRanker 的 30 天持有锁死换手
-    hold_thresh = max(5, REBALANCE_DAYS + 10)
+    hold_thresh = int(bt_config.get("hold_thresh", 30) or 30)
+    if hold_thresh <= 0:
+        hold_thresh = max(5, REBALANCE_DAYS + 10)
     ranker = PortfolioRanker(
         top_k=bt_config["top_k"],
-        n_drop=10, hold_thresh=hold_thresh,
-        sell_rank_buffer=3, buy_confirm_days=1,
-        cost_threshold=0.08,
+        n_drop=int(bt_config.get("n_drop", 10)),
+        hold_thresh=hold_thresh,
+        sell_rank_buffer=int(bt_config.get("sell_rank_buffer", 3)),
+        buy_confirm_days=int(bt_config.get("buy_confirm_days", 1)),
+        cost_threshold=float(bt_config.get("cost_threshold", 0.08)),
     )
 
     # Regime 检测器: use_regime 时在整个回测期只创建一次 (避免每个调仓日
@@ -1447,6 +1582,11 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                          label, today.date(), n_adj,
                          mults["momentum"], mults["reversal"],
                          mults["value"], mults["quality"])
+
+            # ★ 风格预算 (v29): 同家族因子 |权重| 之和封顶, 防一族垄断
+            # (regime 乘数之后应用, 乘数放大过的家族同样受限)
+            weights = _style_budget_weights(
+                weights, style_cap=float(bt_config.get("style_cap", 0.4)))
 
             weights_history.append({
                 "date": str(today.date()),
@@ -1551,20 +1691,36 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                     turnover_history.append(n_turn)
 
                     # ── 组合后置约束 (方案C v5) ──
+                    # ★ 2026-08-16 (v27): 从"检查+日志"改为"实际执行" —
+                    # 目标权重写入 decision["weights"], bt.execute 按权重
+                    # 分配现金 (engine.py 已支持 weights, 缺省等权兜底)。
                     if portfolio_constraints:
-                        # 单票约束: 等权分仓超上限 → 检查+日志 (目标权重由
-                        # apply_portfolio_constraints 给出; bt.execute 层等权
-                        # 分配现金, 不支持个股权重 → 不实际缩放)
-                        n_buy = len(decision.get("buy", []))
-                        if n_buy > 0:
-                            ew_pct = 1.0 / n_buy
+                        prev_w = decision.get("weights")
+                        if prev_w:
+                            # inv_vol/risk_parity 已设权重 → 只做个股封顶
+                            w = _cap_single_weights(
+                                prev_w,
+                                portfolio_constraints.get("max_single_pct", 0.05))
+                        else:
+                            # 等权基线 → 等权或整体缩到上限 (原语义)
+                            w = apply_portfolio_constraints(
+                                {s: 1.0 for s in decision.get("buy", [])},
+                                portfolio_constraints)
+                        if w:
+                            # ★ 行业中性 (v28): 行业权重封顶, 实际执行
+                            max_ind = portfolio_constraints.get(
+                                "max_industry_pct", 0.25)
+                            w = _industry_cap_weights(w, _load_industry_map(),
+                                                      max_ind)
+                            decision["weights"] = w
+                            n_buy = len(decision.get("buy", []))
+                            ew_pct = 1.0 / n_buy if n_buy else 0
                             max_single = portfolio_constraints.get(
                                 "max_single_pct", 0.05)
                             if ew_pct > max_single:
                                 log.info("  [%s] 单票等权 %.1f%% > 上限 %.1f%%, "
-                                         "目标权重缩放到 %.1f%%",
-                                         label, ew_pct * 100,
-                                         max_single * 100, max_single * 100)
+                                         "已按权重执行 (剩余留现金)",
+                                         label, ew_pct * 100, max_single * 100)
                         # 行业约束: 无行业数据 → 跳过 (每期只记一次 warning)
                         if (portfolio_constraints.get("max_industry_pct")
                                 and not industry_warned):
@@ -1575,25 +1731,26 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                                         portfolio_constraints["max_industry_pct"] * 100)
                         # 换手约束: 超上限 → 跳过本轮调仓 (pending=None)。
                         # 语义: config max_turnover=0.5 是"月度累计单边换手"上限
-                        # (纪律: 月单边≤50%)。调仓周期越短, 每期可用的换手预算越少:
-                        #   期上限 = 月上限 × (REBALANCE_DAYS / 21)
-                        # 月频(20)≈0.48/期, 周频(5)=0.12/期 — 与月频公平对比。
+                        # (纪律: 月单边≤50%)。★ 2026-08-15 修复: 期上限由
+                        # turnover_period_cap 计算 (月频不缩放, 短周期按比例),
+                        # 旧公式对月频(20)压线到 47.6% 与正常换手 50% 冲突,
+                        # 导致每轮调仓全被跳过。
                         # 建仓期 (无持仓) 跳过检查: 分母 max(n_hold,1) 退化
                         # 为 1 会把首次建仓 (30只) 误判为 1500% 换手而永久卡死
                         n_hold = len(bt.positions)
                         if n_hold > 0:
-                            max_turn = portfolio_constraints.get(
-                                "max_turnover", 0.5) * (REBALANCE_DAYS / 21.0)
+                            monthly_cap = portfolio_constraints.get(
+                                "max_turnover", 0.5)
+                            max_turn = turnover_period_cap(monthly_cap,
+                                                           REBALANCE_DAYS)
                             turnover = ((len(decision.get("buy", [])) +
                                          len(decision.get("sell", []))) /
                                         (2 * max(n_hold, 1)))
                             if turnover > max_turn:
                                 log.info("  [%s] 换手 %.0f%% > 期上限 %.0f%% "
-                                         "(月%.0f%%×%.1f周数), 跳过本轮调仓",
+                                         "(月上限%.0f%%, 周期%d天), 跳过本轮调仓",
                                          label, turnover * 100, max_turn * 100,
-                                         portfolio_constraints.get(
-                                             "max_turnover", 0.5) * 100,
-                                         21.0 / REBALANCE_DAYS)
+                                         monthly_cap * 100, REBALANCE_DAYS)
                                 pending = None
 
             positions_history.append({
@@ -1610,7 +1767,9 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                     v = crow[sym]
                     if not (isinstance(v, float) and np.isnan(v)):
                         close_prices[sym] = float(v)
-        equity = bt.mark_to_market(close_prices)
+        # ★ 2026-08-15: 无有效收盘价时沿用前值 (防御脏日历日按 0 计价)
+        equity = safe_mark_to_market(bt.mark_to_market, bt.positions,
+                                     close_prices, prev_equity)
         equity_curve.append({"date": str(today.date()), "equity": equity})
         daily_ret = (equity / prev_equity - 1) if prev_equity > 0 else 0.0
         daily_returns.append(daily_ret)
@@ -1816,6 +1975,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
 
         # 验证期回测权重: 仅统计显著因子 (过滤噪音)
         weights = {fn: w for fn, w in weights.items() if fn in sig_factors}
+        # ★ 风格预算 (v29): fold 固定权重同样封顶 (与验证期调仓日一致)
+        weights = _style_budget_weights(
+            weights, style_cap=float(bt_config.get("style_cap", 0.4)))
         n_sel = len(weights)
         log.info("  回测权重: %d 因子 (统计显著, |ICIR|*√n>=%.2f)",
                  n_sel, FOLD_T_STAT_MIN)
@@ -1955,6 +2117,33 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
 # ═══════════════════════════════════════════════════════════
 #  主流程
 # ═══════════════════════════════════════════════════════════
+
+def _check_data_coverage(all_data: dict, needed_end: str,
+                         minute_dir: str = None) -> None:
+    """结构性缺失守卫 (2026-08-16): 日线/分钟必须覆盖运行所需区间末尾。
+
+    覆盖不足 → raise RuntimeError 硬失败 (实验可复现性优先, 不允许静默缺数据)。
+    minute_dir 为分钟数据目录 (如 minute_5m); needed_end < 2022-01-01 时
+    跳过分钟检查 (2022 前无分钟数据, POV 回退 VWAP/开盘属正常)。
+    """
+    end_dt = pd.Timestamp(needed_end)
+    daily_max = None
+    for df in list(all_data.values())[:20]:
+        if df is not None and len(df) > 0 and "date" in df.columns:
+            d = pd.to_datetime(df["date"]).max()
+            if daily_max is None or d > daily_max:
+                daily_max = d
+    if daily_max is not None and daily_max < end_dt:
+        raise RuntimeError(
+            f"日线数据覆盖不足: 需要到 {end_dt.date()}, 实际最新 {daily_max.date()}")
+    if minute_dir and end_dt >= pd.Timestamp("2022-01-01") \
+            and os.path.isdir(minute_dir):
+        from data.minute_fetcher import latest_local_minute_date
+        latest = latest_local_minute_date(minute_dir)
+        if latest is not None and latest < end_dt.date():
+            raise RuntimeError(
+                f"分钟数据覆盖不足: 需要到 {end_dt.date()}, 实际最新 {latest}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -2152,6 +2341,19 @@ def main():
     cal_idx = {d: i for i, d in enumerate(calendar)}
     log.info("  交易日历: %d 天 (%s ~ %s)", len(calendar),
              calendar[0].date(), calendar[-1].date())
+
+    # ── 结构性缺失守卫 (2026-08-16): 数据必须覆盖本次运行所需区间末尾 ──
+    #    覆盖不足硬失败 → 实验可复现 (不允许静默缺数据)。2022 前无分钟数据
+    #    属正常 (POV 回退 VWAP/开盘), 分钟检查只对 2022+ 区间生效。
+    _needed_end = None
+    if args.extend_val:
+        _needed_end = args.extend_val[1]
+    elif args.folds:
+        _needed_end = "2024-12-31"  # fold 5 验证期末
+    if _needed_end:
+        _check_data_coverage(
+            all_data, _needed_end,
+            os.path.join(BASE_DIR, "data_store", "minute_5m"))
 
     log.info("构建收盘价面板...")
     close_panel = build_close_panel(all_data, calendar)
@@ -2402,6 +2604,19 @@ def main():
     }
     if extra_meta:
         output["meta"].update(extra_meta)
+
+    # ── 执行质量指标 (L1, 2026-08-15): 逐笔 fill vs VWAP/到达价/完美价 ──
+    try:
+        from execution.exec_quality import fill_quality
+        all_trades = []
+        for r in results.values():
+            for t in (r.get("trades") or []):
+                all_trades.append(t)
+        if all_trades:
+            output["execution_quality"] = fill_quality(all_trades)
+    except Exception as e:
+        log.warning("执行质量指标计算失败 (不影响主结果): %s", e)
+
     os.makedirs(IC_DIR, exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented, Tooltip, Tabs } from 'antd'
+import { Col, Row, Table, Typography, Spin, Alert, Empty, Tag, Space, Card, Segmented, Tooltip, Tabs, AutoComplete } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import ReactECharts from 'echarts-for-react'
 import { fetchBroker, fetchUniverse, fetchPaperStockPnl } from '../api'
@@ -17,6 +17,8 @@ interface Trade { date: string; symbol: string; action: string; qty: number; pri
 export default function Trading() {
   /** 换仓明细按实验年份筛选: all / 2025 / 2026 (EXTEND 覆盖区间) */
   const [btYear, setBtYear] = useState<'all' | '2025' | '2026'>('all')
+  /** 换仓明细按股票搜索筛选 (代码/名称, 空=全部) */
+  const [btSymbol, setBtSymbol] = useState<string>('')
   const { data, isLoading, isError } = useQuery({
     queryKey: ['broker'], queryFn: fetchBroker, refetchInterval: 30_000,
   })
@@ -64,6 +66,16 @@ export default function Trading() {
     }
   }, [btTrades])
 
+  /** 股票搜索框选项: 仅列出该实验实际交易过的股票 (避免无关干扰) */
+  const tradeSymbols = useMemo(() => {
+    const set = new Set<string>()
+    for (const t of btTrades) set.add(t.symbol)
+    return [...set].sort()
+  }, [btTrades])
+  const stockOptions = useMemo(() => tradeSymbols.map(s => ({
+    value: s, label: `${s} ${nameOf(s)}`,
+  })), [tradeSymbols, nameOf])
+
   if (isLoading) return <Spin />
   if (isError) return <Alert type="error" message="执行状态不可用" />
 
@@ -71,10 +83,12 @@ export default function Trading() {
   const positions = (data?.positions ?? []) as Position[]
   const pnl = (p: Position) => (p.market_value ?? 0) - (p.avg_cost ?? 0) * (p.qty ?? 0)
 
-  /** 换仓明细按实验年份筛选 (EXTEND 2025-01~2026-06) */
-  const filteredTrades = btYear === 'all'
-    ? btTrades
-    : btTrades.filter((t: Trade) => t.date.startsWith(btYear))
+  /** 换仓明细筛选: 年份 (EXTEND 2025-01~2026-06) + 股票 (代码/名称) 叠加 */
+  const filteredTrades = btTrades.filter((t: Trade) => {
+    if (btYear !== 'all' && !t.date.startsWith(btYear)) return false
+    if (btSymbol && t.symbol !== btSymbol) return false
+    return true
+  })
 
   const metricOf = (key: string) => metrics.find(m => m.key === key)?.value
 
@@ -144,7 +158,7 @@ export default function Trading() {
       )}
 
       <Card size="small" title="换仓明细" style={{ marginTop: 16 }}>
-        <Space style={{ marginBottom: 12 }}>
+        <Space style={{ marginBottom: 12 }} wrap>
           <Segmented
             options={[
               { label: '全部', value: 'all' },
@@ -152,6 +166,25 @@ export default function Trading() {
               { label: '2026', value: '2026' },
             ]}
             value={btYear} onChange={setBtYear} />
+          <AutoComplete
+            style={{ width: 260 }}
+            placeholder="按股票代码/名称筛选（如 600519 或 茅台）"
+            value={btSymbol ? `${btSymbol} ${nameOf(btSymbol)}` : ''}
+            options={stockOptions}
+            onSelect={(v) => setBtSymbol(v)}
+            onChange={(v) => {
+              // 清空: 输入框被清空时取消筛选
+              if (!v) setBtSymbol('')
+              // 精确代码匹配 (输入 600519 直接命中)
+              else if (/^\d{6}$/.test(v.trim())) setBtSymbol(v.trim())
+            }}
+            allowClear
+          />
+          {btSymbol && (
+            <Tag closable color="blue" onClose={() => setBtSymbol('')}>
+              {btSymbol} {nameOf(btSymbol)}
+            </Tag>
+          )}
           <Typography.Text type="secondary">
             筛选后 {filteredTrades.length} 笔（共 {btTrades.length} 笔；小订单=随机时点市价单，大订单=POV 拆单；悬停时间列看明细）
           </Typography.Text>
@@ -160,7 +193,7 @@ export default function Trading() {
           <Table rowKey={(r) => `${r.date}-${r.symbol}-${r.action}-${r.price}-${r.qty}`} dataSource={filteredTrades} columns={tradeCols} size="small"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }} />
         ) : (
-          <Empty description="该年份无换仓记录" />
+          <Empty description={btSymbol ? `该筛选条件下无换仓记录（${btSymbol} ${nameOf(btSymbol)}）` : '该年份无换仓记录'} />
         )}
       </Card>
     </div>

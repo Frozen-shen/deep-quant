@@ -205,6 +205,24 @@ def compute_composite_scores_live(factors: List[dict], all_data: dict,
     return dict(zip(valid_syms, composite.tolist()))
 
 
+def check_minute_staleness(latest_minute_date, daily_dates,
+                           threshold: int = 5):
+    """分钟数据陈旧度判定: 落后信号日的交易日数。
+
+    latest_minute_date: date|None (本地分钟数据最新日期)
+    daily_dates: 日线交易日序列 (DatetimeIndex/Series/list)
+    Returns: (stale: bool, gap: int|None)
+      latest_minute_date=None → (False, None) 不判定;
+      gap = 分钟最新日期之后的交易日数量, >threshold 视为陈旧。
+    """
+    if latest_minute_date is None:
+        return False, None
+    dts = pd.to_datetime(daily_dates)
+    m = pd.Timestamp(latest_minute_date)
+    gap = int((dts > m).sum())
+    return gap > threshold, gap
+
+
 def generate_signal_v3(date_str: str = None, dry_run: bool = False):
     """
     生成P5因子组合信号并执行。
@@ -216,6 +234,12 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
     print("=" * 60, flush=True)
     print("  Paper Trading v3 — P5全因子组合", flush=True)
     print("=" * 60, flush=True)
+
+    # ── 0. 离线守卫: 信号生成只读本地数据 ──
+    #    网络统一由 daily_pipeline 数据更新步骤前置完成; 本进程内随后的
+    #    paper_executor 同样离线 (分钟数据新鲜度由获取阶段保证, 缺失走回退)。
+    from netgate import set_offline_mode
+    set_offline_mode(True)
 
     # ── 1. 加载因子配置 ──
     factor_config = load_factor_config()
@@ -292,6 +316,29 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
     all_data = load_all(syms)
     all_data = {s: df for s, df in all_data.items() if df is not None and len(df) >= 100}
     print(f"  有效数据: {len(all_data)} 只", flush=True)
+
+    # ── 数据陈旧度标注 (结构性缺失守卫): 分钟数据落后信号日 >5 交易日 → 告警 ──
+    _data_as_of = None
+    try:
+        from data.minute_fetcher import latest_local_minute_date
+        m5_dir = os.path.join(BASE_DIR, "data_store", "minute_5m")
+        latest_min = latest_local_minute_date(m5_dir)
+        daily_dates = None
+        for df in list(all_data.values())[:10]:
+            if df is not None and len(df) > 0 and "date" in df.columns:
+                daily_dates = pd.to_datetime(df["date"])
+                break
+        stale, gap = check_minute_staleness(latest_min, daily_dates)
+        _data_as_of = {
+            "minute_5m_latest": str(latest_min) if latest_min else None,
+            "stale": bool(stale),
+            "lag_trading_days": gap,
+        }
+        if stale:
+            print(f"  ⚠️ 分钟数据滞后 {gap} 个交易日 (最新 {latest_min}), "
+                  f"POV 定价将回退日线开盘价", flush=True)
+    except Exception as e:
+        print(f"  [WARN] 分钟数据陈旧度检查失败: {e}", flush=True)
 
     # ── 3b. 预计算价量因子 ──
     print("  预计算因子...", flush=True)
@@ -403,6 +450,8 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             minute_mode=config["execution"].get("minute_mode", False),
             execution_algo=config["execution"].get("execution_algo", "vwap"),
             twap_slices=config["execution"].get("twap_slices", 8),
+            residual_bps=config["execution"].get("vwap_residual_bps"),
+            overlay=config["execution"].get("overlay"),
         )
         state = executor.load_state()
         holdings = list(state.positions.keys())
@@ -452,6 +501,7 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             "hold": decision.get("hold", []),
             "n_factors": len(factors),
             "verdict": factor_config.get("verdict", "UNKNOWN"),
+            "data_as_of": _data_as_of,
         }
     else:
         # ★ 熔断检查: HALT 状态下禁止买入, 只允许卖出/持有
@@ -467,20 +517,6 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
         elif cb_state == "warning":
             _, _, dd = cb.calculate_drawdown()
             print(f"\n  ⚠️ 回撤警告: {dd:.2%}, 继续运行但需关注", flush=True)
-        # 分钟数据预拉取
-        if config["execution"].get("minute_mode", False):
-            try:
-                from data.minute_fetcher import MinuteFetcher
-                mf = MinuteFetcher()
-                trade_symbols = list(set(
-                    decision.get('buy', []) +
-                    decision.get('sell', []) +
-                    holdings
-                ))
-                print(f"  预拉取分钟数据: {len(trade_symbols)}只...", flush=True)
-                mf.fetch_batch(trade_symbols, days=5)
-            except Exception as e:
-                print(f"  [WARN] 分钟数据预拉取失败: {e}", flush=True)
 
         # 构建 close_prices
         close_prices = {}
@@ -517,6 +553,7 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             "n_factors": len(factors),
             "verdict": factor_config.get("verdict", "UNKNOWN"),
             "circuit_breaker": cb_state,
+            "data_as_of": _data_as_of,
             "execution": {
                 "buy_filled": len(report.buy_filled),
                 "buy_rejected": len(report.buy_rejected),

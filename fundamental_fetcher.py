@@ -73,6 +73,9 @@ def fetch_one(symbol: str) -> Optional[pd.DataFrame]:
       DataFrame with columns: report_date, roe, profit_growth, revenue_growth,
       eps, bvps, ocf_ps, net_margin, debt_ratio, current_ratio, quick_ratio
     """
+    from netgate import is_offline, OfflineViolation
+    if is_offline():
+        raise OfflineViolation("fundamental_fetcher.fetch_one: 离线模式禁止网络获取")
     import akshare as ak
 
     try:

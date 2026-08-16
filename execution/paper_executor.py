@@ -46,6 +46,23 @@ from trading_rules import (
 )
 
 
+ALGO_FILLS = ("pov", "vwap", "twap")
+
+
+def pick_slippage_bps(slippage_bps: int, residual_bps: int = None,
+                      minute_mode: bool = False, algo: str = "vwap") -> int:
+    """选择实际应用的滑点 (bp)。
+
+    ★ 2026-08-15 (L0b): 分钟算法单 (pov/vwap/twap) 按市场节奏拆单,
+    只收残差滑点 residual_bps (与回测 vwap_residual_bps 同口径);
+    open/close 一次性市价与日线模式保持全额 slippage_bps。
+    residual_bps=None 时回退 slippage_bps (向后兼容)。
+    """
+    if minute_mode and algo in ALGO_FILLS:
+        return residual_bps if residual_bps is not None else slippage_bps
+    return slippage_bps
+
+
 class RejectReason(Enum):
     """订单被拒原因。"""
     LIMIT_UP = "limit_up"              # 涨停
@@ -189,29 +206,37 @@ class PaperExecutor:
                  max_single_pct: float = 0.25,
                  minute_mode: bool = False,
                  execution_algo: str = "vwap",
-                 twap_slices: int = 8):
+                 twap_slices: int = 8,
+                 residual_bps: int = None,
+                 overlay: dict = None):
         """
         Args:
           market: 'a' or 'hk'
           initial_capital: 初始资金 (None=从 config 读取或默认100000)
           top_k: 最大持仓数量
           lot_size: 每手股数
-          slippage_bps: 滑点 (bp)
+          slippage_bps: 滑点 (bp, open/close/日线模式)
           turnover_limit_pct: 月单边换手上限
           max_single_pct: 单票最大仓位比例
           minute_mode: True=用分钟线VWAP/TWAP成交, False=日线开盘价成交
           execution_algo: 分钟执行算法 "vwap"/"twap"/"open"/"close"
           twap_slices: TWAP 拆单段数
+          residual_bps: 算法单残差滑点 (bp, None=回退 slippage_bps;
+            与回测 vwap_residual_bps 对齐, 2026-08-15)
+          overlay: 日内规则 {"gap_wait": {...}, ...} (L2 实验框架,
+            None=不启用, 行为与之前一致; 2026-08-15)
         """
         self.market = market
         self.top_k = top_k
         self.lot_size = lot_size
         self.slippage_bps = slippage_bps
+        self.residual_bps = residual_bps
         self.turnover_limit_pct = turnover_limit_pct
         self.max_single_pct = max_single_pct
         self.minute_mode = minute_mode
         self.execution_algo = execution_algo
         self.twap_slices = twap_slices
+        self.overlay = overlay
 
         storage.init_db()
 
@@ -440,7 +465,8 @@ class PaperExecutor:
 
             # ★ 统一执行价格 (分钟VWAP/TWAP/POV 或 日线开盘价)
             # POV: 用持仓数量作为订单量 (参与率自适应)
-            px = self._get_execution_price(sym, date_str, all_data, order_qty=qty)
+            px = self._get_execution_price(sym, date_str, all_data,
+                                           order_qty=qty, side="SELL")
             if px is None:
                 report.sell_rejected.append(OrderResult(
                     sym, "SELL", "rejected", RejectReason.NO_DATA.value))
@@ -484,7 +510,8 @@ class PaperExecutor:
 
                 # ★ 统一执行价格 (分钟VWAP/TWAP/POV 或 日线开盘价)
                 # POV: 需先确定买入数量作为订单量 → 先用临时价估 qty, 再取 POV 价
-                prov_px = self._get_execution_price(sym, date_str, all_data)
+                prov_px = self._get_execution_price(sym, date_str, all_data,
+                                                    side="BUY")
                 if prov_px is None:
                     report.buy_rejected.append(OrderResult(
                         sym, "BUY", "rejected", RejectReason.NO_DATA.value))
@@ -493,7 +520,8 @@ class PaperExecutor:
                 qty = int(cash_per / prov_px / self.lot_size) * self.lot_size
                 if qty < self.lot_size:
                     continue
-                px = self._get_execution_price(sym, date_str, all_data, order_qty=qty)
+                px = self._get_execution_price(sym, date_str, all_data,
+                                               order_qty=qty, side="BUY")
                 if px is None:
                     report.buy_rejected.append(OrderResult(
                         sym, "BUY", "rejected", RejectReason.NO_DATA.value))
@@ -671,23 +699,36 @@ class PaperExecutor:
     # ════════════════════════════════════════
 
     def _apply_slippage(self, price: float, side: str) -> float:
-        """滑点: 买入上浮, 卖出下沉。"""
-        if self.slippage_bps <= 0:
+        """滑点: 买入上浮, 卖出下沉。
+
+        ★ 2026-08-15 (L0b): 算法单 (pov/vwap/twap) 已按市场节奏拆单,
+        只收残差滑点 (residual_bps, 与回测 vwap_residual_bps 对齐);
+        open/close 与日线模式保持全额滑点 (slippage_bps)。
+        """
+        bps = pick_slippage_bps(self.slippage_bps, self.residual_bps,
+                                self.minute_mode, self.execution_algo)
+        if bps <= 0:
             return price
-        slip = price * self.slippage_bps / 10000.0
+        slip = price * bps / 10000.0
         return price + slip if side == "BUY" else price - slip
 
     def _get_execution_price(self, symbol: str, date_str: str,
                              all_data: dict = None,
-                             order_qty: float = 0.0) -> Optional[float]:
+                             order_qty: float = 0.0,
+                             side: str = "BUY") -> Optional[float]:
         """
         获取执行价格 — 根据模式选择日线开盘价或分钟线算法 (VWAP/TWAP/POV)。
+
+        ★ 2026-08-15 (L2): self.overlay 提供日内规则时, 先由规则决定
+        执行起点 bar (因果, 只用已发生数据), 再交给算法拆单。overlay=None
+        时行为与之前完全一致。
 
         Args:
           symbol: 股票代码
           date_str: 执行日期
           all_data: 日线数据 (分钟模式不需要, 但保留兼容)
           order_qty: 订单数量 (POV 算法需要, 其他算法忽略)
+          side: "BUY"/"SELL" (overlay 方向性规则需要)
 
         Returns:
           执行价格或 None
@@ -696,8 +737,27 @@ class PaperExecutor:
             try:
                 from data.minute_fetcher import MinuteFetcher
                 mf = MinuteFetcher()
-                return mf.get_execution_price(symbol, date_str,
-                                              self.execution_algo, order_qty)
+                start_bar = 0
+                if self.overlay:
+                    df = mf.fetch(symbol, days=5, end_date=date_str)
+                    if df is not None and len(df) > 0:
+                        date_dt = pd.Timestamp(date_str)
+                        day = df[df["时间"].dt.date == date_dt.date()]
+                        prev = df[df["时间"].dt.date < date_dt.date()]
+                        if len(day) > 0 and len(prev) > 0:
+                            from execution.execution_overlay import decide_start_bar
+                            prev_close = float(prev["收盘"].iloc[-1])
+                            start_bar = decide_start_bar(
+                                day.reset_index(drop=True), side,
+                                self.overlay, prev_close)
+                px = mf.get_execution_price(symbol, date_str,
+                                            self.execution_algo, order_qty,
+                                            start_bar=start_bar)
+                if px is not None:
+                    return px
+                # 本地分钟数据缺失 (无当日 bar/无缓存, 离线守卫下无网络兜底):
+                # 回退日线开盘价 (2026-08-16, 与回测"本地无数据回退开盘"一致)
+                print(f"  ⚠️ 分钟数据缺失 {symbol}, 回退到日线开盘价")
             except Exception as e:
                 print(f"  ⚠️ 分钟数据获取失败 {symbol}: {e}, 回退到日线")
                 # fall through to daily mode

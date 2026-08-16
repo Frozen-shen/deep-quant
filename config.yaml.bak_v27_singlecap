@@ -101,7 +101,6 @@ backtest:
 # ── Fold 筛选 (方案C) ──
 fold:
   max_factors: 50          # 稳定因子数量上限 (v9实验: 40→50, 2026-08-07)
-  style_cap: 0.4           # 风格预算 (2026-08-16 v29): 同家族因子|权重|之和上限
 
 # ── 组合层优化 (v9b) ──
 portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v9b实验) / risk_parity=风险平价 (P0)
@@ -139,8 +138,8 @@ portfolio:
   buy_confirm_days: 1
   sell_rank_buffer: 2
   n_drop: 2
-  # 回测组合层参数 (2026-08-16 v27 定稿: 低换手配置启用, 单票 20% 上限已执行;
-  # extend +93.6%/Sharpe2.17/DD-10.8%, 最大权重 17.3%, 见 AGENTS.md)
+  # 回测组合层参数 (2026-08-16 v27: 低换手配置启用 — 单票上限已执行,
+  # 集中度风险受控; 待全量回测验证)
   bt_hold_thresh: 45
   bt_sell_rank_buffer: 6
   bt_n_drop: 6
@@ -172,7 +171,7 @@ neutralization:
 
 # ── 组合后置约束 (方案C v5) ──
 portfolio_constraints:
-  max_single_pct: 0.20      # 单票仓位上限 20% (2026-08-16 v27 定稿: 5%→20%, 已验证最大权重 17.3%)
+  max_single_pct: 0.20      # 单票仓位上限 20% (2026-08-16 v27: 5%→20%, 用户风险偏好决策)
   max_industry_pct: 0.25    # 行业上限 25%
   max_turnover: 0.5         # 单期换手上限 50%
 

@@ -159,6 +159,9 @@ def fetch_money_flow_snapshot(period: str = "20日排行") -> pd.DataFrame:
         Columns (after normalization):
           symbol, name, price, + period-specific flow columns
     """
+    from netgate import is_offline, OfflineViolation
+    if is_offline():
+        raise OfflineViolation("flow_fetcher.fetch_money_flow_snapshot: 离线模式禁止网络获取")
     import akshare as ak
     import socket
 

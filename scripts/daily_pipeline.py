@@ -17,6 +17,7 @@ import sys
 import json
 import time
 import argparse
+import subprocess
 from datetime import datetime
 from typing import Optional, List
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "scripts", "active"))
 
+import storage  # noqa: E402  (持仓/成交, 用于分钟增量标的集合)
 from gate import load_config, GateViolation
 from logger import get_logger
 from experiment_tracker import log_experiment
@@ -90,8 +92,63 @@ def step_trading_day_check(date_str: str) -> str:
     return str(actual.date())
 
 
+def _minute_symbols(date_str: str) -> list:
+    """分钟增量更新标的: 持仓 ∪ 近期成交 ∪ 上次执行报告买卖信号。"""
+    syms = set()
+    try:
+        for p in storage.get_all_positions():
+            if p.get("symbol"):
+                syms.add(p["symbol"])
+    except Exception:
+        pass
+    try:
+        for t in storage.get_trades(limit=2000):
+            if t.get("symbol"):
+                syms.add(t["symbol"])
+    except Exception:
+        pass
+    report_path = os.path.join(BASE_DIR, "data", "paper_executions.jsonl")
+    if os.path.exists(report_path):
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                last = f.readlines()[-1].strip()
+            if last:
+                rep = json.loads(last)
+                for key in ("buy_signals", "sell_signals"):
+                    for s in rep.get(key, []):
+                        if isinstance(s, str) and s:
+                            syms.add(s)
+        except Exception:
+            pass
+    return sorted(syms)
+
+
+def _minute_refresh(date_str: str, since: int = 5, timeout_s: int = 1800) -> str:
+    """管线分钟增量: 只补交易标的 (东财 em 源, 走 eastmoney_proxy 网关)。
+
+    5m + 15m 两档, --since 增量合并去重。失败不阻塞管线 (返回文案说明),
+    分钟数据陈旧度由信号步骤守卫告警兜底; 子进程超时会杀掉但已落盘部分保留。
+    """
+    syms = _minute_symbols(date_str)
+    if not syms:
+        return "分钟增量: 无交易标的, 跳过"
+    script = os.path.join(BASE_DIR, "scripts", "active",
+                          "fetch_baostock_minute.py")
+    try:
+        for freq in ("5", "15"):
+            subprocess.run(
+                [sys.executable, script, "--freq", freq,
+                 "--since", str(since), "--symbols", ",".join(syms)],
+                cwd=BASE_DIR, timeout=timeout_s, check=False)
+        return f"分钟增量: {len(syms)} 只 (5m/15m, 最近 {since} 交易日) 完成"
+    except subprocess.TimeoutExpired:
+        return f"分钟增量: 超时 (>{timeout_s}s), 已落盘部分保留, 下次继续补"
+    except Exception as e:
+        return f"分钟增量失败: {e} (不阻塞, 信号步骤有陈旧度告警兜底)"
+
+
 def step_data_fetch(date_str: str, resume: bool = True) -> str:
-    """增量数据更新 — 调用 update_daily_data 的增量逻辑 (腾讯数据源)。"""
+    """增量数据更新 — 日线 (东财 via eastmoney_proxy, 腾讯兜底) + 分钟增量。"""
     import pandas as pd
 
     from update_daily_data import run as update_run
@@ -107,12 +164,16 @@ def step_data_fetch(date_str: str, resume: bool = True) -> str:
     )
 
     if meta is None:
-        return "fetch returned None (可能无新数据)"
+        daily_note = "fetch returned None (可能无新数据)"
+    else:
+        stats = meta.get("stats", {})
+        count = meta.get("count", 0)
+        failed = stats.get("failed", [])
+        daily_note = f"更新 {count} 只, 失败 {len(failed)} 只"
 
-    stats = meta.get("stats", {})
-    count = meta.get("count", 0)
-    failed = stats.get("failed", [])
-    return f"更新 {count} 只, 失败 {len(failed)} 只"
+    # 分钟增量 (交易标的): 失败不阻塞, 见 _minute_refresh
+    minute_note = _minute_refresh(date_str)
+    return f"{daily_note}; {minute_note}"
 
 
 def step_data_quality(date_str: str) -> str:
@@ -160,6 +221,7 @@ def step_data_quality(date_str: str) -> str:
         ("龙虎榜 aux_lhb", os.path.join(data_store, "aux_lhb", "*.parquet"), "file", "date"),
         ("大宗交易 aux_dzjy", os.path.join(data_store, "aux_dzjy", "*.parquet"), "file", "date"),
         ("分钟15m", os.path.join(data_store, "minute_15m", "*.parquet"), "datetime", None),
+        ("分钟5m", os.path.join(data_store, "minute_5m", "*.parquet"), "datetime", None),
         ("指数基准", os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet"), "date", None),
     ]
     sync_msgs = []

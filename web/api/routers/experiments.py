@@ -12,10 +12,11 @@ router = APIRouter(prefix="/api", tags=["experiments"])
 
 
 def _iter_walkforward_files():
-    """data/ic_validation/walkforward_results_v*.json (glob 天然排除无版本号的最新输出)。"""
+    """data/ic_validation/walkforward_results*.json — 含无版本号的生产结果
+    (walkforward_results.json, 即最新实验), 排除 _bak_ 备份。"""
     if not config.IC_DIR.exists():
         return
-    for p in sorted(config.IC_DIR.glob("walkforward_results_v*.json")):
+    for p in sorted(config.IC_DIR.glob("walkforward_results*.json")):
         if "_bak_" in p.stem:
             continue
         yield p
@@ -103,19 +104,21 @@ def _walkforward_schema(path: Path, d: dict) -> dict:
     # ── 逐笔成交增强 (2026-08-15) ──
     # 1. equity_after: 成交后净值 (从 equity_curve 按日期映射; 调仓日所有成交
     #    共享当日净值, 展示"这笔调仓后的账户净值")
-    # 2. fill_times 归一化: 旧数据 (v24e 及之前) 小订单路径填 09:35 且按
-    #    全天VWAP成交 → 统一标记 全天VWAP(旧), 与新版随机时点市价区分。
-    #    新回测 (v26+) 小订单直接输出 市价@HH:MM, 不经过此归一化。
+    # 2. fill_times 归一化 (仅旧数据): v24e 及之前 (generated_at < 2026-08-15)
+    #    小订单路径填 09:35 且按全天VWAP成交 (装饰性标记) → 统一改为 全天VWAP(旧)。
+    #    2026-08-15 起确定性 POV 重写后, 09:35 是真实首bar成交, 不归一化。
     eq_by_date = {}
     for p in eq:
         eq_by_date[p["date"]] = p.get("equity")
+    legacy_fills = str(meta.get("generated_at", "")) < "2026-08-15"
     for t in trades:
         t_date = t.get("date", "")
         if t_date in eq_by_date and "equity_after" not in t:
             t["equity_after"] = eq_by_date[t_date]
-        ft = t.get("fill_times")
-        if ft and ft == ["09:35"]:
-            t["fill_times"] = ["全天VWAP"]
+        if legacy_fills:
+            ft = t.get("fill_times")
+            if ft and ft == ["09:35"]:
+                t["fill_times"] = ["全天VWAP"]
 
     return {"meta": meta, "metrics": metrics, "series": series, "folds": folds,
             "stock_pnl": stock_pnl, "trades": trades,
@@ -161,7 +164,11 @@ def _registry() -> list[dict]:
                 items.append(_exp_meta(p, d))
             except Exception:
                 continue
+    # 排序: 先按 generated_at 倒序 (最新在前), 再用稳定排序把 walkforward
+    # 回测结果整体提到 exp 流水记录之前 (回测是核心资产, exp 记录是附属流水;
+    # 2026-08-16 实测: exp 记录时间晚于回测时会抢占置顶, 掩盖最新实验)
     items.sort(key=lambda x: x.get("generated_at", ""), reverse=True)
+    items.sort(key=lambda x: 0 if x.get("kind") == "walkforward" else 1)
     return items
 
 

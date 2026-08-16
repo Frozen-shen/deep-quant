@@ -56,6 +56,9 @@ def fetch_northbound_history(symbol: str) -> pd.DataFrame:
       DataFrame with columns: 持股日期, 持股数量, 持股市值, 持股数量占A股百分比, etc.
       如果该股票无北向数据, 返回空 DataFrame。
     """
+    from netgate import is_offline, OfflineViolation
+    if is_offline():
+        raise OfflineViolation("smart_money_fetcher.fetch_northbound_history: 离线模式禁止网络获取")
     import akshare as ak
 
     try:
@@ -221,6 +224,9 @@ def fetch_analyst_consensus() -> pd.DataFrame:
     Returns:
       DataFrame with columns: 代码, 名称, 评级, 目标价, 预测当年每股收益, etc.
     """
+    from netgate import is_offline, OfflineViolation
+    if is_offline():
+        raise OfflineViolation("smart_money_fetcher.fetch_analyst_consensus: 离线模式禁止网络获取")
     import akshare as ak
 
     try:
