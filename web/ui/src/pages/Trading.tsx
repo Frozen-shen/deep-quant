@@ -21,6 +21,8 @@ export default function Trading() {
   const [segKey, setSegKey] = useState<string>('extend_val')
   /** 换仓明细按股票搜索筛选 (代码/名称, 空=全部) */
   const [btSymbol, setBtSymbol] = useState<string>('')
+  /** 搜索框输入文本 (独立于筛选态, 支持自由输入) */
+  const [btInput, setBtInput] = useState<string>('')
   const { data, isLoading, isError } = useQuery({
     queryKey: ['broker'], queryFn: fetchBroker, refetchInterval: 30_000,
   })
@@ -209,14 +211,25 @@ export default function Trading() {
           <AutoComplete
             style={{ width: 260 }}
             placeholder="按股票代码/名称筛选（如 600519 或 茅台）"
-            value={btSymbol ? `${btSymbol} ${nameOf(btSymbol)}` : ''}
+            value={btInput}
             options={stockOptions}
-            onSelect={(v) => setBtSymbol(v)}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase()) ||
+              (option?.value ?? '').includes(input)
+            }
+            onSelect={(v) => {
+              setBtSymbol(v)
+              setBtInput(`${v} ${nameOf(v)}`)
+            }}
             onChange={(v) => {
-              // 清空: 输入框被清空时取消筛选
-              if (!v) setBtSymbol('')
-              // 精确代码匹配 (输入 600519 直接命中)
-              else if (/^\d{6}$/.test(v.trim())) setBtSymbol(v.trim())
+              setBtInput(v)
+              const t = v.trim()
+              if (!t) { setBtSymbol(''); return }
+              // 精确 6 位代码 → 直接筛选
+              if (/^\d{6}$/.test(t)) { setBtSymbol(t); return }
+              // 名称模糊匹配: 唯一命中 → 直接筛选; 多选/无 → 仅联想
+              const hit = tradeSymbols.filter(s => nameOf(s).includes(t))
+              setBtSymbol(hit.length === 1 ? hit[0] : '')
             }}
             allowClear
           />
