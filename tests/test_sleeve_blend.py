@@ -168,3 +168,25 @@ def test_load_styles_config_missing_budget_raises():
     cfg["styles"]["budgets"] = {"momentum": 0.25}  # growth sleeve 缺预算
     with pytest.raises(ValueError):
         load_styles_config(cfg)
+
+
+# ── Task 4: build_extend_sleeve_weights 纯函数 ──
+
+
+def test_build_extend_sleeve_weights():
+    """fold_out + styles_cfg → extend 用 sleeve 列表 (空预算跳过)。"""
+    from run_walkforward_backtest import build_extend_sleeve_weights
+    fold_out = {"sleeve_median_weights": {
+        "momentum": {"m1": 0.05, "m2": 0.1},
+        "growth": {"g1": 0.1}}}
+    cfg = {"budgets": {"momentum": 0.25, "growth": 0.0},
+           "sleeves": {"momentum": {}, "growth": {}}}
+    out = build_extend_sleeve_weights(fold_out, cfg)
+    assert len(out) == 1
+    assert out[0]["name"] == "momentum" and out[0]["budget"] == 0.25
+    assert out[0]["weights"] == {"m1": 0.05, "m2": 0.1}
+
+
+def test_build_extend_sleeve_weights_no_styles():
+    from run_walkforward_backtest import build_extend_sleeve_weights
+    assert build_extend_sleeve_weights({}, None) is None

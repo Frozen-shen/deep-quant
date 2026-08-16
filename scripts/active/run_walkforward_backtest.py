@@ -1998,6 +1998,20 @@ def sleeve_median_weights(sleeve_icirs: dict, sleeves_cfg: dict) -> dict:
     return out
 
 
+def build_extend_sleeve_weights(fold_out: dict, styles_cfg: dict | None) -> list | None:
+    """extend 模拟考用 sleeve 权重列表 (中位数 ICIR + config 预算)。"""
+    if not styles_cfg:
+        return None
+    med = fold_out.get("sleeve_median_weights") or {}
+    budgets = styles_cfg.get("budgets") or {}
+    out = []
+    for name, w in med.items():
+        budget = float(budgets.get(name, 0.0))
+        if w and budget > 0:
+            out.append({"name": name, "weights": w, "budget": budget})
+    return out or None
+
+
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
@@ -2613,6 +2627,12 @@ def main():
                 "weights": ml_weights,
                 "lambda": float(ml_cfg.get("lambda", 0.3)),
             }
+            # ── 多风格 sleeve (config styles 段, enabled=false → None=v27 行为) ──
+            styles_cfg = load_styles_config(config)
+            if styles_cfg:
+                log.info("  多风格 sleeve: %s (budgets=%s)",
+                         ", ".join(styles_cfg["sleeves"].keys()),
+                         styles_cfg.get("budgets"))
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
@@ -2622,7 +2642,8 @@ def main():
                 weight_mode=str(config.get("portfolio_optimizer", "equal")),
                 pool_filter_cfg=config.get("pool_filter"),
                 vol_target_cfg=config.get("vol_target"),
-                trend_timing_cfg=config.get("trend_timing"))
+                trend_timing_cfg=config.get("trend_timing"),
+                styles_cfg=styles_cfg)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -2683,6 +2704,8 @@ def main():
                                    for fn in fold_out["stable_factors"]},
                     universe_fn=universe_fn, use_regime=True,
                     portfolio_constraints=portfolio_constraints,
+                    sleeve_weights=build_extend_sleeve_weights(
+                        fold_out, styles_cfg),
                     minute_weights=minute_layer.get("weights")
                     if minute_layer.get("enabled") else None,
                     minute_lambda=float(minute_layer.get("lambda", 0.3)),
@@ -2791,6 +2814,31 @@ def main():
                  len(extra_meta.get("stable_factors", [])),
                  FOLD_MIN_HITS, FOLD_ICIR_MIN)
     log.info("=" * 60)
+
+    # ── 实验登记 (2026-08-16): 每次回测自动写入 experiments/ ──
+    try:
+        from experiment_tracker import log_experiment
+        _styles = config.get("styles") or {}
+        log_experiment(
+            script_name="run_walkforward_backtest",
+            partition="development+extend_val",
+            config={"top_k": bt_config.get("top_k"),
+                    "styles_enabled": bool(_styles.get("enabled")),
+                    "styles_budgets": _styles.get("budgets"),
+                    "styles_sleeves": {k: v.get("factors") for k, v in
+                                       (_styles.get("sleeves") or {}).items()}},
+            results={k: {"excess_annual": v.get("excess_annual"),
+                         "total_return": v.get("total_return"),
+                         "sharpe": v.get("sharpe"),
+                         "max_drawdown": v.get("max_drawdown")}
+                     for k, v in results.items() if isinstance(v, dict)},
+            notes=(f"styles={bool(_styles.get('enabled'))} "
+                   f"budgets={_styles.get('budgets')}"),
+            experiments_dir=os.path.join(BASE_DIR, "experiments"),
+        )
+    except Exception as e:
+        log.warning("experiment_tracker 登记失败 (不影响主结果): %s", e)
+
     log.info("  结果: %s", OUTPUT_PATH)
 
 
