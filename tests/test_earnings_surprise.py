@@ -113,9 +113,11 @@ def test_industry_momentum_panel(monkeypatch):
     }
     ind_map = {"000001": "行业A", "000002": "行业A",
                "600000": "行业B", "600001": "行业B"}
+    symbols = list(all_data.keys()) + ["999999"]  # 999999 无行业映射
     panel = es.industry_momentum_panel(
-        list(all_data.keys()), all_data, ind_map, list(cal), lookback=60)
+        symbols, all_data, ind_map, list(cal), lookback=60)
     last = panel.iloc[-1]
     assert last["000001"] > 0 and last["600000"] < 0
-    # 无映射 → NaN
-    assert np.isnan(panel["999999"]) if "999999" in panel else True
+    # 无映射 → NaN: 列存在且全 NaN (契约)
+    assert "999999" in panel.columns
+    assert panel["999999"].isna().all()

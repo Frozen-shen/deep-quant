@@ -176,10 +176,12 @@ def industry_momentum_panel(symbols: list, all_data: dict,
         r = pd.Series(df["close"].values, index=d).pct_change().reindex(idx)
         ind_rets.setdefault(ind, []).append(r)
     if not ind_rets:
-        return pd.DataFrame(index=idx, dtype=np.float32)
+        return pd.DataFrame(np.nan, index=idx, columns=sorted(symbols),
+                            dtype=np.float32)
     ind_panel = pd.DataFrame(
         {k: pd.concat(v, axis=1).mean(axis=1) for k, v in ind_rets.items()})
     # 滚动 lookback 日累计收益 (对数近似, 避免复利偏差)
+    # 缺日 (停牌/数据缺) 按 0 对数收益处理 — 建模假设, 非前视
     cum = np.log1p(ind_panel.fillna(0.0)).rolling(lookback, min_periods=10).sum()
     # 每日截面 z-score
     mu = cum.mean(axis=1)
