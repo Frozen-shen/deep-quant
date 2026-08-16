@@ -1074,6 +1074,8 @@ def validate_minute_factors(factor_panels: dict, close_panel: pd.DataFrame,
     minute_names = [fn for fn in factor_names if fn in MINUTE_FACTOR_NAMES]
     if not minute_names or not train_folds:
         return {}
+    log.info("  [probe] validate: %d 分钟因子, folds=%s",
+             len(minute_names), train_folds)
 
     # 对每个 fold 训练期计算 ICIR
     fold_icirs = {fn: [] for fn in minute_names}
@@ -1244,10 +1246,15 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
     offsets = list(range(start_idx, end_idx + 1, IC_STEP))
     if not offsets:
         return {}, {}
+    available = [fn for fn in factor_names if fn in factor_panels]
+    log.info("  [probe] ICIR 估计: %s 模式, %d obs × %d 因子 (%s ~ %s)",
+             "fixed" if (train_start and train_end) else "rolling",
+             len(offsets), len(available),
+             calendar[start_idx].date() if start_idx < len(calendar) else "?",
+             calendar[end_idx].date() if end_idx < len(calendar) else "?")
 
     close_vals = close_panel.to_numpy()
     n_dates = len(calendar)
-    available = [fn for fn in factor_names if fn in factor_panels]
     # 预取每个观测日的因子截面矩阵 (n_stocks, n_factors)
     matrices = []
     labels = []
@@ -2678,6 +2685,7 @@ def main():
     # ── 5. 回测 (带日期守卫) ──
     results = {}
     extra_meta = {}
+    log.info("  [probe] 进入回测守卫块")
     with DateRangeGuard(config, script_name="run_walkforward_backtest") as guard:
         if args.folds:
             # 方案C: 5-fold 分析 + 终极 TEST
@@ -2701,10 +2709,13 @@ def main():
                     ("2022-01-01", "2023-12-31"),
                     ("2022-01-01", "2024-12-31"),
                 ]
+                log.info("  [probe] 分钟验证开始 (enabled=%s)", ml_cfg.get("enabled"))
                 ml_weights = validate_minute_factors(
                     factor_panels, close_panel, calendar, cal_idx,
                     factor_names, train_folds,
                     min_icir=float(ml_cfg.get("min_icir", 0.3)))
+                log.info("  [probe] 分钟验证结束: %d 因子通过",
+                         len(ml_weights or {}))
             minute_layer = {
                 "enabled": ml_cfg.get("enabled", True),
                 "weights": ml_weights,
