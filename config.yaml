@@ -106,6 +106,37 @@ fold:
 # ── 组合层优化 (v9b) ──
 portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v9b实验) / risk_parity=风险平价 (P0)
 
+# ── 多风格 sleeve (2026-08-16 实验; enabled=false 时公式与 v27 一致 (float64 计算路径, 差异 ≤1e-7 量级)) ──
+styles:
+  enabled: false
+  budgets:                 # 组合分 = (1-Σbudget)×核心 + Σ budget×sleeve分
+    momentum: 0.25
+    growth: 0.15
+  sleeves:
+    momentum:              # 5/5 fold 命中但被 top50 截断的动量因子
+      min_hits: 3
+      factors:
+        - return_30d
+        - return_60d
+        - return_90d
+        - vol_adj_mom_60d
+        - momentum_7d
+        - momentum_20d
+        - mom_60d
+        - mom_120d
+        - mom_12_1
+    growth:                # 成长 sleeve: 风格预算实验, 不强求 fold 命中
+      min_hits: 0
+      fallback_weight: 0.1  # fold 中位数 |ICIR|<0.02 时的默认权重 (符号取正, p6 ICIR 均为正)
+      factors:
+        - fund_profit_growth
+        - fund_profit_growth_ded
+        - fund_revenue_growth
+        - aux_yjkb_profit_growth
+        - fund_ocf_ps
+        - fund_ocf_yield
+        - fund_net_margin
+
 # ── 股票池分域 (v10, 波动率分层×regime乘数, 设计文档 2026-08-09) ──
 pool_filter:
   enabled: true           # 模拟考 on 组 (2026-08-09); false=对照组

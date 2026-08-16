@@ -274,6 +274,78 @@ def _style_budget_weights(weights: dict, style_cap: float = 0.4) -> dict:
     return out
 
 
+# ── 多风格 sleeve 配置 (2026-08-16, config styles 段) ──
+SLEEVE_BUDGET_ORDER = ("momentum", "growth")
+
+
+def load_styles_config(config: dict) -> dict | None:
+    """styles 段: enabled=false/缺失 → None (行为与 v27 完全一致)。"""
+    cfg = config.get("styles") or {}
+    if not cfg.get("enabled"):
+        return None
+    budgets = cfg.get("budgets") or {}
+    for name, raw in budgets.items():
+        try:
+            b = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"styles.budgets.{name} 必须为数值且在 [0,1], got {raw!r}")
+        if not 0.0 <= b <= 1.0:
+            raise ValueError(f"styles.budgets.{name} 必须在 [0,1], got {b}")
+    for name in (cfg.get("sleeves") or {}):
+        if name not in budgets:
+            raise ValueError(f"styles.budgets 缺少 sleeve '{name}' 的预算")
+    if sum(float(v) for v in budgets.values()) > 1.0:
+        raise ValueError("styles.budgets 合计不得超过 1.0 (core 隐含 1-Σ)")
+    for name, scfg in (cfg.get("sleeves") or {}).items():
+        if not scfg.get("factors"):
+            raise ValueError(f"styles.sleeves.{name}.factors 为空")
+    return cfg
+
+
+def assert_sleeve_mode_allowed(styles_cfg, args_folds: bool, args_folds_only: bool) -> None:
+    """sleeve 启用时禁止消耗一次性 TEST: folds 且非 folds-only → RuntimeError。"""
+    if styles_cfg and args_folds and not args_folds_only:
+        raise RuntimeError("多风格 sleeve 模式仅支持 --folds-only + --extend-val")
+
+
+def split_sleeve_factors(factor_names: list, styles_cfg: dict):
+    """核心池 = 全部因子 - sleeve 因子; 返回 (core_names, {name: [factors]})。
+
+    接受完整 config (含 styles 键) 或 styles 子段 (load_styles_config 返回值)。
+    """
+    if "sleeves" not in styles_cfg:
+        styles_cfg = styles_cfg.get("styles") or {}
+    sleeves = {}
+    sleeve_set = set()
+    for name, scfg in (styles_cfg.get("sleeves") or {}).items():
+        fs = [f for f in scfg.get("factors", []) if f in factor_names]
+        sleeves[name] = fs
+        sleeve_set.update(fs)
+    core = [f for f in factor_names if f not in sleeve_set]
+    return core, sleeves
+
+
+def parse_budget_combos(s: str) -> list:
+    """'0.25/0.15,0.2/0.2' → [[('momentum',0.25),('growth',0.15)], ...]"""
+    combos = []
+    for part in s.split(","):
+        vals = [p.strip() for p in part.split("/")]
+        if len(vals) != len(SLEEVE_BUDGET_ORDER):
+            raise ValueError(
+                f"预算组合需 {len(SLEEVE_BUDGET_ORDER)} 个值 (mom/growth): '{part}'")
+        combo = [(SLEEVE_BUDGET_ORDER[i], float(vals[i]))
+                 for i in range(len(SLEEVE_BUDGET_ORDER))]
+        if any(not 0.0 <= v <= 1.0 for _, v in combo):
+            raise ValueError(f"预算值须在 [0,1]: '{part}'")
+        if sum(v for _, v in combo) > 1.0:
+            raise ValueError(f"预算合计不得超过 1.0: '{part}'")
+        combos.append(combo)
+    if not combos:
+        raise ValueError("预算组合列表不能为空")
+    return combos
+
+
 def _industry_neutralize(df: pd.DataFrame, industry_map: dict) -> pd.DataFrame:
     """行业截面中性化: 每个日期, 行业内 z-score (组内标准化)。
 
@@ -1210,23 +1282,48 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
     return weights, ic_stats
 
 
+def _weighted_z_composite(cross: pd.DataFrame, weights: dict) -> np.ndarray:
+    """cross (n × 因子) → 因子内 z-score 后按权重加权和, 除以 Σ|w| (长度 n)。"""
+    names = [n for n in weights if n in cross.columns]
+    vals = cross[names].to_numpy(dtype=np.float64)
+    n, m = vals.shape
+    w = np.array([weights[n] for n in names], dtype=np.float64)
+    comp = np.zeros(n)
+    for fi in range(m):
+        col = vals[:, fi]
+        mask = ~np.isnan(col)
+        if mask.sum() < 10:
+            continue
+        mu = np.nanmean(col)
+        sd = np.nanstd(col)
+        if sd < 1e-9:
+            continue
+        z = np.where(mask, (col - mu) / sd, 0.0)
+        comp += w[fi] * z
+    denom = np.sum(np.abs(w))
+    if denom < 1e-9:
+        return comp
+    return comp / denom
+
+
 def score_stocks(factor_panels: dict, weights: dict, t_date,
+                 sleeve_weights: list | None = None,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3) -> dict:
-    """用动态 ICIR 权重对 t_date 当日截面打分 (z-score 加权)。
+    """ICIR 加权 z-score 打分, 支持多 sleeve 预算混合 (2026-08-16)。
 
-    方案B: minute_weights 提供时, 综合分 = 主分 + λ×分钟因子加权分。
-    分钟因子分独立 z-score (不参与主因子归一化, 避免尺度污染)。
+    sleeve_weights: [{"name","weights","budget"}, ...]
+      composite = (1-Σbudget)×主分 + Σ budget×sleeve分 (各通道内部分别归一)。
+    sleeve_weights=None 时公式与 v27 一致 (float64 计算路径, 与 v27 float32
+    的期望差异 ≤1e-7 量级, 排序影响可忽略; 真实 A/B 由实验 A 对照 v27 存档验证)。
     """
     if not weights:
         return {}
-    factor_names = list(weights.keys())
-    w = np.array([weights[n] for n in factor_names])
-    abs_w = np.sum(np.abs(w))
+    abs_w = np.sum(np.abs(list(weights.values())))
     if abs_w < 1e-9:
         return {}
+    factor_names = list(weights.keys())
 
-    # 当日截面: index=股票, columns=因子
     cols = {}
     for n in factor_names:
         p = factor_panels[n]
@@ -1234,31 +1331,39 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
             cols[n] = p.loc[t_date]
     if not cols:
         return {}
-    cross = pd.DataFrame(cols)  # (n_stocks × n_factors)
+    cross = pd.DataFrame(cols)
 
-    # 覆盖率 >= 50%
     n_f = cross.shape[1]
     cov = cross.notna().sum(axis=1)
     cross = cross[cov >= n_f * 0.5]
     if len(cross) < 10:
         return {}
 
-    vals = cross.to_numpy()  # (n_valid, n_factors)
-    composite = np.zeros(len(cross))
-    for fi in range(n_f):
-        col = vals[:, fi]
-        m = ~np.isnan(col)
-        if m.sum() < 10:
-            continue
-        mu = np.nanmean(col)
-        sd = np.nanstd(col)
-        if sd < 1e-9:
-            continue
-        z = np.where(m, (col - mu) / sd, 0.0)
-        composite += w[fi] * z
-    composite /= abs_w
+    base = _weighted_z_composite(cross, weights)
+    core_budget = 1.0
+    sleeve_sum = 0.0
+    if sleeve_weights:
+        for sw in sleeve_weights:
+            s_w = sw.get("weights") or {}
+            s_budget = float(sw.get("budget", 0.0))
+            if not s_w or s_budget <= 0:
+                continue
+            s_cols = {}
+            for n in s_w:
+                p = factor_panels.get(n)
+                if p is not None and t_date in p.index:
+                    s_cols[n] = p.loc[t_date]
+            if not s_cols:
+                continue
+            s_cross = pd.DataFrame(s_cols).reindex(cross.index)
+            s_comp = _weighted_z_composite(s_cross, s_w)
+            # 无该 sleeve 数据的股票 s_comp=0 → 仅主分生效 (自然降级)
+            s_comp = np.nan_to_num(s_comp, nan=0.0)
+            sleeve_sum = sleeve_sum + s_budget * s_comp
+            core_budget -= s_budget
+    composite = core_budget * base + sleeve_sum
 
-    # ── 方案B: 分钟因子叠加层 ──
+    # ── 方案B: 分钟因子叠加层 (语义不变) ──
     if minute_weights:
         m_names = list(minute_weights.keys())
         m_w = np.array([minute_weights[n] for n in m_names])
@@ -1270,24 +1375,8 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
                 if p is not None and t_date in p.index:
                     m_cols[n] = p.loc[t_date]
             if m_cols:
-                m_cross = pd.DataFrame(m_cols)
-                # 与主分相同的股票对齐
-                m_cross = m_cross.reindex(cross.index)
-                m_vals = m_cross.to_numpy()
-                m_comp = np.zeros(len(cross))
-                for fi in range(len(m_names)):
-                    col = m_vals[:, fi]
-                    m = ~np.isnan(col)
-                    if m.sum() < 10:
-                        continue
-                    mu = np.nanmean(col)
-                    sd = np.nanstd(col)
-                    if sd < 1e-9:
-                        continue
-                    z = np.where(m, (col - mu) / sd, 0.0)
-                    m_comp += m_w[fi] * z
-                m_comp /= m_abs
-                # 无分钟数据的股票 m_comp=0 → 仅主分生效 (自然降级)
+                m_cross = pd.DataFrame(m_cols).reindex(cross.index)
+                m_comp = _weighted_z_composite(m_cross, minute_weights)
                 m_comp = np.nan_to_num(m_comp, nan=0.0)
                 composite = composite + minute_lambda * m_comp
 
@@ -1429,6 +1518,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  universe_fn=get_universe,
                  use_regime: bool = False,
                  portfolio_constraints: dict | None = None,
+                 sleeve_weights: list | None = None,
                  minute_weights: dict | None = None,
                  minute_lambda: float = 0.3,
                  weight_mode: str = "equal",
@@ -1444,6 +1534,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
       双变量检测结果调整因子权重 (含动量崩溃保护)。
     portfolio_constraints: 组合后置约束 dict (config.yaml portfolio_constraints
       段: max_single_pct/max_industry_pct/max_turnover), None=不启用。
+    sleeve_weights: 多风格 sleeve 列表 [{"name","weights","budget"}, ...],
+      与 fixed_weights 配套 (fold 模式), None=单通道 (v27 行为)。
     minute_weights: 方案B 分钟叠加层权重 {min_factor: icir}, None=不叠加。
     minute_lambda: 叠加权重 λ (综合分 = 主分 + λ×分钟分)。
     pool_filter_cfg: 股票池分域配置 (config.yaml pool_filter 段,
@@ -1599,6 +1691,7 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
 
             # 评分
             scores = score_stocks(factor_panels, weights, today,
+                                  sleeve_weights=sleeve_weights,
                                   minute_weights=minute_weights,
                                   minute_lambda=minute_lambda)
 
@@ -1888,6 +1981,48 @@ FOLD_T_STAT_MIN = 1.645    # 统计显著标准: |ICIR|*sqrt(n_obs) >= 1.645 (�
 FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合); 可由 config fold.max_factors 覆盖
 
 
+def _sleeve_sig(ic_stats: dict) -> set:
+    """与核心同口径的显著因子: |ICIR|>=FOLD_ICIR_MIN 且 t 统计 >= FOLD_T_STAT_MIN。"""
+    sig = set()
+    for fn, st in ic_stats.items():
+        n_obs = st.get("n_obs", 0)
+        t_stat = abs(st["icir"]) * np.sqrt(n_obs) if n_obs > 0 else 0.0
+        if t_stat >= FOLD_T_STAT_MIN and abs(st["icir"]) >= FOLD_ICIR_MIN:
+            sig.add(fn)
+    return sig
+
+
+def sleeve_median_weights(sleeve_icirs: dict, sleeves_cfg: dict) -> dict:
+    """每 sleeve 因子 5 折 ICIR 中位数 → 权重; |median|<0.02 用 fallback_weight。
+
+    fallback 符号取正 (成长因子 p6 全样本 ICIR 均为正; 2026-08-16)。
+    """
+    out = {}
+    for name, icirs in sleeve_icirs.items():
+        scfg = (sleeves_cfg or {}).get(name, {}) or {}
+        fb = float(scfg.get("fallback_weight", 0.1))
+        w = {}
+        for fn, arr in icirs.items():
+            med = float(np.median(arr)) if arr else 0.0
+            w[fn] = med if abs(med) >= 0.02 else fb
+        out[name] = w
+    return out
+
+
+def build_extend_sleeve_weights(fold_out: dict, styles_cfg: dict | None) -> list | None:
+    """extend 模拟考用 sleeve 权重列表 (中位数 ICIR + config 预算)。"""
+    if not styles_cfg:
+        return None
+    med = fold_out.get("sleeve_median_weights") or {}
+    budgets = styles_cfg.get("budgets") or {}
+    out = []
+    for name, w in med.items():
+        budget = float(budgets.get(name, 0.0))
+        if w and budget > 0:
+            out.append({"name": name, "weights": w, "budget": budget})
+    return out or None
+
+
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
@@ -1898,7 +2033,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       weight_mode: str = "equal",
                       pool_filter_cfg: dict | None = None,
                       vol_target_cfg: dict | None = None,
-                      trend_timing_cfg: dict | None = None) -> dict:
+                      trend_timing_cfg: dict | None = None,
+                      styles_cfg: dict | None = None) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -1930,9 +2066,18 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
             log.info("  分钟叠加层: %d 个因子, λ=%.2f (fold 4-5 验证期)",
                      len(ml_weights), ml_lambda)
 
+    core_names = factor_names
+    sleeves = {}
+    if styles_cfg:
+        core_names, sleeves = split_sleeve_factors(factor_names, styles_cfg)
+        log.info("  sleeve 模式: 核心 %d 因子 + %s",
+                 len(core_names),
+                 ", ".join(f"{n}({len(fs)} 因子)" for n, fs in sleeves.items()))
+
     fold_results = {}
-    factor_hits = {fn: 0 for fn in factor_names}
-    factor_icirs = {fn: [] for fn in factor_names}
+    factor_hits = {fn: 0 for fn in core_names}
+    factor_icirs = {fn: [] for fn in core_names}
+    sleeve_icirs = {}
 
     # 验证期首调仓日: 固定权重只需在训练期末计算一次
     for fi, fold in enumerate(FOLDS):
@@ -1953,15 +2098,39 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
 
         weights, ic_stats = compute_icir_weights(
             factor_panels, close_panel, calendar, cal_idx,
-            val_first, factor_names, train_start=ts, train_end=te,
+            val_first, core_names, train_start=ts, train_end=te,
             universe_fn=universe_fn)
+
+        # ── sleeve 权重估计 (独立通道, 2026-08-16) ──
+        fold_sleeve_weights = {}
+        if sleeves:
+            for sname, sfs in sleeves.items():
+                s_weights, s_stats = compute_icir_weights(
+                    factor_panels, close_panel, calendar, cal_idx,
+                    val_first, sfs, train_start=ts, train_end=te,
+                    universe_fn=universe_fn)
+                min_hits = int(styles_cfg["sleeves"][sname].get("min_hits", 3))
+                if min_hits > 0:
+                    s_weights = {fn: w for fn, w in s_weights.items()
+                                 if fn in _sleeve_sig(s_stats)}
+                else:
+                    # min_hits=0 (成长): 保留 |icir|>=MIN_ICIR 的因子, 符号随 ICIR
+                    s_weights = {fn: w for fn, w in s_weights.items()
+                                 if abs(w) >= MIN_ICIR}
+                fold_sleeve_weights[sname] = s_weights
+                for fn in sfs:
+                    st = s_stats.get(fn)
+                    sleeve_icirs.setdefault(sname, {}).setdefault(fn, []).append(
+                        float(st["icir"]) if st is not None else 0.0)
+                log.info("  sleeve[%s] 本折权重: %d 因子", sname, len(s_weights))
+
         n_sel = len(weights)
         log.info("  训练期因子: %d/%d 入选 |ICIR|>=%.2f",
-                 n_sel, len(factor_names), FOLD_ICIR_MIN)
+                 n_sel, len(core_names), FOLD_ICIR_MIN)
 
         # 记录每个因子的 fold 命中 (统计显著标准: |ICIR|*sqrt(n) >= 1.645)
         sig_factors = set()
-        for fn in factor_names:
+        for fn in core_names:
             st = ic_stats.get(fn)
             if st is not None:
                 factor_icirs[fn].append(st["icir"])
@@ -1989,6 +2158,12 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         r = run_backtest(all_data, factor_panels, close_panel, calendar,
                          cal_idx, factor_names, bt_config, vs, ve,
                          label=f"VAL{fi+1}", fixed_weights=weights,
+                         sleeve_weights=([{
+                             "name": sname,
+                             "weights": fold_sleeve_weights.get(sname) or {},
+                             "budget": float((styles_cfg.get("budgets") or {})
+                                             .get(sname, 0.0)),
+                         } for sname in sleeves] if sleeves else None),
                          universe_fn=universe_fn, use_regime=use_regime,
                          portfolio_constraints=portfolio_constraints,
                          minute_weights=ml_weights if fi >= 3 else None,
@@ -2008,7 +2183,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     # ── 稳定因子筛选 (统计显著 ≥3/5 folds + 方向一致 + 数量上限) ──
     # 方向一致性: 因子在 ≥3/5 folds 中 ICIR 符号相同 (防止正负抵消)
     cand = []
-    for fn in factor_names:
+    for fn in core_names:
         if factor_hits[fn] < FOLD_MIN_HITS or not factor_icirs[fn]:
             continue
         arr = np.array(factor_icirs[fn])
@@ -2026,7 +2201,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     log.info("")
     log.info("=" * 60)
     log.info("  稳定因子: %d/%d (≥%d folds 显著+方向一致, top%d)",
-             len(stable), len(factor_names), FOLD_MIN_HITS,
+             len(stable), len(core_names), FOLD_MIN_HITS,
              limit)
     if stable:
         top = sorted(stable_icir.items(), key=lambda kv: -abs(kv[1]))[:15]
@@ -2041,6 +2216,9 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
         "stable_factors": stable,
         "stable_factor_icir_median": {
             k: round(v, 4) for k, v in stable_icir.items()},
+        "sleeve_median_weights": (
+            sleeve_median_weights(sleeve_icirs, styles_cfg.get("sleeves", {}))
+            if styles_cfg else {}),
     }
 
 
@@ -2460,6 +2638,18 @@ def main():
                 "weights": ml_weights,
                 "lambda": float(ml_cfg.get("lambda", 0.3)),
             }
+            # ── 多风格 sleeve (config styles 段, enabled=false → None=v27 行为) ──
+            styles_cfg = load_styles_config(config)
+            try:
+                assert_sleeve_mode_allowed(styles_cfg, args.folds, args.folds_only)
+            except RuntimeError:
+                log.error("🚫 多风格 sleeve 模式仅支持 --folds-only + --extend-val; "
+                          "styles.enabled=true 时禁止执行一次性 TEST (模型与验证不一致会消耗 TEST 锁)。")
+                sys.exit(1)
+            if styles_cfg:
+                log.info("  多风格 sleeve: %s (budgets=%s)",
+                         ", ".join((styles_cfg.get("sleeves") or {}).keys()),
+                         styles_cfg.get("budgets"))
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
@@ -2469,7 +2659,8 @@ def main():
                 weight_mode=str(config.get("portfolio_optimizer", "equal")),
                 pool_filter_cfg=config.get("pool_filter"),
                 vol_target_cfg=config.get("vol_target"),
-                trend_timing_cfg=config.get("trend_timing"))
+                trend_timing_cfg=config.get("trend_timing"),
+                styles_cfg=styles_cfg)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
@@ -2530,6 +2721,8 @@ def main():
                                    for fn in fold_out["stable_factors"]},
                     universe_fn=universe_fn, use_regime=True,
                     portfolio_constraints=portfolio_constraints,
+                    sleeve_weights=build_extend_sleeve_weights(
+                        fold_out, styles_cfg),
                     minute_weights=minute_layer.get("weights")
                     if minute_layer.get("enabled") else None,
                     minute_lambda=float(minute_layer.get("lambda", 0.3)),
@@ -2638,6 +2831,33 @@ def main():
                  len(extra_meta.get("stable_factors", [])),
                  FOLD_MIN_HITS, FOLD_ICIR_MIN)
     log.info("=" * 60)
+
+    # ── 实验登记 (2026-08-16): 每次回测自动写入 experiments/ ──
+    try:
+        from experiment_tracker import log_experiment
+        _styles = config.get("styles") or {}
+        _partition = ("test" if "test" in results
+                      else "development" + ("+extend_val" if "extend_val" in results else ""))
+        log_experiment(
+            script_name="run_walkforward_backtest",
+            partition=_partition,
+            config={"top_k": bt_config.get("top_k"),
+                    "styles_enabled": bool(_styles.get("enabled")),
+                    "styles_budgets": _styles.get("budgets"),
+                    "styles_sleeves": {k: v.get("factors") for k, v in
+                                       (_styles.get("sleeves") or {}).items()}},
+            results={k: {"excess_annual": v.get("excess_annual"),
+                         "total_return": v.get("total_return"),
+                         "sharpe": v.get("sharpe"),
+                         "max_drawdown": v.get("max_drawdown")}
+                     for k, v in results.items() if isinstance(v, dict)},
+            notes=(f"styles={bool(_styles.get('enabled'))} "
+                   f"budgets={_styles.get('budgets')}"),
+            experiments_dir=os.path.join(BASE_DIR, "experiments"),
+        )
+    except Exception as e:
+        log.warning("experiment_tracker 登记失败 (不影响主结果): %s", e)
+
     log.info("  结果: %s", OUTPUT_PATH)
 
 
