@@ -34,14 +34,43 @@ import os
 import sys
 import json
 import time
+import gc
 import argparse
 import warnings
+import faulthandler
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+faulthandler.enable()  # 段错误/OOM 时打印 Python 栈到 stderr
+
+
+def _rss_gb() -> float:
+    """当前进程工作集内存 (GB); Windows 用 ctypes, 失败返回 -1。"""
+    try:
+        import ctypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", ctypes.c_ulong),
+                        ("PageFaultCount", ctypes.c_ulong),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        pmc = _PMC()
+        pmc.cb = ctypes.sizeof(pmc)
+        h = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb)
+        return pmc.WorkingSetSize / 1024 ** 3
+    except Exception:
+        return -1.0
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
@@ -2675,17 +2704,21 @@ def main():
         neutralize_k=neutralize_k,
         industry_map=_load_industry_map() if industry_neutral else None)
     # 预期差/行业动量面板合并 (2026-08-17; 无对应因子时不产生任何面板)
+    log.info("  [mem] merge 前 RSS=%.1f GB", _rss_gb())
     _n_surprise = merge_surprise_panels(
         factor_panels, factor_names, pd.DatetimeIndex(needed_dates),
         sorted(all_data.keys()), all_data, _load_industry_map())
     if _n_surprise:
         log.info("  预期差/行业面板: %d 个 (sue/accel/pead/ind)", _n_surprise)
+    gc.collect()
+    log.info("  [mem] merge 后 RSS=%.1f GB", _rss_gb())
     log.info("  面板就绪: %d 因子", len(factor_panels))
 
     # ── 5. 回测 (带日期守卫) ──
     results = {}
     extra_meta = {}
     log.info("  [probe] 进入回测守卫块")
+    log.info("  [mem] 守卫块前 RSS=%.1f GB", _rss_gb())
     with DateRangeGuard(config, script_name="run_walkforward_backtest") as guard:
         if args.folds:
             # 方案C: 5-fold 分析 + 终极 TEST
@@ -2710,6 +2743,7 @@ def main():
                     ("2022-01-01", "2024-12-31"),
                 ]
                 log.info("  [probe] 分钟验证开始 (enabled=%s)", ml_cfg.get("enabled"))
+                log.info("  [mem] 分钟验证前 RSS=%.1f GB", _rss_gb())
                 ml_weights = validate_minute_factors(
                     factor_panels, close_panel, calendar, cal_idx,
                     factor_names, train_folds,
