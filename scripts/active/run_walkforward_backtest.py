@@ -48,7 +48,11 @@ faulthandler.enable()  # 段错误/OOM 时打印 Python 栈到 stderr
 
 
 def _rss_gb() -> float:
-    """当前进程工作集内存 (GB); Windows 用 ctypes, 失败返回 -1。"""
+    """当前进程工作集内存 (GB); Windows 用 ctypes, 失败返回 -1。
+
+    注意: GetCurrentProcess() 伪句柄在部分环境对 psapi 无效 (返回 0),
+    必须 OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ) 真实句柄。
+    """
     try:
         import ctypes
 
@@ -64,11 +68,19 @@ def _rss_gb() -> float:
                         ("PagefileUsage", ctypes.c_size_t),
                         ("PeakPagefileUsage", ctypes.c_size_t)]
 
-        pmc = _PMC()
-        pmc.cb = ctypes.sizeof(pmc)
-        h = ctypes.windll.kernel32.GetCurrentProcess()
-        ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb)
-        return pmc.WorkingSetSize / 1024 ** 3
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x0410, False, os.getpid())  # QUERY_INFO|VM_READ
+        if not h:
+            return -1.0
+        try:
+            pmc = _PMC()
+            pmc.cb = ctypes.sizeof(pmc)
+            if not ctypes.windll.psapi.GetProcessMemoryInfo(
+                    h, ctypes.byref(pmc), pmc.cb):
+                return -1.0
+            return pmc.WorkingSetSize / 1024 ** 3
+        finally:
+            k32.CloseHandle(h)
     except Exception:
         return -1.0
 

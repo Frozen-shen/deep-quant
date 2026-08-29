@@ -471,7 +471,10 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
             lot_size=config["execution"].get("lot_size", 100),
             slippage_bps=config["execution"].get("slippage_bps", 30),
             turnover_limit_pct=config["execution"].get("turnover_limit_pct", 0.5),
-            max_single_pct=config["execution"].get("max_single_pct", 0.25),
+            # 与回测同源 (portfolio_constraints, v27 定稿 20%); execution
+            # 段的旧键已废弃 (2026-08-29 审计: 0.25 与回测约束不一致)
+            max_single_pct=(config.get("portfolio_constraints") or {}).get(
+                "max_single_pct", 0.20),
             minute_mode=config["execution"].get("minute_mode", False),
             execution_algo=config["execution"].get("execution_algo", "vwap"),
             twap_slices=config["execution"].get("twap_slices", 8),
