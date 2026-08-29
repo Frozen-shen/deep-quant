@@ -5,6 +5,7 @@ sys.path.insert(0, BASE)
 sys.path.insert(0, os.path.join(BASE, "scripts", "active"))
 import pandas as pd
 import numpy as np
+import pytest
 
 
 def _mk_symbol(sym, quarters, eps, announce_days, start="2020-03-31"):
@@ -122,6 +123,55 @@ def test_industry_momentum_panel(monkeypatch):
     # 无映射 → NaN: 列存在且全 NaN (契约)
     assert "999999" in panel.columns
     assert panel["999999"].isna().all()
+
+
+def test_industry_mom_broadcast_matches_panel():
+    """实盘广播值 = 全历史面板最后一行逐值一致 (rolling(60) 只依赖过去观测)。"""
+    import earnings_surprise as es
+    cal = pd.date_range("2024-01-01", periods=120, freq="B")
+    def mk(series):
+        return pd.DataFrame({"date": cal, "close": series})
+    all_data = {
+        "000001": mk(np.linspace(10, 10 * 1.01 ** 119, 120)),
+        "000002": mk(np.linspace(10, 10 * 1.005 ** 119, 120)),
+        "600000": mk(np.linspace(10, 10 * 0.99 ** 119, 120)),
+        "600001": mk(np.linspace(10, 10 * 0.995 ** 119, 120)),
+        "600002": mk(np.linspace(10, 10 * 1.002 ** 119, 120)),
+    }
+    ind_map = {"000001": "A", "000002": "A", "600000": "B", "600001": "B",
+               "600002": "C"}
+    bcast = es.industry_mom_broadcast_at(all_data, ind_map, cal[-1])
+    panel = es.industry_momentum_panel(
+        sorted(all_data), all_data, ind_map, list(cal))
+    last = panel.iloc[-1].dropna()
+    assert set(bcast) == set(last.index)
+    for s in bcast:
+        assert bcast[s] == pytest.approx(float(last[s]), abs=1e-6)
+
+
+def test_apply_industry_lambda_math_matches_backtest_inline():
+    """apply_industry_lambda == score_stocks L1481-1486 内联数学 (含 NaN→0)。"""
+    import earnings_surprise as es
+    rng = np.random.RandomState(7)
+    universe = [f"{i:06d}" for i in range(50)]
+    scores = {s: float(v) for s, v in zip(universe, rng.randn(50))}
+    vals = rng.randn(50)
+    vals[3] = np.nan  # 无行业映射个股
+    bcast_full = pd.Series(vals, index=universe).dropna().to_dict()
+    out = es.apply_industry_lambda(scores, bcast_full, lam=0.10)
+    # 回测内联: i_vals = bcast.reindex(cross.index); nanmean/nanstd(ddof=0);
+    # nan→加0
+    i_vals = np.array([bcast_full.get(s, np.nan) for s in universe])
+    mu, sd = np.nanmean(i_vals), np.nanstd(i_vals)
+    expected = {s: scores[s] + 0.10 * (0.0 if np.isnan(v) else (v - mu) / sd)
+                for s, v in zip(universe, i_vals)}
+    for s in universe:
+        assert out[s] == pytest.approx(expected[s], abs=1e-12)
+    # 降级: λ=0 / 空广播 / 常数广播(sd=0) → 原样
+    assert es.apply_industry_lambda(scores, bcast_full, 0.0) == scores
+    assert es.apply_industry_lambda(scores, {}, 0.10) == scores
+    flat = {s: 1.0 for s in universe}
+    assert es.apply_industry_lambda(scores, flat, 0.10) == scores
 
 
 def test_merge_surprise_panels_counts(monkeypatch):

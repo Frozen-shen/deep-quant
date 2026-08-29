@@ -193,3 +193,88 @@ def industry_momentum_panel(symbols: list, all_data: dict,
         if ind in z.columns:
             out[s] = z[ind].astype(np.float32)
     return out
+
+
+_industry_map_cache: dict | None = None
+
+
+def load_industry_map() -> dict:
+    """行业映射 {6位代码: industry} (data_store/aux_industry 快照)。
+
+    与回测 _load_industry_map 同一数据源与键规范 (去 sh/sz 前缀);
+    缺失/损坏 → {} (调用方降级)。模块级缓存。"""
+    global _industry_map_cache
+    if _industry_map_cache is not None:
+        return _industry_map_cache
+    path = os.path.join(BASE_DIR, "data_store", "aux_industry",
+                        "industry_map.parquet")
+    if not os.path.exists(path):
+        _industry_map_cache = {}
+        return _industry_map_cache
+    try:
+        df = pd.read_parquet(path)
+        codes = (df["code"].astype(str)
+                 .str.replace("sh", "", regex=False)
+                 .str.replace("sz", "", regex=False))
+        _industry_map_cache = dict(zip(codes, df["industry"].astype(str)))
+    except Exception:
+        _industry_map_cache = {}
+    return _industry_map_cache
+
+
+def industry_mom_broadcast_at(all_data: dict, industry_map: dict,
+                              as_of, lookback: int = 60) -> dict:
+    """as_of 日各股行业动量广播值 (= industry_momentum_panel 最后一行)。
+
+    与全历史面板逐值一致: rolling(lookback).sum 只依赖过去 lookback 个观测,
+    取 as_of 前 ~90 个交易日窗口时, 窗口首行 pct_change 的截断伪影落在
+    60 日求和窗之外。NaN (无映射/缺数据) 不入结果, 调用方按"不加分"处理
+    (与回测 score_stocks 行业通道 nan→0 等价)。
+    """
+    cutoff = pd.Timestamp(as_of) - pd.Timedelta(days=150)
+    win = {}
+    for s, df in all_data.items():
+        try:
+            d = pd.to_datetime(df["date"])
+        except Exception:
+            continue
+        sub = df[d >= cutoff]
+        if len(sub) >= 2:
+            win[s] = sub
+    if not win:
+        return {}
+    cal = sorted({d.date() for sub in win.values()
+                  for d in pd.to_datetime(sub["date"])})
+    if not cal:
+        return {}
+    panel = industry_momentum_panel(list(win), win, industry_map, cal,
+                                    lookback=lookback)
+    if panel.empty:
+        return {}
+    return panel.iloc[-1].dropna().to_dict()
+
+
+def apply_industry_lambda(scores: dict, bcast: dict, lam: float) -> dict:
+    """composite += λ × 截面z(行业动量广播值)。返回新 dict, 不改入参。
+
+    与回测 score_stocks 行业通道数学一致 (run_walkforward_backtest.py
+    L1477-1486): z 在打分域上取 nanmean/nanstd (ddof=0), 无值个股加 0,
+    sd≤1e-9 / 有效值<2 时原样返回 (降级不阻断信号)。
+    实盘 universe 是当日可评分股, 回测是 cross.index — 各自当日截面,
+    机制一致即为 parity 的合理定义。
+    """
+    import math
+    if lam <= 0 or not bcast or not scores:
+        return dict(scores)
+    vals = [bcast[s] for s in scores if s in bcast and bcast[s] == bcast[s]]
+    if len(vals) < 2:
+        return dict(scores)
+    mu = sum(vals) / len(vals)
+    var = sum((v - mu) ** 2 for v in vals) / len(vals)
+    sd = math.sqrt(var)
+    if sd <= 1e-9:
+        return dict(scores)
+    return {s: v + (lam * (bcast[s] - mu) / sd
+                    if bcast.get(s) is not None and bcast[s] == bcast[s]
+                    else 0.0)
+            for s, v in scores.items()}
