@@ -355,6 +355,29 @@ def split_sleeve_factors(factor_names: list, styles_cfg: dict):
     return core, sleeves
 
 
+def fold_extra_factor_names(styles_cfg: dict) -> set:
+    """fold 模式下需额外并入 factor_names 的因子名集合 (styles 段驱动)。
+
+    - enabled: 并入全部 sleeve 因子 (precompute 对该列无数据自动跳过,
+      面板由 merge_surprise_panels 补)
+    - industry_lambda>0: 并入 ind_mom_60 —— 独立于 sleeve 开关。
+      行业 λ 是叠加通道而非 sleeve 分池, Y 实验要求 "v27 基线
+      (styles.enabled=false) + 行业通道" 的单变量归因, 禁用时仍须生效。
+    """
+    styles_cfg = styles_cfg or {}
+    extra = set()
+    if styles_cfg.get("enabled"):
+        for scfg in (styles_cfg.get("sleeves") or {}).values():
+            extra |= set(scfg.get("factors") or [])
+    try:
+        lam = float(styles_cfg.get("industry_lambda", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        lam = 0.0
+    if lam > 0:
+        extra.add("ind_mom_60")
+    return extra
+
+
 def parse_budget_combos(s: str) -> list:
     """'0.25/0.15,0.2/0.2' → [[('momentum',0.25),('growth',0.15)], ...]"""
     combos = []
@@ -2640,13 +2663,8 @@ def main():
         # 预期差/行业动量因子 (2026-08-17): 不在 FactorScorer 预设中, styles
         # 启用时并入 factor_names (precompute 对该列无数据跳过, 面板由
         # merge_surprise_panels 补; ind_mom_60 仅行业 λ>0 时并入)
-        _styles_cfg = config.get("styles") or {}
-        if _styles_cfg.get("enabled"):
-            _extra = set()
-            for _scfg in (_styles_cfg.get("sleeves") or {}).values():
-                _extra |= set(_scfg.get("factors") or [])
-            if float(_styles_cfg.get("industry_lambda", 0.0)) > 0:
-                _extra.add("ind_mom_60")
+        _extra = fold_extra_factor_names(config.get("styles") or {})
+        if _extra:
             factor_names = sorted(set(factor_names) | _extra)
     else:
         factor_names = sorted(FactorScorer.from_preset("full_auto").factor_weights.keys())
