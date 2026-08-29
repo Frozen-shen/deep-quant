@@ -851,5 +851,94 @@
       }
     ],
     "weeks_decaying": 1
+  },
+  {
+    "timestamp": "2026-08-20T16:57:38.080426",
+    "lookback_days": 60,
+    "top_factors": [
+      {
+        "factor": "turnover_vol",
+        "n_days": 13,
+        "ic_mean": -0.090608,
+        "ic_std": 0.042296,
+        "icir": -2.1422,
+        "pos_ratio": 0.0769
+      },
+      {
+        "factor": "ma_bullish",
+        "n_days": 13,
+        "ic_mean": -0.182553,
+        "ic_std": 0.184011,
+        "icir": -0.9921,
+        "pos_ratio": 0.1538
+      },
+      {
+        "factor": "sharpe_20d",
+        "n_days": 13,
+        "ic_mean": 0.249081,
+        "ic_std": 0.261429,
+        "icir": 0.9528,
+        "pos_ratio": 0.6923
+      },
+      {
+        "factor": "vol_price_sync",
+        "n_days": 13,
+        "ic_mean": -0.09856,
+        "ic_std": 0.116672,
+        "icir": -0.8448,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "turnover_trend",
+        "n_days": 13,
+        "ic_mean": -0.065551,
+        "ic_std": 0.082454,
+        "icir": -0.795,
+        "pos_ratio": 0.1538
+      },
+      {
+        "factor": "return_30d",
+        "n_days": 13,
+        "ic_mean": 0.196168,
+        "ic_std": 0.24931,
+        "icir": 0.7868,
+        "pos_ratio": 0.6923
+      },
+      {
+        "factor": "volatility_20d",
+        "n_days": 13,
+        "ic_mean": -0.273497,
+        "ic_std": 0.354757,
+        "icir": -0.7709,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "volatility_10d",
+        "n_days": 13,
+        "ic_mean": -0.253655,
+        "ic_std": 0.329256,
+        "icir": -0.7704,
+        "pos_ratio": 0.2308
+      },
+      {
+        "factor": "ma5_ma30_spread",
+        "n_days": 13,
+        "ic_mean": -0.189999,
+        "ic_std": 0.248095,
+        "icir": -0.7658,
+        "pos_ratio": 0.3846
+      },
+      {
+        "factor": "liq_ratio",
+        "n_days": 13,
+        "ic_mean": -0.13078,
+        "ic_std": 0.172097,
+        "icir": -0.7599,
+        "pos_ratio": 0.3846
+      }
+    ],
+    "decay_warning": false,
+    "decayed_factors": [],
+    "weeks_decaying": 0
   }
 ]

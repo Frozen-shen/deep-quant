@@ -34,14 +34,43 @@ import os
 import sys
 import json
 import time
+import gc
 import argparse
 import warnings
+import faulthandler
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+faulthandler.enable()  # 段错误/OOM 时打印 Python 栈到 stderr
+
+
+def _rss_gb() -> float:
+    """当前进程工作集内存 (GB); Windows 用 ctypes, 失败返回 -1。"""
+    try:
+        import ctypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [("cb", ctypes.c_ulong),
+                        ("PageFaultCount", ctypes.c_ulong),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        pmc = _PMC()
+        pmc.cb = ctypes.sizeof(pmc)
+        h = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb)
+        return pmc.WorkingSetSize / 1024 ** 3
+    except Exception:
+        return -1.0
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, BASE_DIR)
@@ -324,6 +353,29 @@ def split_sleeve_factors(factor_names: list, styles_cfg: dict):
         sleeve_set.update(fs)
     core = [f for f in factor_names if f not in sleeve_set]
     return core, sleeves
+
+
+def fold_extra_factor_names(styles_cfg: dict) -> set:
+    """fold 模式下需额外并入 factor_names 的因子名集合 (styles 段驱动)。
+
+    - enabled: 并入全部 sleeve 因子 (precompute 对该列无数据自动跳过,
+      面板由 merge_surprise_panels 补)
+    - industry_lambda>0: 并入 ind_mom_60 —— 独立于 sleeve 开关。
+      行业 λ 是叠加通道而非 sleeve 分池, Y 实验要求 "v27 基线
+      (styles.enabled=false) + 行业通道" 的单变量归因, 禁用时仍须生效。
+    """
+    styles_cfg = styles_cfg or {}
+    extra = set()
+    if styles_cfg.get("enabled"):
+        for scfg in (styles_cfg.get("sleeves") or {}).values():
+            extra |= set(scfg.get("factors") or [])
+    try:
+        lam = float(styles_cfg.get("industry_lambda", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        lam = 0.0
+    if lam > 0:
+        extra.add("ind_mom_60")
+    return extra
 
 
 def parse_budget_combos(s: str) -> list:
@@ -926,6 +978,40 @@ def _merge_aux_panels(panels: dict, factor_names: list,
     return n_merged
 
 
+SURPRISE_FACTORS = ("sue_std", "earn_accel", "pead_20d", "ind_mom_60")
+
+
+def merge_surprise_panels(panels: dict, factor_names: list,
+                          idx: pd.DatetimeIndex, symbols: list,
+                          all_data: dict, industry_map: dict) -> int:
+    """预期差/行业动量因子面板合并 (2026-08-17, PIT-safe)。
+
+    sue_std/earn_accel 来自季度财报 (公告日生效), pead_20d 事件驱动,
+    ind_mom_60 来自日线行业动量。仅合并 factor_names 中含有的因子。
+    """
+    from earnings_surprise import (sue_panel, earn_accel_panel, pead_panel,
+                                   industry_momentum_panel)
+    cal = list(idx)
+    want = [f for f in SURPRISE_FACTORS if f in factor_names]
+    if not want:
+        return 0
+    n = 0
+    if "sue_std" in want:
+        panels["sue_std"] = sue_panel(symbols, cal).reindex(index=idx, columns=symbols)
+        n += 1
+    if "earn_accel" in want:
+        panels["earn_accel"] = earn_accel_panel(symbols, cal).reindex(index=idx, columns=symbols)
+        n += 1
+    if "pead_20d" in want:
+        panels["pead_20d"] = pead_panel(symbols, all_data, cal).reindex(index=idx, columns=symbols)
+        n += 1
+    if "ind_mom_60" in want:
+        panels["ind_mom_60"] = industry_momentum_panel(
+            symbols, all_data, industry_map, cal).reindex(index=idx, columns=symbols)
+        n += 1
+    return n
+
+
 def _merge_minute_panels(panels: dict, all_data: dict,
                          factor_names: list, idx: pd.DatetimeIndex,
                          lookback: int = 20) -> int:
@@ -1040,6 +1126,8 @@ def validate_minute_factors(factor_panels: dict, close_panel: pd.DataFrame,
     minute_names = [fn for fn in factor_names if fn in MINUTE_FACTOR_NAMES]
     if not minute_names or not train_folds:
         return {}
+    log.info("  [probe] validate: %d 分钟因子, folds=%s",
+             len(minute_names), train_folds)
 
     # 对每个 fold 训练期计算 ICIR
     fold_icirs = {fn: [] for fn in minute_names}
@@ -1210,10 +1298,15 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
     offsets = list(range(start_idx, end_idx + 1, IC_STEP))
     if not offsets:
         return {}, {}
+    available = [fn for fn in factor_names if fn in factor_panels]
+    log.info("  [probe] ICIR 估计: %s 模式, %d obs × %d 因子 (%s ~ %s)",
+             "fixed" if (train_start and train_end) else "rolling",
+             len(offsets), len(available),
+             calendar[start_idx].date() if start_idx < len(calendar) else "?",
+             calendar[end_idx].date() if end_idx < len(calendar) else "?")
 
     close_vals = close_panel.to_numpy()
     n_dates = len(calendar)
-    available = [fn for fn in factor_names if fn in factor_panels]
     # 预取每个观测日的因子截面矩阵 (n_stocks, n_factors)
     matrices = []
     labels = []
@@ -1309,7 +1402,8 @@ def _weighted_z_composite(cross: pd.DataFrame, weights: dict) -> np.ndarray:
 def score_stocks(factor_panels: dict, weights: dict, t_date,
                  sleeve_weights: list | None = None,
                  minute_weights: dict | None = None,
-                 minute_lambda: float = 0.3) -> dict:
+                 minute_lambda: float = 0.3,
+                 industry_lambda: float = 0.0) -> dict:
     """ICIR 加权 z-score 打分, 支持多 sleeve 预算混合 (2026-08-16)。
 
     sleeve_weights: [{"name","weights","budget"}, ...]
@@ -1379,6 +1473,17 @@ def score_stocks(factor_panels: dict, weights: dict, t_date,
                 m_comp = _weighted_z_composite(m_cross, minute_weights)
                 m_comp = np.nan_to_num(m_comp, nan=0.0)
                 composite = composite + minute_lambda * m_comp
+
+    # ── 行业动量叠加 (2026-08-17): composite += λ × ind_mom_60 通道分 ──
+    if industry_lambda > 0:
+        ip = factor_panels.get("ind_mom_60")
+        if ip is not None and t_date in ip.index:
+            i_vals = ip.loc[t_date].reindex(cross.index).to_numpy(dtype=np.float64)
+            mu_i = np.nanmean(i_vals)
+            sd_i = np.nanstd(i_vals)
+            if sd_i > 1e-9:
+                z_i = np.where(~np.isnan(i_vals), (i_vals - mu_i) / sd_i, 0.0)
+                composite = composite + industry_lambda * z_i
 
     return {s: float(v) for s, v in zip(cross.index, composite)
             if not np.isnan(v)}
@@ -1524,7 +1629,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
                  weight_mode: str = "equal",
                  pool_filter_cfg: dict | None = None,
                  vol_target_cfg: dict | None = None,
-                 trend_timing_cfg: dict | None = None):
+                 trend_timing_cfg: dict | None = None,
+                 industry_lambda: float = 0.0):
     """回测主循环。
 
     fixed_weights: 若提供, 全程使用该固定权重 (方案C fold 验证期模式,
@@ -1538,6 +1644,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
       与 fixed_weights 配套 (fold 模式), None=单通道 (v27 行为)。
     minute_weights: 方案B 分钟叠加层权重 {min_factor: icir}, None=不叠加。
     minute_lambda: 叠加权重 λ (综合分 = 主分 + λ×分钟分)。
+    industry_lambda: 行业动量叠加 λ (2026-08-17; 综合分 += λ×ind_mom_60 通道分,
+      0=关闭)。
     pool_filter_cfg: 股票池分域配置 (config.yaml pool_filter 段,
       含 enabled/low_vol_mult/high_vol_mult/low_vol_up/high_vol_up)。
       None 或 enabled=false 时行为与 v9 完全一致 (不施加任何乘数)。
@@ -1693,7 +1801,8 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
             scores = score_stocks(factor_panels, weights, today,
                                   sleeve_weights=sleeve_weights,
                                   minute_weights=minute_weights,
-                                  minute_lambda=minute_lambda)
+                                  minute_lambda=minute_lambda,
+                                  industry_lambda=industry_lambda)
 
             # ★ 股票池分域 (v10): 波动率分层 × regime 乘数 (选股层软偏好)。
             # 乘数表与 vol_pct 严格对应: >0.70 高波动市场 → 避险表 (低波加分),
@@ -2034,7 +2143,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       pool_filter_cfg: dict | None = None,
                       vol_target_cfg: dict | None = None,
                       trend_timing_cfg: dict | None = None,
-                      styles_cfg: dict | None = None) -> dict:
+                      styles_cfg: dict | None = None,
+                      industry_lambda: float = 0.0) -> dict:
     """
     方案C核心: 5-fold Walk-Forward。
 
@@ -2048,6 +2158,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
 
     minute_layer: 方案B 分钟叠加配置 {enabled, weights, lambda},
       仅 fold 4-5 验证期 (有分钟数据) 生效, fold 1-3 传 None。
+    industry_lambda: 行业动量叠加 λ (2026-08-17), 透传 run_backtest。
     """
     log.info("=" * 60)
     log.info("  方案C Walk-Forward: %d folds (训练扩展, 验证固定权重)",
@@ -2171,7 +2282,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                          weight_mode=weight_mode,
                          pool_filter_cfg=pool_filter_cfg,
                          vol_target_cfg=vol_target_cfg,
-                         trend_timing_cfg=trend_timing_cfg)
+                         trend_timing_cfg=trend_timing_cfg,
+                         industry_lambda=industry_lambda)
         if r:
             fold_results[f"fold_{fi+1}"] = {
                 "train": f"{ts} ~ {te}",
@@ -2232,7 +2344,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                   weight_mode: str = "equal",
                   pool_filter_cfg: dict | None = None,
                   vol_target_cfg: dict | None = None,
-                  trend_timing_cfg: dict | None = None) -> dict | None:
+                  trend_timing_cfg: dict | None = None,
+                  industry_lambda: float = 0.0) -> dict | None:
     """
     终极 Holdout: 用稳定因子的中位数 ICIR 权重, 在 TEST 期一次性回测。
 
@@ -2289,7 +2402,8 @@ def run_fold_test(all_data, factor_panels, close_panel, calendar, cal_idx,
                         weight_mode=weight_mode,
                         pool_filter_cfg=pool_filter_cfg,
                         vol_target_cfg=vol_target_cfg,
-                        trend_timing_cfg=trend_timing_cfg)
+                        trend_timing_cfg=trend_timing_cfg,
+                        industry_lambda=industry_lambda)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2546,6 +2660,12 @@ def main():
             # 手动并入 factor_names — 无数据期的 fold 由 IC 截面检查自动跳过
             from minute_factors import get_minute_factor_names
             factor_names = sorted(set(factor_names) | set(get_minute_factor_names()))
+        # 预期差/行业动量因子 (2026-08-17): 不在 FactorScorer 预设中, styles
+        # 启用时并入 factor_names (precompute 对该列无数据跳过, 面板由
+        # merge_surprise_panels 补; ind_mom_60 仅行业 λ>0 时并入)
+        _extra = fold_extra_factor_names(config.get("styles") or {})
+        if _extra:
+            factor_names = sorted(set(factor_names) | _extra)
     else:
         factor_names = sorted(FactorScorer.from_preset("full_auto").factor_weights.keys())
 
@@ -2601,11 +2721,22 @@ def main():
         neutralize_enabled=neutralize_enabled,
         neutralize_k=neutralize_k,
         industry_map=_load_industry_map() if industry_neutral else None)
+    # 预期差/行业动量面板合并 (2026-08-17; 无对应因子时不产生任何面板)
+    log.info("  [mem] merge 前 RSS=%.1f GB", _rss_gb())
+    _n_surprise = merge_surprise_panels(
+        factor_panels, factor_names, pd.DatetimeIndex(needed_dates),
+        sorted(all_data.keys()), all_data, _load_industry_map())
+    if _n_surprise:
+        log.info("  预期差/行业面板: %d 个 (sue/accel/pead/ind)", _n_surprise)
+    gc.collect()
+    log.info("  [mem] merge 后 RSS=%.1f GB", _rss_gb())
     log.info("  面板就绪: %d 因子", len(factor_panels))
 
     # ── 5. 回测 (带日期守卫) ──
     results = {}
     extra_meta = {}
+    log.info("  [probe] 进入回测守卫块")
+    log.info("  [mem] 守卫块前 RSS=%.1f GB", _rss_gb())
     with DateRangeGuard(config, script_name="run_walkforward_backtest") as guard:
         if args.folds:
             # 方案C: 5-fold 分析 + 终极 TEST
@@ -2629,10 +2760,14 @@ def main():
                     ("2022-01-01", "2023-12-31"),
                     ("2022-01-01", "2024-12-31"),
                 ]
+                log.info("  [probe] 分钟验证开始 (enabled=%s)", ml_cfg.get("enabled"))
+                log.info("  [mem] 分钟验证前 RSS=%.1f GB", _rss_gb())
                 ml_weights = validate_minute_factors(
                     factor_panels, close_panel, calendar, cal_idx,
                     factor_names, train_folds,
                     min_icir=float(ml_cfg.get("min_icir", 0.3)))
+                log.info("  [probe] 分钟验证结束: %d 因子通过",
+                         len(ml_weights or {}))
             minute_layer = {
                 "enabled": ml_cfg.get("enabled", True),
                 "weights": ml_weights,
@@ -2660,13 +2795,16 @@ def main():
                 pool_filter_cfg=config.get("pool_filter"),
                 vol_target_cfg=config.get("vol_target"),
                 trend_timing_cfg=config.get("trend_timing"),
-                styles_cfg=styles_cfg)
+                styles_cfg=styles_cfg,
+                industry_lambda=float((config.get("styles") or {}).get("industry_lambda", 0.0)))
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
             extra_meta["stable_factors"] = fold_out["stable_factors"]
             extra_meta["stable_factor_icir_median"] = (
                 fold_out["stable_factor_icir_median"])
+            if styles_cfg and fold_out.get("sleeve_median_weights"):
+                extra_meta["sleeve_median_weights"] = fold_out["sleeve_median_weights"]
             r = None
             if not args.folds_only:
                 # ★ TEST② 数据完备性守卫: test_end 超过数据日历末端时拒绝
@@ -2692,7 +2830,8 @@ def main():
                     weight_mode=str(config.get("portfolio_optimizer", "equal")),
                     pool_filter_cfg=config.get("pool_filter"),
                     vol_target_cfg=config.get("vol_target"),
-                    trend_timing_cfg=config.get("trend_timing"))
+                    trend_timing_cfg=config.get("trend_timing"),
+                    industry_lambda=float((config.get("styles") or {}).get("industry_lambda", 0.0)))
             if r:
                 results["test"] = r
                 # 终极 TEST 锁 (只跑一次纪律)
@@ -2729,7 +2868,8 @@ def main():
                     pool_filter_cfg=config.get("pool_filter"),
                     vol_target_cfg=config.get("vol_target"),
                     weight_mode=str(config.get("portfolio_optimizer", "equal")),
-                    trend_timing_cfg=config.get("trend_timing"))
+                    trend_timing_cfg=config.get("trend_timing"),
+                    industry_lambda=float((config.get("styles") or {}).get("industry_lambda", 0.0)))
                 if ev_r:
                     results["extend_val"] = ev_r
                     extra_meta["extend_val"] = {

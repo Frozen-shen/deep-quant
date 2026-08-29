@@ -415,6 +415,31 @@ def generate_signal_v3(date_str: str = None, dry_run: bool = False):
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # ── 4b. 行业动量叠加通道 (v28, 回测已验证): composite += λ×截面z(ind_mom_60)
+    #     与回测 score_stocks 行业通道同一数学 (apply_industry_lambda),
+    #     广播值取 industry_mom_broadcast_at (与 industry_momentum_panel 逐值一致)。
+    #     失败降级为核心分 (WARN), 不阻断信号 — 与分钟/基本面加载同风格。
+    try:
+        _lam = float(((config.get("styles") or {}).get("industry_lambda")) or 0.0)
+    except (TypeError, ValueError):
+        _lam = 0.0
+    if _lam > 0:
+        try:
+            from earnings_surprise import (load_industry_map,
+                                           industry_mom_broadcast_at,
+                                           apply_industry_lambda)
+            _imap = load_industry_map()
+            if _imap:
+                _bcast = industry_mom_broadcast_at(all_data, _imap, today)
+                _n_before = len(scores)
+                scores = apply_industry_lambda(scores, _bcast, _lam)
+                _hit = sum(1 for s in scores if s in _bcast)
+                print(f"  行业λ通道: λ={_lam:.2f} 覆盖 {_hit}/{_n_before} 只", flush=True)
+            else:
+                print("  [WARN] 行业映射缺失, 信号为核心分 (无行业λ叠加)", flush=True)
+        except Exception as e:
+            print(f"  [WARN] 行业λ通道失败, 信号为核心分: {e}", flush=True)
+
     top_k = config["execution"].get("top_k", 30)
     n_drop = config["portfolio"].get("n_drop", 2)
     hold_thresh = config["portfolio"].get("hold_thresh", 30)

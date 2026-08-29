@@ -214,3 +214,42 @@ def test_load_styles_config_extra_budget_key_counted():
     cfg["styles"]["budgets"] = {"momentum": 0.8, "growth": 0.1, "value": 0.3}
     with pytest.raises(ValueError):
         load_styles_config(cfg)
+
+
+# ── fold_extra_factor_names (2026-08-29 Y 实验修复) ──
+
+def test_fold_extra_names_disabled_lambda_zero_empty():
+    from run_walkforward_backtest import fold_extra_factor_names
+    assert fold_extra_factor_names({}) == set()
+    assert fold_extra_factor_names(None) == set()
+    assert fold_extra_factor_names(
+        {"enabled": False, "industry_lambda": 0.0}) == set()
+
+
+def test_fold_extra_names_disabled_lambda_positive_adds_ind_mom():
+    # Y 实验核心语义: styles 禁用 + λ>0 时 ind_mom_60 仍须并入
+    # (否则 run_backtest 拿 λ 找不到面板, 行业通道静默失效)
+    from run_walkforward_backtest import fold_extra_factor_names
+    assert fold_extra_factor_names(
+        {"enabled": False, "industry_lambda": 0.10}) == {"ind_mom_60"}
+
+
+def test_fold_extra_names_enabled_includes_sleeve_factors():
+    from run_walkforward_backtest import fold_extra_factor_names
+    extra = fold_extra_factor_names(_base_styles()["styles"])
+    assert extra == {"mom_60d", "return_30d", "fund_profit_growth"}
+
+
+def test_fold_extra_names_enabled_with_lambda():
+    from run_walkforward_backtest import fold_extra_factor_names
+    cfg = _base_styles()["styles"]
+    cfg["industry_lambda"] = 0.1
+    extra = fold_extra_factor_names(cfg)
+    assert "ind_mom_60" in extra
+    assert "mom_60d" in extra
+
+
+def test_fold_extra_names_bad_lambda_treated_as_zero():
+    from run_walkforward_backtest import fold_extra_factor_names
+    assert fold_extra_factor_names(
+        {"enabled": False, "industry_lambda": "abc"}) == set()
