@@ -2089,14 +2089,22 @@ def run_backtest(all_data, factor_panels, close_panel, calendar, cal_idx,
 # ═══════════════════════════════════════════════════════════
 
 # Fold 划分 (方案C): 训练期逐年扩展, 验证期固定1年
+# 2026-08-29 扩展: fold_6/7 把 OOS 级联推进到 2026H1 (每折权重只出自
+# 自身训练窗, 验证窗与后续折不重叠)。注意: fold_6/7 的**验证窗数据**
+# 从未参与选型 (hits/中位数只统计 fold_1~5), 但 fold_7 的**训练窗**含
+# 2025 → 其权重对 fold_6 的成绩有间接选择暴露; 定稿选型证据仍以 fold_1~5
+# + extend 为准, fold_6/7 是级联体检而非裁判。
 FOLDS = [
     {"train": ("2015-01-01", "2019-12-31"), "val": ("2020-01-01", "2020-12-31")},
     {"train": ("2015-01-01", "2020-12-31"), "val": ("2021-01-01", "2021-12-31")},
     {"train": ("2015-01-01", "2021-12-31"), "val": ("2022-01-01", "2022-12-31")},
     {"train": ("2015-01-01", "2022-12-31"), "val": ("2023-01-01", "2023-12-31")},
     {"train": ("2015-01-01", "2023-12-31"), "val": ("2024-01-01", "2024-12-31")},
+    {"train": ("2015-01-01", "2024-12-31"), "val": ("2025-01-01", "2025-12-31")},
+    {"train": ("2015-01-01", "2025-12-31"), "val": ("2026-01-01", "2026-06-30")},
 ]
-FOLD_MIN_HITS = 3          # 因子须在 >=3/5 folds 中 |ICIR| 达标才保留
+FOLD_CORE_N = 5            # 参与稳定因子选型的核心折 (训练窗止于 2023)
+FOLD_MIN_HITS = 3          # 因子须在核心折 >=3/5 中 |ICIR| 达标才保留
 FOLD_ICIR_MIN = 0.05       # fold 内 |ICIR| 入选阈值 (滚动模式下仅作下限)
 FOLD_T_STAT_MIN = 1.645    # 统计显著标准: |ICIR|*sqrt(n_obs) >= 1.645 (单尾5%)
 FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合); 可由 config fold.max_factors 覆盖
@@ -2158,7 +2166,7 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       styles_cfg: dict | None = None,
                       industry_lambda: float = 0.0) -> dict:
     """
-    方案C核心: 5-fold Walk-Forward。
+    方案C核心: Walk-Forward 级联 (7 折 = 5 核心选型折 + 2 级联体检折)。
 
     每个 fold:
       1. 训练期 [train] 用固定窗口计算全部因子 ICIR
@@ -2169,24 +2177,27 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
       - 各 fold 验证期成绩汇总 → OOS 年化超额均值/IR
 
     minute_layer: 方案B 分钟叠加配置 {enabled, weights, lambda},
-      仅 fold 4-5 验证期 (有分钟数据) 生效, fold 1-3 传 None。
+      仅 fold 4-7 验证期 (有分钟数据) 生效, fold 1-3 传 None。
     industry_lambda: 行业动量叠加 λ (2026-08-17), 透传 run_backtest。
     """
     log.info("=" * 60)
-    log.info("  方案C Walk-Forward: %d folds (训练扩展, 验证固定权重)",
-             len(FOLDS))
-    log.info("  因子保留标准: |ICIR|>=%.2f 在 >=%d/%d folds 中达标",
-             FOLD_ICIR_MIN, FOLD_MIN_HITS, len(FOLDS))
+    log.info("  方案C Walk-Forward: %d folds (前 %d 核心折选型 + 级联体检折, "
+             "训练扩展/验证固定权重; 验证窗 2020~2026H1 逐年不重叠)",
+             len(FOLDS), FOLD_CORE_N)
+    log.info("  因子保留标准: |ICIR|>=%.2f 在核心折 >=%d/%d 中达标 "
+             "(fold %d~%d 级联折不参与选型)",
+             FOLD_ICIR_MIN, FOLD_MIN_HITS, FOLD_CORE_N,
+             FOLD_CORE_N + 1, len(FOLDS))
     log.info("=" * 60)
 
-    # ── 方案B: 分钟叠加层 (fold 4-5 验证期才有分钟数据) ──
+    # ── 方案B: 分钟叠加层 (fold 4-7 验证期才有分钟数据) ──
     ml_weights = None
     ml_lambda = 0.3
     if minute_layer and minute_layer.get("enabled"):
         ml_weights = minute_layer.get("weights")  # validate_minute_factors 输出
         ml_lambda = float(minute_layer.get("lambda", 0.3))
         if ml_weights:
-            log.info("  分钟叠加层: %d 个因子, λ=%.2f (fold 4-5 验证期)",
+            log.info("  分钟叠加层: %d 个因子, λ=%.2f (fold 4-7 验证期)",
                      len(ml_weights), ml_lambda)
 
     core_names = factor_names
@@ -2252,18 +2263,27 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                  n_sel, len(core_names), FOLD_ICIR_MIN)
 
         # 记录每个因子的 fold 命中 (统计显著标准: |ICIR|*sqrt(n) >= 1.645)
+        # ★ 2026-08-29: hits/中位数只统计核心折 (fi < FOLD_CORE_N=5, 训练窗
+        #   止于 2023)。fold_6/7 是 2025/2026H1 级联体检折——验证权重照常
+        #   由本折训练窗估出, 但其 ICIR 不进选型统计, 保证 stable_factors
+        #   与 median ICIR 权重和 v28 完全一致 (extend/TEST② 语义不变)。
         sig_factors = set()
         for fn in core_names:
             st = ic_stats.get(fn)
             if st is not None:
-                factor_icirs[fn].append(st["icir"])
                 n_obs = st.get("n_obs", 0)
                 t_stat = abs(st["icir"]) * np.sqrt(n_obs) if n_obs > 0 else 0.0
-                if t_stat >= FOLD_T_STAT_MIN and abs(st["icir"]) >= FOLD_ICIR_MIN:
-                    factor_hits[fn] += 1
+                sig = (t_stat >= FOLD_T_STAT_MIN
+                       and abs(st["icir"]) >= FOLD_ICIR_MIN)
+                if fi < FOLD_CORE_N:
+                    factor_icirs[fn].append(st["icir"])
+                    if sig:
+                        factor_hits[fn] += 1
+                if sig:
                     sig_factors.add(fn)
             else:
-                factor_icirs[fn].append(0.0)
+                if fi < FOLD_CORE_N:
+                    factor_icirs[fn].append(0.0)
 
         # 验证期回测权重: 仅统计显著因子 (过滤噪音)
         weights = {fn: w for fn, w in weights.items() if fn in sig_factors}
@@ -2457,7 +2477,7 @@ def main():
     parser.add_argument("--test-only", action="store_true",
                         help="仅跑 TEST")
     parser.add_argument("--folds", action="store_true", default=None,
-                        help="方案C: 5-fold Walk-Forward + 终极 TEST")
+                        help="方案C: Walk-Forward 级联 (核心5折选型+级联折) + 终极 TEST")
     parser.add_argument("--folds-only", action="store_true", default=None,
                         help="仅 5-fold 分析, 不执行终极 TEST (v8 新因子验证用, 不消耗 TEST 锁)")
     parser.add_argument("--force-partial-test", action="store_true",
@@ -2568,7 +2588,10 @@ def main():
     else:
         log.info("  组合约束: 未启用")
 
-    # 终极 TEST 锁 (方案C: 2025-01~2026-06 只跑一次)
+    # 终极 TEST 锁 (TEST②=2026-07~12, 区间见 data_partition.development;
+    # 版本级一次性纪律: 本版本周期内只跑一次, 预注册评估版本=v28;
+    # 段末数据并入 research 后新版本自可复用该段, 详见 AGENTS.md 训练周期协议。
+    # 注: 旧注释写的 "2025-01~2026-06" 是已毕业的 TEST① 区间, 已过时)
     TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock_v5")
     if args.unlock_test and os.path.exists(TEST_LOCK_PATH):
         os.remove(TEST_LOCK_PATH)
@@ -2762,7 +2785,7 @@ def main():
                     factor_panels, sorted(factor_names))
                 log.info("  因子正交化: %d 因子 (Gram-Schmidt, 顺序 %s)",
                          len(factor_panels), sorted(factor_names)[:3])
-            # 方案B: 分钟因子独立验证 (fold 4-5 训练期)
+            # 方案B: 分钟因子独立验证 (fold 4-7 训练期)
             ml_cfg = config.get("minute_layer", {})
             ml_weights = None
             if ml_cfg.get("enabled"):
@@ -2979,9 +3002,9 @@ def main():
                  r["avg_pit_size"], r.get("avg_n_selected_factors", 0))
     if args.folds:
         log.info("  " + "-" * 68)
-        log.info("  稳定因子 %d 个 (≥%d/5 folds, |ICIR|≥%.2f)",
+        log.info("  稳定因子 %d 个 (核心折 ≥%d/%d, |ICIR|≥%.2f)",
                  len(extra_meta.get("stable_factors", [])),
-                 FOLD_MIN_HITS, FOLD_ICIR_MIN)
+                 FOLD_MIN_HITS, FOLD_CORE_N, FOLD_ICIR_MIN)
     log.info("=" * 60)
 
     # ── 实验登记 (2026-08-16): 每次回测自动写入 experiments/ ──

@@ -1,8 +1,7 @@
 # ═══════════════════════════════════════════════════════════
 # quant-starter 统一配置 (v2.0 — 2026-08-01 重构)
 # 唯一配置源。所有代码从此文件读取。
-# 修改前先备份 (config.yaml.bak_*); 每次回测由 experiment_tracker
-# 自动记录全量 config 哈希, 无需手动维护版本号。
+# 修改此文件后必须更新 blind_test.config_hash。
 # ═══════════════════════════════════════════════════════════
 
 # ── 数据分区 v5 (2026-08-09 滚动演进) ──
@@ -11,7 +10,7 @@
 # blind = 2027+ 永不回测; 行业依据: QuantConnect WFO 滚动窗口 + WorldQuant 回测→模拟→实盘
 data_partition:
   research:    {start: "2015-01-01", end: "2026-06-30"}  # 因子开发 + WF folds (含毕业TEST①)
-  development: {start: "2026-07-01", end: "2026-12-31"}  # TEST② (一次性终审; 预注册评估版本=v28)
+  development: {start: "2026-07-01", end: "2026-12-31"}  # TEST② (holdout, 数据积累中, 只跑一次)
   test:        {start: "2026-07-01", end: "2026-12-31"}  # 与 development 同区间 (TEST②)
   blind:       {start: "2027-01-01", end: "2027-12-31"}  # 模拟盘跟踪 (永不回测)
   full_start: "2015-01-01"
@@ -21,7 +20,7 @@ data_partition:
 blind_test:
   locked: false
   contaminated: false
-  note: "blind=2027+, daily_pipeline跟踪; TEST①(2025-01~2026-06)已毕业并入research; TEST②=2026-07~12为版本级一次性终审(预注册=v28, 数据完备后方可开跑); 段末数据并入research后新版本(v29+)自可正常复用该段"
+  note: "v5演进: blind=2027+, daily_pipeline每日跟踪; TEST①(2025-01~2026-06)已毕业; TEST②=2026-07~12只跑一次"
   blind_start: "2027-01-01"
   protocol: "daily_pipeline自动运行, 禁止手动回测, 2028-01-01后评估"
 
@@ -36,14 +35,12 @@ shares_fetch:
 
 # ── 执行参数 ──
 execution:
-  initial_capital: 300000       # 2026-08-15 决策: 10万→30万 (跨最低佣金门槛;
-                                #   当时 top_k=10, 2026-08-16 重决策为 20)
+  initial_capital: 300000       # 2026-08-15 决策: 10万→30万 (top_k=10, 每只3万跨最低佣金门槛)
   lot_size: 100
   top_k: 20                    # 持仓数量 (2026-08-16 敏感性重决策: 10=+2.1%/Sharpe0.46,
                                #   20=+11.4%/0.78最优, 30=+9.4%/0.75; 10 过度集中)
   max_positions: 40            # 最大持仓上限
-  # 单票上限统一走 portfolio_constraints.max_single_pct (20%, v27 定稿);
-  # 原 execution.max_single_pct 已废弃 (2026-08-29 审计: 与回测约束不一致)
+  max_single_pct: 0.25         # 单票仓位上限
   slippage_bps: 30             # 滑点 (小盘股30bp)
   commission_buy: 0.00025      # 买入手续费
   commission_sell: 0.00075     # 卖出手续费 (含印花税)
@@ -52,7 +49,7 @@ execution:
                                #   vwap=次日VWAP(旧) / open=次日开盘(更旧)
   vwap_residual_bps: 10        # VWAP/POV残差滑点 (bps, 拆单无法完美命中均价)
   minute_mode: true            # 模拟盘执行: 用分钟线POV/VWAP/TWAP成交 (2026-08-12启用,
-                               #   MinuteFetcher 已接入 data_store/minute_5m 全历史 5053只)
+                               #   MinuteFetcher 已接入 data_store/minute_5m 全历史 5055只)
   execution_algo: pov          # 分钟执行算法: pov=成交量比例参与(跟随市场节奏, 推荐)
                                #   / vwap=量加权 / twap=时间加权
   twap_slices: 8               # TWAP 拆分段数 (~每30分钟一段, POV下忽略)
@@ -80,7 +77,7 @@ factors:
   use_fundamental: false       # 基本面数据就绪后改为 true
   corr_threshold: 0.6          # 独立性剪枝阈值 (从0.4放宽到0.6)
 
-# ── 分钟因子 (方案C v5, 数据2022起; λ 层独立验证用 fold 4-5, 见 minute_layer) ──
+# ── 分钟因子 (方案C v5, 数据2022起, fold 3-5 可用) ──
 minute_factors:
   enabled: true
   lookback: 20
@@ -104,19 +101,16 @@ backtest:
 # ── Fold 筛选 (方案C) ──
 fold:
   max_factors: 50          # 稳定因子数量上限 (v9实验: 40→50, 2026-08-07)
-  style_cap: 0.4           # 风格预算 (2026-08-16 v27 定稿): 同家族因子|权重|之和上限
+  style_cap: 0.4           # 风格预算 (2026-08-16 v29): 同家族因子|权重|之和上限
 
 # ── 组合层优化 (v9b) ──
 portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v9b实验) / risk_parity=风险平价 (P0)
 
-# ── 多风格 sleeve (2026-08-16 实验段, v28 起休眠; enabled=false 时公式与生产一致) ──
-# 唯一生效的是 industry_lambda 行业通道 (独立于 sleeve 开关)。
-# budgets/sleeves 为 B/X 实验遗留 (B=动量/成长预算 失败, X=预期差换料 失败),
-# 保留备档; 重启实验前请先按当时设计重置。
+# ── 多风格 sleeve (2026-08-16 实验; enabled=false 时与 v27 完全一致) ──
 styles:
   enabled: false
   budgets:                 # 组合分 = (1-Σbudget)×核心 + Σ budget×sleeve分
-    momentum: 0.05
+    momentum: 0.25
     growth: 0.15
   sleeves:
     momentum:              # 5/5 fold 命中但被 top50 截断的动量因子
@@ -131,16 +125,17 @@ styles:
         - mom_60d
         - mom_120d
         - mom_12_1
-    growth:                # X 实验预期差料 (2026-08-17 换料, 已失败, 仅存档)
+    growth:                # 成长 sleeve: 风格预算实验, 不强求 fold 命中
       min_hits: 0
-      fallback_weight: 0.1
+      fallback_weight: 0.1  # fold 中位数 |ICIR|<0.02 时的默认权重 (符号取正, p6 ICIR 均为正)
       factors:
-        - sue_std
-        - earn_accel
-        - pead_20d
+        - fund_profit_growth
+        - fund_profit_growth_ded
+        - fund_revenue_growth
+        - aux_yjkb_profit_growth
         - fund_ocf_ps
         - fund_ocf_yield
-  industry_lambda: 0.10    # 行业动量叠加 λ (v28 生产值; 0=关闭回退 v27)
+        - fund_net_margin
 
 # ── 股票池分域 (v10, 波动率分层×regime乘数, 设计文档 2026-08-09) ──
 pool_filter:
@@ -214,7 +209,7 @@ portfolio_constraints:
 
 # ── 波动率目标仓位 (P0, 2026-08-09) ──
 vol_target:
-  enabled: true          # v28 生产启用; 实验对照时置 false
+  enabled: true          # 实验时置 true
   target_pct: 0.70        # 目标波动率百分位
   max_scale: 1.0          # 满仓上限
   min_scale: 0.40         # 最低仓位
