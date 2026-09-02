@@ -26,6 +26,9 @@ test_wfo_equity.png
 orders.log
 alerts.log
 
+# 调试重定向输出 (tqdm/进度条 stdout 转储) 约定统一写入 logs/ 目录, 不散落仓库根目录
+logs_*.txt
+
 # Paper Trade (runtime data)
 paper_trade_comparison.csv
 paper_trade/

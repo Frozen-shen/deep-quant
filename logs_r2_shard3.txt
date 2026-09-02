@@ -1,9 +1,0 @@
-  [PROXY] baostock 走 SOCKS5 127.0.0.1:7897 (切换节点 = 换出口 IP)
-═══ Baostock 5分钟线拉取 ═══
-  宇宙: 5073 只, 本次: 1269 只 (offset=2538)
-  日期: 2022-01-01 ~ 2026-08-06
-  缓存: C:\Users\Frozen\ZCodeProject\quant-starter\data_store\minute_5m
-  强制: False
-
-login failed!
-登录失败: 黑名单用户，请与管理员联系
