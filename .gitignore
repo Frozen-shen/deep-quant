@@ -10,6 +10,10 @@ venv/
 
 # Database
 *.db
+# 数据库/配置的临时二进制备份不进版本库 (体积持续增长, diff 无意义);
+# 有意保留的实验快照请放 archive/config_snapshots/
+*.db.bak*
+/config.yaml.bak*
 
 # LLM Cache
 .llm_cache/
