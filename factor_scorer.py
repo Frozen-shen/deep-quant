@@ -1,199 +1,34 @@
 """
-多因子打分引擎 — 替代二元 MA 信号
+因子名单容器 — 供下游 IC 加权 / ML 学习真实权重
 
-核心思路:
-  不是: MA金叉? → buy (二元)
-  而是: 动量(+0.3) + 波动(-0.1) + 量价(+0.2) + 趋势(+0.1) = 0.5 → buy (连续打分)
+历史说明:
+  本模块早期内置了一批手工/历史硬编码数值权重预设 (ic_auto / ic_top20 /
+  ic_optimized / ic_optimized_v2 / trend_momentum / mean_reversion / a_share /
+  balanced) 以及配套的加权打分方法 (score / normalize / cross_sectional_score /
+  normalize_cross_sectional)。经全仓库 grep 确认: 所有活跃调用点
+  (decision_engine / model.pipeline / run_walkforward_backtest / run_paper_signal /
+  run_full_ic_validation 等) 只通过 FactorScorer.from_preset(...).factor_weights.keys()
+  取"因子名单", 交由 FactorCache.compute_factors + 下游 IC 加权 / LightGBM 学习真实
+  权重, 从未调用上述加权打分方法, 硬编码数值权重从未生效。故予以删除 (纪律第十条:
+  模块准入 / 防平行代码库)。仅保留权重恒为 1.0 的因子名单容器预设
+  (full_auto / full_auto_v5 / alpha158_full)。
 
 用法:
     from factor_scorer import FactorScorer
-    scorer = FactorScorer.from_preset("trend_momentum")
-    df_signal = scorer.score_and_signal(df)
+    scorer = FactorScorer.from_preset("full_auto")
+    factor_names = sorted(scorer.factor_weights.keys())   # 因子名单
 """
 
 import pandas as pd
-import numpy as np
-from factor_engine import FactorLibrary, parse_factor
+from factor_engine import FactorLibrary
 from factor_library import get_all_factors, FUNDAMENTAL_FACTORS, AUX_FACTORS
 
 
 # ================================================================
-#  预定义因子权重配置
+#  因子名单预设 (权重恒为 1.0, 真实权重由下游 IC/ML 学习)
 # ================================================================
 
-FACTOR_PRESETS = {
-    # 趋势动量型 (适合小米类波段股)
-    "trend_momentum": {
-        "name": "趋势动量",
-        "factors": {
-            # 动量因子 — 正权重: 涨势越好越买
-            "return_5d":    0.15,
-            "return_20d":   0.10,
-            "ma5_ma20_spread": 0.20,
-            "ma10_ma20_spread": 0.10,
-            # 趋势因子
-            "ma5_cross_ma20": 0.15,
-            "ma_bullish":   0.10,
-            # 量价确认
-            "vol_ratio":    0.10,
-            "vol_up_price_up": 0.05,
-            # 风控因子 — 负权重: 波动大减分
-            "volatility_20d": -0.15,
-        },
-        "buy_threshold": 0.15,
-        "sell_threshold": -0.10,
-    },
-
-    # 均值回复型 (适合高波动震荡股)
-    "mean_reversion": {
-        "name": "均值回复",
-        "factors": {
-            "return_5d":   -0.25,  # 涨多了减分
-            "return_20d":  -0.15,  # 涨多了减分
-            "ma5_bias":    -0.10,  # 偏离均线减分
-            "ma20_bias":   -0.10,
-            "volatility_20d": 0.10,  # 波动大反而有机会
-            "position_20d": -0.15,  # 高位减分, 低位加分(取负=低位加分)
-            "vol_ratio":    0.10,
-            "down_streak":  0.05,   # 连续下跌加分(抄底)
-        },
-        "buy_threshold": 0.2,
-        "sell_threshold": -0.1,
-    },
-
-    # A股专属 — 高动量+政策驱动+T+1适应
-    "a_share": {
-        "name": "A股动量",
-        "factors": {
-            # 动量因子 — A股政策驱动,动量效应更强
-            "return_5d":    0.25,
-            "return_20d":   0.20,
-            "return_60d":   0.10,
-            "ma5_ma20_spread":  0.20,
-            "ma10_ma20_spread": 0.10,
-            "ma20_ma60_spread": 0.10,
-            # 趋势确认
-            "ma5_cross_ma20": 0.10,
-            "ma_bullish":   0.10,
-            "ma_bearish":  -0.10,
-            # 量价 — A股量价配合更关键
-            "vol_ratio":    0.15,
-            "vol_up_price_up": 0.10,
-            "vol_up_price_down": -0.10,
-            # 风控 — A股波动大,降低波动惩罚
-            "volatility_20d": -0.05,
-            "position_20d":   0.05,
-        },
-        "buy_threshold": 0.25,    # 比通用低,更容易触发买入
-        "sell_threshold": -0.15,  # 比通用宽松,减少频繁卖出
-    },
-
-    # ★ v5: IC自动权重(带方向, 由run_ic_analysis.py生成)
-    "ic_auto": {
-        "name": "IC自动权重(CSI1000研究期 2018-2022)",
-        "factors": {
-            "turnover_vol": -1.0, "liq_ratio": -0.89, "turnover_trend": -0.781,
-            "volatility_10d": -0.757, "skew_20d": -0.717, "amplitude_5d": -0.713,
-            "volatility_20d": -0.701, "volatility_30d": -0.662, "klen": -0.64,
-            "return_30d": 0.628, "ma20_ma60_spread": -0.586, "momentum_20d": 0.585,
-            "rev_mom_spread": 0.567, "ma5_ma30_spread": -0.54, "sharpe_20d": 0.475,
-            "ma10_ma20_spread": -0.471, "ma5_ma20_spread": -0.456, "ma3_ma20_spread": -0.447,
-            "vol_price_sync": -0.436, "ma_bullish": -0.428,
-        },
-        "buy_threshold": 0.15, "sell_threshold": -0.10,
-    },
-
-    # ★ v2: Top-20高IC因子 (仅保留最可靠的, 减少噪音) [已废弃, 保留向后兼容]
-    "ic_top20": {
-        "name": "Top-20 IC因子",
-        "factors": {
-            "volatility_20d": 0.20, "ma5_ma20_spread": 0.15,
-            "ma10_ma20_spread": 0.12, "ma20_ma60_spread": 0.10,
-            "sharpe_20d": 0.08, "return_7d": 0.07,
-            "rsv_9": 0.07, "cntd_20": 0.06,
-            "ma5_ma30_spread": 0.06, "rank_20": 0.05,
-            "channel_high_20": 0.05, "macd_hist": 0.05,
-            "turnover_trend": 0.05, "turnover_vol": 0.04,
-            "liq_ratio": 0.04, "vol_regime": 0.04,
-            "range_20d": 0.03, "amplitude_5d": 0.03,
-            "skew_20d": 0.03, "ma_bullish": 0.02,
-        },
-        "buy_threshold": 0.15,
-        "sell_threshold": -0.10,
-    },
-
-    # IC优化型 — 只保留IC>0的因子 + 新增Alpha158因子 + P2增强
-    "ic_optimized": {
-        "name": "IC优化",
-        "factors": {
-            "volatility_20d": 0.15, "ma5_ma20_spread": 0.12,
-            "ma10_ma20_spread": 0.08, "ma20_ma60_spread": 0.06,
-            "ma5_cross_ma20": 0.06, "vol_ratio": 0.06,
-            "kmid2": 0.04, "klen": 0.03, "ksft2": 0.03,
-            "rsv_9": 0.05, "cntd_20": 0.03, "rank_20": 0.03,
-            "turnover_ratio": 0.04,
-            # ★ 扩展因子
-            "return_2d": 0.03, "return_7d": 0.04, "return_30d": 0.03,
-            "volatility_10d": 0.04, "volatility_30d": 0.03,
-            "ma3_ma20_spread": 0.04, "ma5_ma30_spread": 0.03,
-            "sharpe_20d": 0.04, "amplitude_5d": 0.03,
-            "channel_high_20": 0.03, "skew_20d": 0.02,
-            "turnover_vol": 0.03, "liq_ratio": 0.02,
-            "boll_width": 0.03, "macd_hist": 0.03,
-            # ★ P2 增强因子
-            "reversal_1d": 0.03, "reversal_3d": 0.02,
-            "momentum_7d": 0.03, "momentum_20d": 0.02,
-            "rev_mom_spread": 0.04,
-            "vol_price_sync": 0.03, "turnover_trend": 0.02,
-            "vol_regime": 0.03, "vol_compress": 0.02,
-            "range_20d": 0.02, "ma_bullish": 0.03,
-        },
-        "buy_threshold": 0.15,
-        "sell_threshold": -0.10,
-    },
-
-    # IC优化v2 — 基于30只股票2024-2026的IC分析 (因子权重按abs_IC分配)
-    "ic_optimized_v2": {
-        "name": "IC优化v2",
-        "factors": {
-            "sharpe_20d": 0.070, "ma5_ma30_spread": 0.068,
-            "ma3_ma20_spread": 0.064, "ma10_ma20_spread": 0.062,
-            "ma5_ma20_spread": 0.062, "return_7d": 0.059,
-            "rank_20": 0.058, "return_30d": 0.057,
-            "rsv_9": 0.057, "return_2d": 0.057,
-            "macd_hist": 0.049, "channel_high_20": 0.045,
-            "cntd_20": 0.043, "ma20_ma60_spread": 0.035,
-            "kmid2": 0.033, "ksft2": 0.026,
-            "skew_20d": 0.020, "ma5_cross_ma20": 0.017,
-            "amplitude_5d": 0.016, "turnover_ratio": 0.016,
-            "vol_ratio": 0.016, "volatility_10d": 0.013,
-            "klen": 0.013, "turnover_vol": 0.013,
-            "volatility_20d": 0.012, "liq_ratio": 0.009,
-            "volatility_30d": 0.007, "boll_width": 0.004,
-        },
-        "buy_threshold": 0.15,
-        "sell_threshold": -0.10,
-    },
-
-    # 均衡型 (通用)
-    "balanced": {
-        "name": "均衡",
-        "factors": {
-            "return_5d":    0.10,
-            "return_20d":   0.05,
-            "ma5_ma20_spread": 0.15,
-            "ma20_ma60_spread": 0.10,
-            "ma_bullish":   0.10,
-            "ma_bearish":  -0.10,
-            "vol_ratio":    0.08,
-            "volatility_20d": -0.08,
-            "vol_up_price_up": 0.05,
-            "position_20d":  0.05,
-        },
-        "buy_threshold": 0.2,
-        "sell_threshold": -0.15,
-    },
-}
+FACTOR_PRESETS: dict = {}
 
 # ── 动态构建 full_auto 预设: 包含全部因子, 权重=1.0 (由LightGBM学习) ──
 def _build_full_auto_factors():
@@ -261,19 +96,16 @@ FACTOR_PRESETS["alpha158_full"] = _build_alpha158_full_preset()
 
 
 # ================================================================
-#  因子打分引擎
+#  因子名单容器
 # ================================================================
 
 class FactorScorer:
     """
-    多因子打分引擎。
+    因子名单容器。
 
-    流程:
-    1. 计算所有因子值 (通过 FactorLibrary)
-    2. 滚动窗口 Z-score 标准化 (每列独立)
-    3. 加权求和 → 综合分数
-    4. 分数 > buy_threshold → signal=1
-       分数 < sell_threshold → signal=-1
+    仅负责: 从预设解析出因子名单 (factor_weights.keys(), 权重恒为 1.0),
+    并基于 FactorLibrary 计算因子原始值。真实的因子加权由下游
+    (IC 加权 / LightGBM) 学习, 不在本类内进行。
     """
 
     def __init__(self, factor_weights: dict, buy_threshold: float = 0.3,
@@ -289,9 +121,9 @@ class FactorScorer:
         self.library = FactorLibrary.from_config(config)
 
     @classmethod
-    def from_preset(cls, preset_name: str = "trend_momentum"):
-        """从预定义配置创建。"""
-        preset = FACTOR_PRESETS.get(preset_name, FACTOR_PRESETS["balanced"])
+    def from_preset(cls, preset_name: str = "full_auto"):
+        """从因子名单预设创建。"""
+        preset = FACTOR_PRESETS.get(preset_name, FACTOR_PRESETS["full_auto"])
         return cls(
             factor_weights=preset["factors"],
             buy_threshold=preset["buy_threshold"],
@@ -316,149 +148,3 @@ class FactorScorer:
     def compute_factors(self, df: pd.DataFrame) -> pd.DataFrame:
         """计算所有因子原始值。"""
         return self.library.evaluate_all(df)
-
-    def normalize(self, factors_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        滚动窗口 Z-score 标准化。
-
-        每列: z = (x - rolling_mean) / rolling_std
-        """
-        factor_cols = [c for c in factors_df.columns if c != "date"]
-        normalized = pd.DataFrame(index=factors_df.index)
-        if "date" in factors_df.columns:
-            normalized["date"] = factors_df["date"]
-
-        for col in factor_cols:
-            series = factors_df[col].astype(float)
-            roll_mean = series.rolling(self.norm_window, min_periods=20).mean()
-            roll_std = series.rolling(self.norm_window, min_periods=20).std()
-            normalized[col] = ((series - roll_mean) / roll_std.replace(0, np.nan)).fillna(0)
-
-        return normalized
-
-    def score(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        完整打分流程: 计算 → 标准化 → 加权 → 信号。
-
-        返回: df + score + signal + position
-        """
-        # 1. 计算原始因子
-        factors_raw = self.compute_factors(df)
-
-        # 2. 标准化
-        factors_norm = self.normalize(factors_raw)
-
-        # 3. 加权求和
-        score = pd.Series(0.0, index=df.index)
-        for factor_name, weight in self.factor_weights.items():
-            if factor_name in factors_norm.columns:
-                score += factors_norm[factor_name].fillna(0) * weight
-
-        # 4. 分数平滑 (减少噪音)
-        score = score.rolling(3, min_periods=1).mean()
-
-        # 5. 转为信号
-        df = df.copy()
-        df["factor_score"] = score
-        df["signal"] = 0
-        df.loc[score > self.buy_threshold, "signal"] = 1
-        df.loc[score < self.sell_threshold, "signal"] = -1
-
-        # 6. 持仓状态
-        df["position"] = np.where(df["signal"] == 1, 1,
-                          np.where(df["signal"] == -1, 0, np.nan))
-        df["position"] = df["position"].ffill().fillna(0).astype(int)
-
-        # 统计
-        buys = (df["signal"] == 1).sum()
-        sells = (df["signal"] == -1).sum()
-        avg_score = score.mean()
-        print(f"[FactorScorer] 综合分数均值={avg_score:+.3f}, "
-              f"BUY={buys}, SELL={sells} "
-              f"(阈值: 买>{self.buy_threshold}, 卖<{self.sell_threshold})")
-
-        return df
-
-    def normalize_cross_sectional(self, all_factors: dict) -> dict:
-        """
-        截面标准化: 同一天所有股票的因子值一起排名。
-
-        参数:
-          all_factors: {symbol: DataFrame(因子值)}
-        返回:
-          {symbol: DataFrame(标准化因子值)}
-        """
-        symbols = list(all_factors.keys())
-        if len(symbols) < 2:
-            return all_factors  # 只有1只股票,不需要截面
-
-        # 找到公共因子列
-        factor_cols = [c for c in all_factors[symbols[0]].columns
-                       if c not in ("date", "symbol")]
-
-        # 对每个因子列,截面排名
-        for col in factor_cols:
-            # 收集所有股票的当前值
-            values = {}
-            for sym in symbols:
-                df = all_factors[sym]
-                if col in df.columns and len(df) > 0:
-                    v = df[col].iloc[-1]
-                    if not np.isnan(v):
-                        values[sym] = v
-
-            if len(values) < 2:
-                continue
-
-            # 截面标准化: (x - mean) / std
-            vals = np.array(list(values.values()))
-            mean = np.mean(vals)
-            std = np.std(vals) if np.std(vals) > 0 else 1.0
-
-            for sym in symbols:
-                if sym in values:
-                    z = (values[sym] - mean) / std
-                    idx = all_factors[sym].index[-1]
-                    all_factors[sym].loc[idx, col] = z
-
-        return all_factors
-
-    def cross_sectional_score(self, stock_data: dict) -> dict:
-        """
-        截面评分: 所有股票同一天打分,分数可直接比较。
-
-        参数:
-          stock_data: {symbol: DataFrame(price data)}
-        返回:
-          {symbol: float(score)}
-        """
-        # 1. 每只股票独立计算因子
-        all_factors = {}
-        for sym, df in stock_data.items():
-            factors = self.compute_factors(df)
-            if len(factors) > 0:
-                # 用最近值
-                last = factors.iloc[-1:].copy()
-                all_factors[sym] = last
-
-        # 2. 截面标准化
-        if len(all_factors) >= 2:
-            all_factors = self.normalize_cross_sectional(all_factors)
-
-        # 3. 加权求和
-        scores = {}
-        for sym, factors in all_factors.items():
-            if len(factors) == 0:
-                scores[sym] = 0.0
-                continue
-            score = 0.0
-            row = factors.iloc[-1]
-            for factor_name, weight in self.factor_weights.items():
-                if factor_name in factors.columns:
-                    v = row[factor_name]
-                    score += (0 if np.isnan(v) else v) * weight
-            scores[sym] = score
-
-        return scores
-        """生成交易信号 (兼容现有策略接口)。"""
-        return self.score(df)

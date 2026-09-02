@@ -68,8 +68,8 @@ def compute_current_ic(lookback_days: int = DEFAULT_LOOKBACK,
     all_data = {s: df for s, df in all_data.items() if len(df) >= 100}
     print(f"  有效股票: {len(all_data)}")
 
-    # 预计算因子
-    scorer = FactorScorer.from_preset("ic_auto")
+    # 预计算因子 (原 ic_auto 硬编码权重预设已删除, 仅取因子名单)
+    scorer = FactorScorer.from_preset("full_auto")
     factor_names = sorted(scorer.factor_weights.keys())
     cache = FactorCache(scorer, factor_names)
     cache.precompute(all_data)

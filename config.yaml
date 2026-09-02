@@ -76,7 +76,7 @@ model:
 
 # ── 因子配置 ──
 factors:
-  preset: ic_auto
+  preset: full_auto            # 因子名单容器 (真实权重由下游 IC/ML 学习); 原 ic_auto 硬编码权重预设已删除
   use_fundamental: false       # 基本面数据就绪后改为 true
   corr_threshold: 0.6          # 独立性剪枝阈值 (从0.4放宽到0.6)
 

@@ -81,7 +81,7 @@ def demo():
 
     SYMBOLS = ["600519", "000858", "601318"]
     data = load_all(SYMBOLS)
-    scorer = FactorScorer.from_preset("ic_optimized")
+    scorer = FactorScorer.from_preset("full_auto")  # 原 ic_optimized 硬编码权重预设已删除
 
     cache = FactorCache(scorer)
     cache.precompute(data)
