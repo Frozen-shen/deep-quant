@@ -1,0 +1,20 @@
+# requirements-lock.txt —— 直接依赖精确版本锁定 (pip freeze 快照)
+# 生成环境: Python 3.12.3 / win32  生成日期: 2026-09-02
+# 用途: akshare 这类高频改版爬虫库不锁版本易因上游改字段名而无声崩坏,
+#       回测/信号复现请用 `pip install -r requirements-lock.txt`。
+# 注意: 仅锁直接依赖 (声明于 pyproject/requirements.txt); 完整传递闭包可
+#       用 `pip freeze` 或 pip-tools 另行生成。
+akshare==1.18.64
+pandas==3.0.3
+numpy==2.5.1
+scipy==1.18.0
+lightgbm==4.7.0
+pyyaml==6.0.3
+requests==2.34.2
+pyarrow==25.0.0
+matplotlib==3.11.0
+fastapi==0.141.1
+uvicorn==0.51.0
+httpx==0.28.1
+akshare-proxy-patch==0.5.0
+pytest==9.1.1

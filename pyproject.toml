@@ -25,21 +25,26 @@ classifiers = [
 ]
 
 dependencies = [
-    "pandas>=1.5.0",
-    "numpy>=1.23.0",
-    "scipy>=1.9.0",
-    "lightgbm>=3.3.0",
-    "akshare>=1.10.0",
+    # ── 核心运行时依赖 (主代码路径 import; 下限参考当前实际安装版本) ──
+    # 与 requirements.txt 保持一致 (同一套真实依赖)。
+    "pandas>=3.0.0",
+    "numpy>=2.0.0",
+    "scipy>=1.18.0",
+    "lightgbm>=4.7.0",
+    "akshare>=1.18.0",
     "pyyaml>=6.0",
-    "loguru>=0.7.0",
-    "pyarrow>=10.0.0",
-    "tqdm>=4.64.0",
+    "requests>=2.34.0",     # data_fetcher / alerter / fetch_daily_data
+    "pyarrow>=25.0.0",      # 主代码 parquet 读写 (data/store.py, fetch_daily_data), 非仅 archive
+    "matplotlib>=3.11.0",   # scripts/active/export_equity_curve.py
+    "fastapi>=0.141.0",     # web/api 看板后端
+    "uvicorn>=0.51.0",      # 运行 web/api (uvicorn web.api.main:app :8000)
+    "httpx>=0.28.0",        # fastapi.testclient.TestClient 依赖
 ]
 
 [project.optional-dependencies]
-viz = [
-    "matplotlib>=3.6.0",
-    "streamlit>=1.28.0",
+proxy = [
+    # 东财接口代理网关 (eastmoney_proxy.py); 未安装则静默降级为直连, 故列为可选
+    "akshare-proxy-patch>=0.5.0",
 ]
 dev = [
     "pytest>=7.2.0",
@@ -48,7 +53,7 @@ dev = [
     "mypy>=1.0.0",
 ]
 all = [
-    "quant-starter[viz,dev]",
+    "quant-starter[proxy,dev]",
 ]
 
 [project.urls]
