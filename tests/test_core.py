@@ -91,6 +91,44 @@ class TestEvaluator(unittest.TestCase):
         self.assertIn("oos_pct", report)
         self.assertIn("trust", report)
 
+    def test_deflated_sharpe_uses_real_trial_count(self):
+        # 2026-09-02: n_trials 默认不再硬编码 6, 自动读 experiments/ 累计登记数
+        from evaluator import _resolve_n_trials
+        import os
+        exp_dir = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "experiments")
+        n_files = sum(1 for f in os.listdir(exp_dir)
+                      if f.startswith("exp_") and f.endswith(".json"))
+        auto = _resolve_n_trials(None)
+        self.assertGreaterEqual(auto, 1)
+        self.assertEqual(auto, max(1, n_files))
+        self.assertEqual(_resolve_n_trials(0), 1)    # 下限 1
+        self.assertEqual(_resolve_n_trials(30), 30)  # 显式覆盖
+
+    def test_deflated_sharpe_discounts_with_more_trials(self):
+        # 试验次数越多, DSR 越保守 (单调不增); n_trials=1 无多重测试惩罚
+        from evaluator import _deflated_sharpe
+        d1 = _deflated_sharpe(0.4, 60, 0.0, 3.0, n_trials=1)
+        d6 = _deflated_sharpe(0.4, 60, 0.0, 3.0, n_trials=6)
+        d48 = _deflated_sharpe(0.4, 60, 0.0, 3.0, n_trials=48)
+        self.assertGreaterEqual(d1, d6)
+        self.assertGreaterEqual(d6, d48)
+        self.assertGreater(d6, d48)  # 短窗口+中等SR 下折扣应可观测
+        self.assertEqual(_deflated_sharpe(-0.1, 60, 0.0, 3.0), 0.0)
+
+    def test_analyze_window_reports_n_trials(self):
+        # 评测输出带 deflated_sharpe_n_trials, 显式 n_trials 原样透传
+        import numpy as np
+        from evaluator import ModelEvaluator
+        rng = np.random.RandomState(0)
+        rets = rng.normal(0.001, 0.01, 300)
+        bench = rng.normal(0.0002, 0.008, 300)
+        eq = np.cumprod(1 + rets) * 100000
+        wm = ModelEvaluator().analyze_window(
+            eq, rets, benchmark_returns=bench, n_trials=10)
+        self.assertEqual(wm["deflated_sharpe_n_trials"], 10)
+        self.assertIn("deflated_sharpe", wm)
+
     def test_score_metric(self):
         from evaluator import _score_metric
         # 值 >= great → 1.0

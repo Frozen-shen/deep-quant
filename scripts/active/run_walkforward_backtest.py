@@ -90,6 +90,8 @@ sys.path.insert(0, BASE_DIR)
 from logger import get_logger
 from gate import load_config, check_date_range, DateRangeGuard, GateViolation
 from data.pit_universe import get_universe
+from stats_correction import (effective_num_tests, factor_correlation_matrix,
+                              fdr_correction, t_summary_to_pvalue)
 
 log = get_logger("walkforward_bt")
 
@@ -1272,7 +1274,8 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
                          factor_names: list,
                          train_start: str | None = None,
                          train_end: str | None = None,
-                         universe_fn=None) -> tuple:
+                         universe_fn=None,
+                         permute_seed: int | None = None) -> tuple:
     """
     计算因子 ICIR 权重。
 
@@ -1283,6 +1286,10 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
 
     窗口: [start_idx, end_idx] (日历索引), 每 IC_STEP 天一个观测点。
     标签: 21 日前瞻收益 close[t+21]/close[t]-1 (在 T 时已全部实现)。
+
+    permute_seed: 非 None 时, 每个观测日把前瞻收益标签在该截面有效股票内
+      随机重排 (因子值不变) → 破坏因子-收益关联, 用于空假设置换检验
+      (run_null_calibration.py); None 时行为与生产完全一致。
 
     Returns: (weights: {factor: icir}, ic_stats: {factor: {ic_mean, ic_std, n_obs}})
     """
@@ -1319,6 +1326,8 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
 
     close_vals = close_panel.to_numpy()
     n_dates = len(calendar)
+    perm_rng = np.random.RandomState(permute_seed) \
+        if permute_seed is not None else None
     # 预取每个观测日的因子截面矩阵 (n_stocks, n_factors)
     matrices = []
     labels = []
@@ -1354,8 +1363,11 @@ def compute_icir_weights(factor_panels: dict, close_panel: pd.DataFrame,
         x = np.column_stack(cols)
         # 仅保留有有效标签的行
         valid = ~np.isnan(ret)
+        lab = ret[valid]
+        if perm_rng is not None:  # 空假设置换: 截面内重排标签
+            lab = perm_rng.permutation(lab)
         matrices.append(x[valid, :])
-        labels.append(ret[valid])
+        labels.append(lab)
 
     if not matrices:
         return {}, {}
@@ -2109,6 +2121,66 @@ FOLD_ICIR_MIN = 0.05       # fold 内 |ICIR| 入选阈值 (滚动模式下仅作
 FOLD_T_STAT_MIN = 1.645    # 统计显著标准: |ICIR|*sqrt(n_obs) >= 1.645 (单尾5%)
 FOLD_MAX_FACTORS = 40      # 稳定因子数量上限 (防止噪音因子稀释组合); 可由 config fold.max_factors 覆盖
 
+# ── 多重检验校正 (2026-09-02): 逐折对全部候选因子做 BH-FDR, 与原门槛双重把关 ──
+# 背景: ~205 个候选因子独立施加同一筛选条件, 无校正时"纯噪音因子靠运气
+# 连中 3/5 折"的期望数随候选池增大而上升。BH 用"有效独立检验数"(因子相关
+# 矩阵特征值分解) 替代原始候选数, 避免高度相关变体导致过度保守。
+# 空假设下的期望假发现数诊断: scripts/active/run_null_calibration.py
+FDR_ALPHA_DEFAULT = 0.10       # 目标 FDR 水平 (config fold.fdr_alpha)
+FDR_VAR_EXPLAINED = 0.95       # 有效检验数: 主成分累计方差解释率阈值
+FDR_CORRECTION_PATH = os.path.join(IC_DIR, "fdr_correction_report.json")
+
+
+def select_stable_factors(core_names, factor_hits, factor_icirs,
+                          factor_bh_hits=None,
+                          min_hits=FOLD_MIN_HITS, icir_min=FOLD_ICIR_MIN,
+                          max_factors=FOLD_MAX_FACTORS,
+                          null_override: dict | None = None):
+    """稳定因子筛选: (≥min_hits 折显著 + 方向一致) ∩ (BH 校正通过, 若提供)。
+
+    双门槛 (2026-09-02):
+      - 原门槛 (下限): 核心折 ≥min_hits 折 |ICIR|>=icir_min 且方向一致
+      - BH 门槛: factor_bh_hits ≥min_hits (逐折对全部候选因子做
+        Benjamini-Hochberg, 有效检验数见 run_fold_analysis);
+        factor_bh_hits=None 时跳过 (历史口径/诊断对照用)
+    最后按 |中位数ICIR| 排序取前 max_factors。
+
+    null_override: 空假设诊断 (run_null_calibration.py) 用的阈值覆盖
+      {"icir_min": ...}, 生产路径恒为 None。说明: 逐折 hits 无法在此重算
+      (需要各折原始统计量), 覆盖的 icir_min 施加于 |中位数ICIR| 与
+      |逐折ICIR|≥icir_min 的折数检查, 近似"更高入选阈值"的效果,
+      方向偏严格 (见 run_null_calibration.py 报告方法说明)。
+
+    Returns: (stable, stable_icir, cand_icir) — stable 为因子名列表,
+      stable_icir/cand_icir 为 {因子名: 中位数ICIR}。
+    """
+    ov = null_override or {}
+    min_hits = int(ov.get("min_hits", min_hits))
+    icir_min = float(ov.get("icir_min", icir_min))
+    cand = []
+    for fn in core_names:
+        if factor_hits.get(fn, 0) < min_hits:
+            continue
+        icirs = factor_icirs.get(fn) or []
+        if not icirs:
+            continue
+        arr = np.array(icirs)
+        # icir_min 覆盖 (诊断用): 至少 min_hits 折 |ICIR| 达到该阈值
+        if int((np.abs(arr) >= icir_min).sum()) < min_hits:
+            continue
+        pos_cnt = int((arr > 0).sum())
+        neg_cnt = int((arr < 0).sum())
+        if max(pos_cnt, neg_cnt) < min_hits:  # 方向一致
+            continue
+        if factor_bh_hits is not None and factor_bh_hits.get(fn, 0) < min_hits:
+            continue
+        cand.append(fn)
+    cand_icir = {fn: float(np.median(factor_icirs[fn])) for fn in cand}
+    ranked = sorted(cand_icir.items(), key=lambda kv: -abs(kv[1]))
+    stable = [fn for fn, _ in ranked[:max_factors]]
+    stable_icir = {fn: cand_icir[fn] for fn in stable}
+    return stable, stable_icir, cand_icir
+
 
 def _sleeve_sig(ic_stats: dict) -> set:
     """与核心同口径的显著因子: |ICIR|>=FOLD_ICIR_MIN 且 t 统计 >= FOLD_T_STAT_MIN。"""
@@ -2164,7 +2236,8 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       vol_target_cfg: dict | None = None,
                       trend_timing_cfg: dict | None = None,
                       styles_cfg: dict | None = None,
-                      industry_lambda: float = 0.0) -> dict:
+                      industry_lambda: float = 0.0,
+                      fdr_cfg: dict | None = None) -> dict:
     """
     方案C核心: Walk-Forward 级联 (7 折 = 5 核心选型折 + 2 级联体检折)。
 
@@ -2173,12 +2246,17 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
       2. 验证期 [val] 用训练期固定权重回测 (无信息泄漏)
     汇总:
       - 每个因子在多少 fold 中 |ICIR| 达标 (fold_hits)
-      - 保留 fold_hits >= FOLD_MIN_HITS 的稳定因子
+      - 多重检验校正 (2026-09-02): 核心折内对全部候选因子做 BH-FDR
+        (p 值来自 IC t 统计量, 检验数=相关矩阵有效独立检验数),
+        BH 命中 ≥FOLD_MIN_HITS 与原 hits 门槛双重把关
+      - 保留通过双门槛的稳定因子
       - 各 fold 验证期成绩汇总 → OOS 年化超额均值/IR
 
     minute_layer: 方案B 分钟叠加配置 {enabled, weights, lambda},
       仅 fold 4-7 验证期 (有分钟数据) 生效, fold 1-3 传 None。
     industry_lambda: 行业动量叠加 λ (2026-08-17), 透传 run_backtest。
+    fdr_cfg: 多重检验校正配置 {"alpha": float, "var_explained": float};
+      None 时用默认值 (FDR_ALPHA_DEFAULT / FDR_VAR_EXPLAINED)。
     """
     log.info("=" * 60)
     log.info("  方案C Walk-Forward: %d folds (前 %d 核心折选型 + 级联体检折, "
@@ -2211,7 +2289,12 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     fold_results = {}
     factor_hits = {fn: 0 for fn in core_names}
     factor_icirs = {fn: [] for fn in core_names}
+    factor_bh_hits = {fn: 0 for fn in core_names}   # BH 校正通过折数 (2026-09-02)
+    fold_mt_meta = []                               # 各核心折的多重检验元数据
     sleeve_icirs = {}
+
+    _fdr_alpha = float((fdr_cfg or {}).get("alpha", FDR_ALPHA_DEFAULT))
+    _fdr_ve = float((fdr_cfg or {}).get("var_explained", FDR_VAR_EXPLAINED))
 
     # 验证期首调仓日: 固定权重只需在训练期末计算一次
     for fi, fold in enumerate(FOLDS):
@@ -2285,6 +2368,46 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                 if fi < FOLD_CORE_N:
                     factor_icirs[fn].append(0.0)
 
+        # ── 多重检验校正 (2026-09-02): 本折全部候选因子做 BH-FDR ──
+        # p 值 = IC 序列单样本 t 检验 (t=ICIR*sqrt(n_obs), 与上方显著性
+        # 判据同源); 检验数用"有效独立检验数" (因子截面相关矩阵特征值
+        # 分解, 累计解释 _fdr_ve 方差的主成分数), 避免高度相关变体把
+        # 校正推向过度保守。仅核心折参与选型统计 (与 hits 同口径)。
+        if fi < FOLD_CORE_N:
+            fold_pvals = []
+            for fn in core_names:
+                st = ic_stats.get(fn)
+                fold_pvals.append(1.0 if st is None else t_summary_to_pvalue(
+                    st.get("ic_mean", 0.0), st.get("ic_std", 0.0),
+                    st.get("n_obs", 0)))
+            # 训练窗观测日 (与 compute_icir_weights 的 offsets 同口径)
+            _s = _nearest_idx(cal_idx, ts)
+            _e = _nearest_idx(cal_idx, te)
+            _t = cal_idx.get(val_first)
+            m_eff, n_bh_pass = None, 0
+            if _s is not None and _e is not None and _t is not None:
+                _end = min(_e - LABEL_HORIZON, _t - LABEL_HORIZON)
+                corr_dates = [calendar[oi]
+                              for oi in range(_s, _end + 1, IC_STEP)
+                              if 0 <= oi + LABEL_HORIZON < len(calendar)]
+                corr_mat, corr_names = factor_correlation_matrix(
+                    factor_panels, corr_dates, core_names)
+                m_eff = effective_num_tests(corr_mat, _fdr_ve)
+                bh_pass = fdr_correction(fold_pvals, alpha=_fdr_alpha,
+                                         m=max(1, m_eff))
+                bh_by_name = dict(zip(core_names, bh_pass))
+                for fn in core_names:
+                    if bh_by_name.get(fn, False):
+                        factor_bh_hits[fn] += 1
+                        n_bh_pass += 1
+            fold_mt_meta.append({
+                "fold": fi + 1, "n_candidates": len(core_names),
+                "m_eff": m_eff, "fdr_alpha": _fdr_alpha,
+                "n_bh_pass": n_bh_pass,
+            })
+            log.info("  BH-FDR: %d/%d 因子通过 (alpha=%.2f, 有效检验数=%s)",
+                     n_bh_pass, len(core_names), _fdr_alpha, m_eff)
+
         # 验证期回测权重: 仅统计显著因子 (过滤噪音)
         weights = {fn: w for fn, w in weights.items() if fn in sig_factors}
         # ★ 风格预算 (v29): fold 固定权重同样封顶 (与验证期调仓日一致)
@@ -2324,27 +2447,31 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                 **r,
             }
 
-    # ── 稳定因子筛选 (统计显著 ≥3/5 folds + 方向一致 + 数量上限) ──
-    # 方向一致性: 因子在 ≥3/5 folds 中 ICIR 符号相同 (防止正负抵消)
-    cand = []
-    for fn in core_names:
-        if factor_hits[fn] < FOLD_MIN_HITS or not factor_icirs[fn]:
-            continue
-        arr = np.array(factor_icirs[fn])
-        pos_cnt = int((arr > 0).sum())
-        neg_cnt = int((arr < 0).sum())
-        if max(pos_cnt, neg_cnt) >= FOLD_MIN_HITS:  # 方向一致
-            cand.append(fn)
-    cand_icir = {fn: float(np.median(factor_icirs[fn])) for fn in cand}
-    # 按 |ICIR| 排序取 top FOLD_MAX_FACTORS (可由 max_factors 覆盖)
+    # ── 稳定因子筛选 (双门槛, 2026-09-02) ──
+    # 1) 原门槛 (下限): 核心折 ≥3/5 显著 + 方向一致
+    # 2) BH-FDR 门槛: 逐折对全部候选因子做 BH (有效独立检验数),
+    #    通过折数 ≥3/5 才保留。pre_fdr = 仅原门槛的结果, 留档对比。
     limit = max_factors if max_factors else FOLD_MAX_FACTORS
-    ranked = sorted(cand_icir.items(), key=lambda kv: -abs(kv[1]))
-    stable = [fn for fn, _ in ranked[:limit]]
-    stable_icir = {fn: cand_icir[fn] for fn in stable}
+    stable_pre_fdr, _, cand_icir_pre_fdr = select_stable_factors(
+        core_names, factor_hits, factor_icirs,
+        factor_bh_hits=None, min_hits=FOLD_MIN_HITS,
+        icir_min=FOLD_ICIR_MIN, max_factors=limit)
+    stable, stable_icir, cand_icir = select_stable_factors(
+        core_names, factor_hits, factor_icirs,
+        factor_bh_hits=factor_bh_hits, min_hits=FOLD_MIN_HITS,
+        icir_min=FOLD_ICIR_MIN, max_factors=limit)
+    # 截断前的完整候选集 (供 fdr_correction_report.json 下游使用)
+    cand_pre_fdr_all = sorted(cand_icir_pre_fdr.keys())
+    cand_post_fdr_all = sorted(cand_icir.keys())
+    n_fdr_drop = len(set(stable_pre_fdr) - set(stable))
+    if n_fdr_drop:
+        log.info("  BH-FDR 双门槛: %d → %d 个稳定因子 (剔除 %d: %s)",
+                 len(stable_pre_fdr), len(stable), n_fdr_drop,
+                 ", ".join(sorted(set(stable_pre_fdr) - set(stable))[:10]))
 
     log.info("")
     log.info("=" * 60)
-    log.info("  稳定因子: %d/%d (≥%d folds 显著+方向一致, top%d)",
+    log.info("  稳定因子: %d/%d (≥%d folds 显著+方向一致, BH校正, top%d)",
              len(stable), len(core_names), FOLD_MIN_HITS,
              limit)
     if stable:
@@ -2357,9 +2484,20 @@ def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
     return {
         "folds": fold_results,
         "factor_hits": factor_hits,
+        "factor_bh_hits": factor_bh_hits,
         "stable_factors": stable,
+        "stable_factors_pre_fdr": stable_pre_fdr,
         "stable_factor_icir_median": {
             k: round(v, 4) for k, v in stable_icir.items()},
+        "multiple_testing": {
+            "method": "BH-FDR (per-fold, m=有效独立检验数)",
+            "alpha": _fdr_alpha,
+            "var_explained": _fdr_ve,
+            "min_bh_hits": FOLD_MIN_HITS,
+            "folds": fold_mt_meta,
+            "candidates_pre_fdr": cand_pre_fdr_all,
+            "candidates_post_fdr": cand_post_fdr_all,
+        },
         "sleeve_median_weights": (
             sleeve_median_weights(sleeve_icirs, styles_cfg.get("sleeves", {}))
             if styles_cfg else {}),
@@ -2820,6 +2958,13 @@ def main():
                 log.info("  多风格 sleeve: %s (budgets=%s)",
                          ", ".join((styles_cfg.get("sleeves") or {}).keys()),
                          styles_cfg.get("budgets"))
+            # 多重检验校正参数 (config fold 段, 唯一参数源)
+            _fold_cfg = config.get("fold", {}) or {}
+            fdr_cfg = {
+                "alpha": float(_fold_cfg.get("fdr_alpha", FDR_ALPHA_DEFAULT)),
+                "var_explained": float(_fold_cfg.get(
+                    "fdr_var_explained", FDR_VAR_EXPLAINED)),
+            }
             fold_out = run_fold_analysis(
                 all_data, factor_panels, close_panel, calendar, cal_idx,
                 factor_names, bt_config, universe_fn=universe_fn,
@@ -2831,13 +2976,49 @@ def main():
                 vol_target_cfg=config.get("vol_target"),
                 trend_timing_cfg=config.get("trend_timing"),
                 styles_cfg=styles_cfg,
-                industry_lambda=float((config.get("styles") or {}).get("industry_lambda", 0.0)))
+                industry_lambda=float((config.get("styles") or {}).get("industry_lambda", 0.0)),
+                fdr_cfg=fdr_cfg)
             for k, v in fold_out.get("folds", {}).items():
                 results[k] = v
             extra_meta["fold_factor_hits"] = fold_out["factor_hits"]
+            extra_meta["fold_factor_bh_hits"] = fold_out["factor_bh_hits"]
             extra_meta["stable_factors"] = fold_out["stable_factors"]
+            extra_meta["stable_factors_pre_fdr"] = fold_out["stable_factors_pre_fdr"]
+            extra_meta["multiple_testing"] = fold_out["multiple_testing"]
             extra_meta["stable_factor_icir_median"] = (
                 fold_out["stable_factor_icir_median"])
+
+            # ── FDR 校正报告 (2026-09-02): 动态替代旧静态 FDR_ELIMINATED ──
+            # 下游 (run_corrected_backtest/run_regime_robustness) 从这里读取
+            # 显式拒绝名单, 报告缺失时降级为不剔除。
+            _mt = fold_out["multiple_testing"]
+            _pre_all = set(_mt["candidates_pre_fdr"])
+            _post_all = set(_mt["candidates_post_fdr"])
+            _fdr_report = {
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "description": ("稳定因子筛选的多重检验校正结果 (逐折 BH, "
+                                "有效独立检验数); 替代旧静态名单"),
+                "stable_factors": sorted(_post_all),
+                "rejected_factors": sorted(_pre_all - _post_all),
+                "meta": {
+                    "method": _mt["method"],
+                    "fdr_alpha": _mt["alpha"],
+                    "var_explained": _mt["var_explained"],
+                    "min_hits": FOLD_MIN_HITS,
+                    "core_folds": FOLD_CORE_N,
+                    "n_candidates": len(fold_out.get("factor_hits", {})),
+                    "n_pre_fdr": len(_pre_all),
+                    "n_post_fdr": len(_post_all),
+                    "folds": _mt["folds"],
+                    "walkforward_output": OUTPUT_PATH,
+                },
+            }
+            os.makedirs(IC_DIR, exist_ok=True)
+            with open(FDR_CORRECTION_PATH, "w", encoding="utf-8") as f:
+                json.dump(_fdr_report, f, ensure_ascii=False, indent=2)
+            log.info("  FDR 校正报告: %s (候选 %d → 校正后 %d, 显式剔除 %d)",
+                     FDR_CORRECTION_PATH, len(_pre_all), len(_post_all),
+                     len(_pre_all - _post_all))
             if styles_cfg and fold_out.get("sleeve_median_weights"):
                 extra_meta["sleeve_median_weights"] = fold_out["sleeve_median_weights"]
             r = None
@@ -3002,8 +3183,11 @@ def main():
                  r["avg_pit_size"], r.get("avg_n_selected_factors", 0))
     if args.folds:
         log.info("  " + "-" * 68)
-        log.info("  稳定因子 %d 个 (核心折 ≥%d/%d, |ICIR|≥%.2f)",
+        log.info("  稳定因子 %d 个 (原门槛 %d, BH 剔除 %d; 核心折 ≥%d/%d, |ICIR|≥%.2f)",
                  len(extra_meta.get("stable_factors", [])),
+                 len(extra_meta.get("stable_factors_pre_fdr", [])),
+                 len(set(extra_meta.get("stable_factors_pre_fdr", []))
+                     - set(extra_meta.get("stable_factors", []))),
                  FOLD_MIN_HITS, FOLD_CORE_N, FOLD_ICIR_MIN)
     log.info("=" * 60)
 
@@ -3013,6 +3197,10 @@ def main():
         _styles = config.get("styles") or {}
         _partition = ("test" if "test" in results
                       else "development" + ("+extend_val" if "extend_val" in results else ""))
+        # stable_factors 变化记录 (2026-09-02 多重检验校正):
+        # pre_fdr = 仅原门槛 (≥3/5 fold 显著+方向一致), post = 双门槛 (含 BH)
+        _sf_pre = extra_meta.get("stable_factors_pre_fdr", [])
+        _sf_post = extra_meta.get("stable_factors", [])
         log_experiment(
             script_name="run_walkforward_backtest",
             partition=_partition,
@@ -3020,14 +3208,19 @@ def main():
                     "styles_enabled": bool(_styles.get("enabled")),
                     "styles_budgets": _styles.get("budgets"),
                     "styles_sleeves": {k: v.get("factors") for k, v in
-                                       (_styles.get("sleeves") or {}).items()}},
+                                       (_styles.get("sleeves") or {}).items()},
+                    "fdr": (extra_meta.get("multiple_testing") or {}).get(
+                        "alpha")},
             results={k: {"excess_annual": v.get("excess_annual"),
                          "total_return": v.get("total_return"),
                          "sharpe": v.get("sharpe"),
                          "max_drawdown": v.get("max_drawdown")}
                      for k, v in results.items() if isinstance(v, dict)},
             notes=(f"styles={bool(_styles.get('enabled'))} "
-                   f"budgets={_styles.get('budgets')}"),
+                   f"budgets={_styles.get('budgets')} "
+                   f"stable_factors_pre_fdr={len(_sf_pre)} "
+                   f"stable_factors_post_fdr={len(_sf_post)} "
+                   f"fdr_dropped={sorted(set(_sf_pre) - set(_sf_post))}"),
             experiments_dir=os.path.join(BASE_DIR, "experiments"),
         )
     except Exception as e:

@@ -6,7 +6,8 @@ scripts/active/run_corrected_backtest.py — 正式 Holdout 回测 (v3)
 方法论保障:
   1. PIT universe — 每个调仓日用 CSI300+CSI1000 月度成分
   2. 参数统一 — top_k/成本/调仓频率全部来自 config.yaml
-  3. FDR 校正 — BH q=0.10 剔除不显著因子
+  3. FDR 校正 — 读取主选择流程动态产出的 fdr_correction_report.json
+     (逐折 BH, 2026-09-02 起替代旧静态名单); 报告缺失时降级为不剔除
   4. TEST 锁 — TEST 期只能跑一次，结果锁定后不可重跑
   5. 日期守卫 — gate.py DateRangeGuard 运行时拦截盲测期访问
   6. BLIND 永不回测 — 脚本中无 BLIND 相关代码
@@ -39,6 +40,7 @@ sys.path.insert(0, BASE_DIR)
 from logger import get_logger
 from gate import load_config, check_date_range, DateRangeGuard, GateViolation
 from data.pit_universe import get_universe
+from stats_correction import apply_fdr_correction, load_fdr_correction
 
 log = get_logger("corrected_bt")
 
@@ -47,9 +49,9 @@ REPORT_PATH = os.path.join(IC_DIR, "p5_portfolio_report.json")
 OUTPUT_PATH = os.path.join(IC_DIR, "corrected_backtest.json")
 BENCH_PATH = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
 TEST_LOCK_PATH = os.path.join(IC_DIR, ".test_lock")
-
-# FDR 淘汰的因子
-FDR_ELIMINATED = {"fund_ocf_ps", "fund_sp"}
+# 主选择流程 (run_walkforward_backtest.py --folds-only) 动态产出的校正结果
+# (2026-09-02 替代旧静态名单 {"fund_ocf_ps", "fund_sp"})
+FDR_REPORT_PATH = os.path.join(IC_DIR, "fdr_correction_report.json")
 
 # 探索性因子类别 (IC验证期与TEST重叠, 不计入正式alpha)
 # 分钟因子IC在2024-2025数据上验证, 与TEST期(2024-07~2025-06)高度重叠
@@ -94,12 +96,18 @@ def load_bt_config() -> dict:
 
 
 def load_factors(include_exploratory: bool = False) -> list:
-    """加载 P5 因子并应用 FDR 校正 + 探索性因子降级。"""
+    """加载 P5 因子并应用动态 FDR 校正 + 探索性因子降级。
+
+    FDR 名单来自主选择流程产出的 fdr_correction_report.json
+    (stats_correction.load_fdr_correction); 报告缺失时不剔除任何因子
+    并打警告 (不再使用任何静态名单)。
+    """
     with open(REPORT_PATH, "r", encoding="utf-8") as f:
         report = json.load(f)
     factors = report.get("selected_factors", [])
     before_fdr = len(factors)
-    factors = [f for f in factors if f["name"] not in FDR_ELIMINATED]
+    correction = load_fdr_correction(FDR_REPORT_PATH)
+    factors = apply_fdr_correction(factors, correction, log=log)
     after_fdr = len(factors)
 
     # 探索性因子降级
@@ -612,7 +620,7 @@ def main():
             "fixes": [
                 "幸存者偏差: 每个调仓日使用 PIT universe (CSI300+CSI1000)",
                 "参数漂移: top_k 统一为 config.yaml 值 (30)",
-                "FDR: BH 校正剔除 fund_ocf_ps, fund_sp",
+                "FDR: 动态校正名单 (fdr_correction_report.json, 逐折 BH)",
                 "BLIND 已污染 (trial_count>=3): 仅报告 Dev + TEST",
             ],
             "n_factors": len(factors),

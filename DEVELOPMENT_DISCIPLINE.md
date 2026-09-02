@@ -227,3 +227,49 @@ Walk-Forward 现为 7 折：核心 5 折（训练窗止于 2023，负责因子�
 4. **绝对数字打折**：被历史版本反复对照过的段（extend 2025-01~2026-06，已 ≥8 轮）
    的绝对收益只作参考；版本间只承认**相对改善**，且改善幅度须明显大于轮间噪音
    （folds 逐年超额方差 ±10pp 级）。
+
+---
+
+## 第十二条：统计校正与试验计数（2026-09-02）
+
+候选因子池 ~205 个, 对每个因子独立施加同一显著性条件会产生多重比较假阳性;
+报告 DSR 若不随真实试验次数打折, 过拟合程度会被系统性低估。本条约定义下三个
+机制的口径与使用边界:
+
+**1. 稳定因子双门槛 (代码强制, `run_walkforward_backtest.py`)**
+- 原门槛 (下限, 保留): 核心折 ≥3/5 折 |ICIR|≥`FOLD_ICIR_MIN` 且方向一致。
+- 多重比较门槛 (新增): 每核心折对**全部候选因子**做 BH-FDR
+  (p 值 = 该折 IC 序列的单样本 t 检验), 检验数用**有效独立检验数** m_eff
+  (候选因子截面相关矩阵特征值分解, 主成分累计解释
+  `fold.fdr_var_explained`(默认0.95) 方差) 而非原始候选数; 通过折数
+  ≥3/5 才可入选。参数 `fold.fdr_alpha` (默认 0.10) 为唯一调参入口。
+- 双门槛通过后的完整候选集与显式拒绝名单写入
+  `data/ic_validation/fdr_correction_report.json`; 任何下游脚本
+  (run_corrected_backtest / run_regime_robustness) 一律从该文件读取,
+  **禁止再出现静态淘汰名单**。
+
+**2. 置换检验诊断 (跑批前必须执行的体检)**
+- 改变任何筛选参数 (fdr_alpha/fdr_var_explained/FOLD_ICIR_MIN/FOLD_MIN_HITS)
+  或候选因子池之前, 先跑 `scripts/active/run_null_calibration.py`
+  (N≥200), 报告存 `data/ic_validation/null_calibration_report.json`。
+- 判读: 真实一次跑出的稳定因子数应显著高于空假设分布的 95 分位;
+  若落入噪音区间, 该轮筛选结果不得直接进选型, 需先提高阈值或人工复核。
+- 报告给出的 "期望假发现数<1 的 |ICIR| 阈值" 是参考基线, 采纳与否
+  由人工决策并登记 experiment_tracker, 机器不自动改参。
+
+**3. 试验计数口径 (DSR n_trials, 代码强制, evaluator.py)**
+- **什么算一次试验**: 每次经 `experiment_tracker.log_experiment()` 登记、
+  研究者会看到结果并可能据此决定"保留/放弃/调参"的运行, 均计一次试验。
+  包括: walk-forward fold 分析 (含 --folds-only)、extend 模拟考、sleeve/
+  参数实验、null calibration 等诊断登记。同配置的机械重跑同样计数——选择
+  压力来自"看到结果后的决策", 与配置是否变化无关; 高估只让 DSR 更保守,
+  方向安全。
+- 计数 = `experiments/` 目录下 `exp_*.json` 记录数
+  (`stats_correction.count_trials`); `_deflated_sharpe()` 的 `n_trials`
+  **不允许再传硬编码 6**, 未显式传参时自动读该计数 (下限 1)。
+- 若未来需要细分试验类别 (如只计"选型决策"不计机械重跑), 必须先修订
+  本条口径并同步更新 `count_trials` 与本文档, 禁止两处口径漂移。
+
+**4. 方向记录 (阶段二, 未实现)**
+- "发现折/确认折分离" (核心折再拆分为初筛+复验) 见 OPTIMIZATION_PLAN.md,
+  因压缩历史窗口, 需单独评估后再实施。

@@ -24,6 +24,8 @@
                  trading_quality, stability, statistical }
 """
 
+import os
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -111,7 +113,8 @@ class ModelEvaluator:
     def analyze_window(self, equity: np.ndarray, daily_returns: np.ndarray,
                        benchmark_returns: np.ndarray = None,
                        trades: List[Dict] = None,
-                       initial_capital: float = 100_000) -> Dict:
+                       initial_capital: float = 100_000,
+                       n_trials: int | None = None) -> Dict:
         """
         单窗口完整评测。
 
@@ -121,6 +124,8 @@ class ModelEvaluator:
           benchmark_returns: 基准每日收益率 (可选)
           trades: 交易列表 [{"date","symbol","action","price","qty","commission","pnl"}, ...]
           initial_capital: 初始资金
+          n_trials: DSR 试验次数。None → 自动读 experiments/ 累计登记数
+            (口径见 _deflated_sharpe / DEVELOPMENT_DISCIPLINE.md)
 
         Returns:
           dict: 27+ 指标
@@ -219,7 +224,9 @@ class ModelEvaluator:
                 down_capture = float(daily_returns[bench_down].mean() / benchmark_returns[bench_down].mean())
 
         # ── DSR (Deflated Sharpe Ratio) ──
-        dsr = _deflated_sharpe(sr, n_days, skewness, kurtosis)
+        dsr_n_trials = _resolve_n_trials(n_trials)
+        dsr = _deflated_sharpe(sr, n_days, skewness, kurtosis,
+                               n_trials=dsr_n_trials)
 
         # ── Rolling Sharpe ──
         rolling_sr = _rolling_sharpe_stats(daily_returns, window=126)  # 6M
@@ -245,6 +252,7 @@ class ModelEvaluator:
             "tracking_error": tracking_err, "information_ratio": ir,
             "alpha": alpha, "beta": beta,
             "deflated_sharpe": dsr,
+            "deflated_sharpe_n_trials": dsr_n_trials,
             "rolling_sharpe_min": rolling_sr["min"],
             "rolling_sharpe_mean": rolling_sr["mean"],
             "rolling_sharpe_std": rolling_sr["std"],
@@ -594,14 +602,40 @@ def _final_grade(score: float) -> str:
 #  辅助函数: DSR + Rolling Sharpe
 # ════════════════════════════════════════
 
-def _deflated_sharpe(sr: float, n_days: int, skew: float, kurt: float,
-                     n_trials: int = 6) -> float:
+def _resolve_n_trials(n_trials: int | None) -> int:
+    """解析 DSR 试验次数 (2026-09-02: 替代硬编码默认值 6)。
+
+    n_trials=None → 自动读 experiments/ 目录累计登记的实验条数
+    (stats_correction.count_trials)。试验口径: 每次经
+    experiment_tracker.log_experiment() 登记的运行算一次试验
+    (walk-forward fold 分析、sleeve/参数实验、诊断脚本均计入);
+    同配置机械重跑也计数——选择压力来自"看到结果后保留/放弃",
+    高估只让 DSR 更保守, 方向安全。完整口径见
+    DEVELOPMENT_DISCIPLINE.md "试验计数与 DSR" 条。
     """
-    Deflated Sharpe Ratio (Harvey & Liu 2015).
+    if n_trials is not None:
+        return max(1, int(n_trials))
+    try:
+        from stats_correction import count_trials
+        exp_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "experiments")
+        return max(1, count_trials(exp_dir))
+    except Exception:
+        return 1
+
+
+def _deflated_sharpe(sr: float, n_days: int, skew: float, kurt: float,
+                     n_trials: int | None = None) -> float:
+    """
+    Deflated Sharpe Ratio (Harvey & Liu 2015)。
     考虑多重测试后 Sharpe 的统计显著性。
+
+    n_trials: 试验次数; None → _resolve_n_trials 自动取 experiments/
+    累计登记数 (历史上硬编码 6, 2026-09-02 起改为真实计数)。
     """
     if sr <= 0 or n_days < 20:
         return 0.0
+    n_trials = _resolve_n_trials(n_trials)
     # 夏普标准误 (Lo 2002)
     se = np.sqrt((1 + 0.5 * sr**2 - skew * sr + kurt * sr**2 / 4) / n_days)
     if se <= 0:
@@ -609,7 +643,8 @@ def _deflated_sharpe(sr: float, n_days: int, skew: float, kurt: float,
     # Expected Max SR under null
     from scipy.stats import norm
     gamma = 0.5772  # Euler-Mascheroni constant
-    e_max = norm.ppf(1 - 1/n_trials) if n_trials > 0 else 0.0
+    # n_trials=1 时 ppf(0)=-inf 退化 → 单次试验无多重测试惩罚 (e_max=0)
+    e_max = norm.ppf(1 - 1/n_trials) if n_trials > 1 else 0.0
     # Deflated SR
     dsr_val = (sr - e_max * se) / se
     return float(max(0.0, norm.cdf(dsr_val)))

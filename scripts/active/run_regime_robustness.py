@@ -35,6 +35,7 @@ sys.path.insert(0, BASE_DIR)
 
 from logger import get_logger
 from regime_detector import RegimeDetector, Regime
+from stats_correction import apply_fdr_correction, load_fdr_correction
 
 log = get_logger("regime_robust")
 
@@ -42,9 +43,8 @@ IC_DIR = os.path.join(BASE_DIR, "data", "ic_validation")
 REPORT_PATH = os.path.join(IC_DIR, "p5_portfolio_report.json")
 BENCH_PATH = os.path.join(BASE_DIR, "data", "cache", "index_csi1000.parquet")
 OUTPUT_PATH = os.path.join(IC_DIR, "regime_robustness.json")
-
-# 与 run_corrected_backtest.py 一致
-FDR_ELIMINATED = {"fund_ocf_ps", "fund_sp"}
+# 与 run_corrected_backtest.py 一致: 动态 FDR 校正名单 (2026-09-02 起)
+FDR_REPORT_PATH = os.path.join(IC_DIR, "fdr_correction_report.json")
 EXPLORATORY_CATEGORIES = {"minute"}
 
 DEV_START = "2023-01-01"
@@ -69,11 +69,12 @@ BASE_TURNOVER = {
 
 
 def load_factors() -> list:
-    """加载因子 (与 run_corrected_backtest.py 一致: FDR + 探索性降级)。"""
+    """加载因子 (与 run_corrected_backtest.py 一致: 动态FDR + 探索性降级)。"""
     with open(REPORT_PATH, "r", encoding="utf-8") as f:
         report = json.load(f)
     factors = report.get("selected_factors", [])
-    factors = [f for f in factors if f["name"] not in FDR_ELIMINATED]
+    factors = apply_fdr_correction(
+        factors, load_fdr_correction(FDR_REPORT_PATH), log=log)
     factors = [f for f in factors if f.get("category") not in EXPLORATORY_CATEGORIES]
     return factors
 
