@@ -8,7 +8,6 @@ A股行业分类 — 基于代码前缀的粗分类
 """
 
 import os, json
-import numpy as np
 
 # ================================================================
 #  A股板块映射 — 基于代码前缀的粗分类 (Phase 2.3)
@@ -107,62 +106,3 @@ def build_a_share_sector_map(symbols: list) -> dict:
         pass
 
     return sector_map
-
-
-class SectorAnalyzer:
-    """A股板块分析器 — 基于前缀映射 + 同伴比较。"""
-
-    def __init__(self):
-        self._a_sectors: dict = {}
-
-    def load_sectors(self, symbols: list):
-        self._a_sectors = build_a_share_sector_map(symbols)
-
-    def get_sector(self, symbol: str) -> str:
-        return self._a_sectors.get(str(symbol), "其他")
-
-    def score_at(self, symbol: str, stock_prices: dict) -> float:
-        """
-        计算板块相对强度评分。
-
-        stock_prices: {symbol: pct_change_today}
-        返回: sector_score (-1 = 严重跑输板块, +1 = 大幅跑赢板块)
-        """
-        sector_info = self.get_sector(symbol)
-        peers = sector_info["peers"]
-        
-        # 收集同伴涨跌幅
-        peer_changes = []
-        for p in peers:
-            if p in stock_prices and stock_prices[p] is not None:
-                peer_changes.append(stock_prices[p])
-        
-        if len(peer_changes) < 2:
-            return 0.0
-        
-        peer_avg = np.mean(peer_changes)
-        peer_std = np.std(peer_changes) if len(peer_changes) > 1 else 0.01
-        
-        stock_change = stock_prices.get(symbol, 0)
-        
-        # Z-score: 个股涨跌 vs 板块平均
-        if peer_std > 0:
-            z_score = (stock_change - peer_avg) / peer_std
-        else:
-            z_score = 0
-        
-        # 映射到 -1~1
-        score = np.clip(z_score / 2, -1, 1)
-        
-        return float(score)
-
-    def analyze(self, symbol: str, stock_prices: dict) -> dict:
-        """完整板块分析。"""
-        sector_info = self.get_sector(symbol)
-        score = self.score_at(symbol, stock_prices)
-        
-        return {
-            "sector": sector_info["sector"],
-            "sector_score": score,
-            "vs_peers": "跑赢" if score > 0.2 else ("跑输" if score < -0.2 else "同步"),
-        }
