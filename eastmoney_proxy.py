@@ -8,13 +8,33 @@ eastmoney_proxy.py — 东财接口代理初始化 (cheapproxy / akshare-proxy-p
     import eastmoney_proxy
     eastmoney_proxy.setup_from_config()
 
-配置: config.yaml 的 eastmoney_proxy 段 (enabled/gateway/auth_token/hook_domains)
+配置: config.yaml 的 eastmoney_proxy 段 (enabled/gateway/hook_domains)
+凭据: 环境变量 CHEAPPROXY_AUTH_TOKEN (项目根 .env, 不入库; 2026-09-02 起
+      不再从 config.yaml 读取——公开仓库硬编码凭据属泄露事故)
 """
 
 import os
 
 # 必须早于 akshare/efinance 的任何 import
 _CONFIG_LOADED = False
+
+
+def _load_env_file(base_dir: str = None) -> None:
+    """加载项目根 .env 到环境变量 (不覆盖已设置的值; 同 alerter.py 惯例)。"""
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(base_dir, ".env")
+    if not os.path.exists(env_path):
+        return
+    try:
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ.setdefault(key.strip(), val.strip())
+    except OSError:
+        pass
 
 
 def load_proxy_config(base_dir: str = None) -> dict:
@@ -49,7 +69,8 @@ def setup_from_config(base_dir: str = None, force: bool = False) -> bool:
         return False
 
     gateway = cfg.get("gateway", "101.201.173.125")
-    token = cfg.get("auth_token", "")
+    _load_env_file(base_dir)
+    token = os.environ.get("CHEAPPROXY_AUTH_TOKEN", "")
     retry = int(cfg.get("retry", 30))
     hook_domains = cfg.get("hook_domains", [])
 

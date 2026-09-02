@@ -82,6 +82,9 @@ trained_weights.json
 # ZCode plans
 .zcode/
 
+# Secrets (环境变量凭据, 严禁入库)
+.env
+
 # LGBM fold compare panel cache (large, rebuildable)
 data/ic_validation/panels_cache_lgbm/
 data/ic_validation/panels_cache_lgbm_tmp/

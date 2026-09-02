@@ -2,7 +2,7 @@
 import akshare_proxy_patch
 akshare_proxy_patch.install_patch(
     "101.201.173.125",
-    auth_token="20260809YL16REJA",
+    auth_token="[REDACTED]",
     retry=30,
     hook_domains=[
         "fund.eastmoney.com", "push2.eastmoney.com", "push2his.eastmoney.com",

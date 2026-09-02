@@ -205,7 +205,7 @@ broker:
 eastmoney_proxy:
   enabled: true
   gateway: "101.201.173.125"
-  auth_token: "20260809YL16REJA"
+  auth_token: "[REDACTED-见.env CHEAPPROXY_AUTH_TOKEN]"
   retry: 30
   # ⚠️ hook_domains 只保留 push2/push2his! (2026-08-09 深夜实测结论)
   # 加其他域名 (fund/push2ex/datacenter-web/emweb/searchapi) 会导致 efinance
