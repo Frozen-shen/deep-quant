@@ -143,7 +143,8 @@ class TestConfig(unittest.TestCase):
 
     def test_config_loadable(self):
         import yaml
-        with open(os.path.join(os.path.dirname(__file__), "..", "config.yaml")) as f:
+        with open(os.path.join(os.path.dirname(__file__), "..", "config.yaml"),
+                  encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         self.assertIn("data_partition", cfg)
         self.assertIn("universe", cfg)

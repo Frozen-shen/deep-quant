@@ -1,0 +1,171 @@
+{
+  "fold_7": "2026-01-05 ~ 2026-06-30",
+  "hypotheses": {
+    "h1": {
+      "n_bets_dates": 6,
+      "n_factors_bet": 168,
+      "n_factors_with_realized_ic": 98,
+      "excluded_non_dsl": [
+        "amplitude_20d",
+        "amplitude_5d",
+        "aux_gdhs_change_pct",
+        "aux_lhb_net_20d",
+        "aux_lockup_pressure_30d",
+        "aux_margin_balance_ratio",
+        "aux_margin_change_5d",
+        "body_ratio",
+        "channel_high_60",
+        "channel_low_20",
+        "close_position_20d",
+        "cord_10",
+        "cord_20",
+        "cord_30",
+        "cord_5",
+        "cord_60",
+        "corr_pv_10",
+        "corr_pv_20",
+        "doji",
+        "fund_accruals",
+        "fund_bp",
+        "fund_debt_ratio",
+        "fund_ep",
+        "fund_net_margin",
+        "fund_ocf_yield",
+        "fund_pb",
+        "fund_roe",
+        "fund_roe_ttm",
+        "high_low_ratio_5d",
+        "imax_10",
+        "imax_20",
+        "imax_30",
+        "imax_5",
+        "imax_60",
+        "imin_10",
+        "imin_20",
+        "imin_30",
+        "imin_5",
+        "imin_60",
+        "imxd_10",
+        "imxd_20",
+        "imxd_30",
+        "imxd_5",
+        "imxd_60",
+        "ind_mom_60",
+        "intraday_range_20d",
+        "k_len",
+        "liq_ratio",
+        "market_cap",
+        "min_am_pm_ratio",
+        "min_close_strength",
+        "min_intraday_trend",
+        "min_large_order_flow",
+        "min_open_gap",
+        "min_realized_skew",
+        "min_realized_vol",
+        "min_vol_concentration",
+        "overnight_return_20d",
+        "range_20d",
+        "turnover_max5",
+        "turnover_spike",
+        "turnover_trend",
+        "turnover_vol",
+        "vma_10",
+        "vma_20",
+        "vma_30",
+        "vma_5",
+        "vma_60",
+        "vol_change_5d",
+        "vol_price_sync",
+        "vol_ratio_20d",
+        "vol_up_price_up",
+        "volume_cv_20d",
+        "volume_price_corr_20d",
+        "vstd_10",
+        "vstd_30",
+        "vstd_5",
+        "vstd_60",
+        "wvma_10",
+        "wvma_20",
+        "wvma_30",
+        "wvma_60"
+      ],
+      "flip_count": 8,
+      "flip_weight_share": 0.11099252446040528,
+      "per_bet_hits": [
+        {
+          "date": "2026-01-05",
+          "hit": 78,
+          "n": 86
+        },
+        {
+          "date": "2026-02-02",
+          "hit": 78,
+          "n": 86
+        },
+        {
+          "date": "2026-03-10",
+          "hit": 78,
+          "n": 86
+        },
+        {
+          "date": "2026-04-08",
+          "hit": 78,
+          "n": 86
+        },
+        {
+          "date": "2026-05-11",
+          "hit": 78,
+          "n": 86
+        },
+        {
+          "date": "2026-06-08",
+          "hit": 78,
+          "n": 86
+        }
+      ],
+      "top_flipped": [
+        [
+          "rev_mom_spread",
+          0.4,
+          -0.0003
+        ],
+        [
+          "sumd_20",
+          -0.4,
+          0.0038
+        ],
+        [
+          "sumn_20",
+          0.4,
+          -0.0047
+        ],
+        [
+          "sump_20",
+          -0.4,
+          0.003
+        ],
+        [
+          "resi_60",
+          -0.3501,
+          0.0035
+        ],
+        [
+          "sharpe_20d",
+          0.2544,
+          -0.0043
+        ],
+        [
+          "realized_vol_ratio",
+          -0.1777,
+          0.0171
+        ],
+        [
+          "return_90d",
+          0.0409,
+          -0.0125
+        ]
+      ],
+      "note": "IC 为 21 日前瞻收益逐日截面 spearman 均值 (重叠标签, 仅供方向判断)"
+    }
+  }
+}

@@ -1,8 +1,10 @@
 """
 scripts/active/run_regime_robustness.py — Regime 参数敏感性测试
 
-目的: 检验 regime_detector.py 中硬编码的因子权重乘数和换手参数是否过拟合。
-方法: 对 Development 期 (2023-01 ~ 2024-06) 跑多组参数, 比较结果差异。
+目的: 检验 regime_detector.py 中因子权重乘数和换手参数是否过拟合。
+方法:
+  - 默认模式: 对 Development 期 (2023-01 ~ 2024-06) 跑多组参数, 比较结果差异。
+  - --folds 模式: 对核心五折验证窗 (2020~2024) 跑基线与候选, 再做跨折配对检验。
 
 参数组:
   - Original:     (up_pos=2.0, up_neg=0.3, down_pos=0.5, down_neg=1.5)
@@ -16,6 +18,7 @@ scripts/active/run_regime_robustness.py — Regime 参数敏感性测试
 
 用法:
   py scripts/active/run_regime_robustness.py
+  py scripts/active/run_regime_robustness.py --folds
 """
 
 import os
@@ -46,6 +49,30 @@ OUTPUT_PATH = os.path.join(IC_DIR, "regime_robustness.json")
 # 与 run_corrected_backtest.py 一致: 动态 FDR 校正名单 (2026-09-02 起)
 FDR_REPORT_PATH = os.path.join(IC_DIR, "fdr_correction_report.json")
 EXPLORATORY_CATEGORIES = {"minute"}
+
+
+def require_fdr_report_for_folds():
+    """五折验证的硬门禁：拒绝旧 p5/无 FDR 的降级输入。"""
+    if not os.path.isfile(FDR_REPORT_PATH):
+        raise RuntimeError(
+            f"缺少当前 fdr_correction_report.json: {FDR_REPORT_PATH}; "
+            "请先运行 py scripts/active/run_walkforward_backtest.py "
+            "--folds --folds-only 生成当前 FDR 产物，再运行 --folds。"
+        )
+    try:
+        with open(FDR_REPORT_PATH, "r", encoding="utf-8") as f:
+            report = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"fdr_correction_report.json 无法读取: {FDR_REPORT_PATH}"
+        ) from exc
+    required = {"stable_factors", "rejected_factors", "meta"}
+    if not required.issubset(report):
+        raise RuntimeError(
+            f"fdr_correction_report.json 结构不完整，缺少: "
+            f"{sorted(required - set(report))}"
+        )
+    return report
 
 DEV_START = "2023-01-01"
 DEV_END = "2024-06-30"
@@ -476,7 +503,10 @@ def main():
         log.info("  Regime profile 5 折验证 (P4, 2026-09-03)")
     else:
         log.info("  Regime 参数敏感性测试")
-    log.info("  期间: %s ~ %s (Development)", DEV_START, DEV_END)
+    if args.folds:
+        log.info("  期间: 核心五折验证窗 2020-01-01 ~ 2024-12-31")
+    else:
+        log.info("  期间: %s ~ %s (Development)", DEV_START, DEV_END)
     log.info("=" * 60)
 
     # 加载参数
@@ -492,6 +522,13 @@ def main():
     }
     log.info("  top_k=%d, lot=%d, slippage=%dbps",
              bt_config["top_k"], bt_config["lot_size"], bt_config["slippage_bps"])
+
+    if args.folds:
+        try:
+            require_fdr_report_for_folds()
+        except RuntimeError as exc:
+            log.error("P4 五折验证输入不合规: %s", exc)
+            raise SystemExit(2)
 
     # 加载因子
     factors = load_factors()

@@ -1,5 +1,5 @@
 """
-修复 data_store 中因腾讯备用源导致的 amount/turnover 缺失问题。
+修复和清理 data_store 中的日线数据。
 
 问题背景:
   data_store 使用腾讯备用源 (tencent_fallback) 构建,
@@ -16,6 +16,7 @@
   py scripts/active/fix_data_quality.py --limit 10     # 测试模式, 只修复前 10 只
   py scripts/active/fix_data_quality.py --resume       # 跳过已修复的文件
   py scripts/active/fix_data_quality.py --validate     # 仅验证, 不修复
+  py scripts/active/fix_data_quality.py --canonicalize  # 清理坏行并补齐未复权字段
 
 预计耗时: ~100 分钟 (3000+ 只股票, 每只约 2 秒)
 """
@@ -39,6 +40,192 @@ META_FILE = os.path.join(DATA_STORE, "_meta.json")
 # ── 参数 ─────────────────────────────────────────────────────────────
 PROGRESS_INTERVAL = 50      # 每 N 只打印进度
 RATE_LIMIT_SLEEP = 0.1      # baostock 请求间隔 (baostock 限速较宽松)
+
+# 这些文件在数据源切换点之后出现连续的千倍/万倍价格，且切换前后
+# 不满足任何合理复权关系；不是可用的拆分/分红事件，因此整段隔离。
+KNOWN_CORRUPT_TAIL_STARTS = {
+    "000046": "2023-12-28",
+    "000540": "2023-05-19",
+    "000806": "2023-07-06",
+    "000961": "2024-05-09",
+    "000979": "2018-12-28",
+    "002450": "2021-05-30",
+}
+
+
+def purge_invalid_rows(df: pd.DataFrame, code: str):
+    """删除可确定为脏数据的行，保留无法证明错误的正常行。
+
+    规则只处理：已确认的源切换尾段、非正/不可能 OHLC、周末伪交易日，
+    以及负成交量/成交额。普通停牌的零成交量不在这里删除。
+    """
+    work = df.copy()
+    work["date"] = pd.to_datetime(work["date"], errors="coerce")
+    dates = work["date"]
+
+    reasons = {}
+    tail_start = KNOWN_CORRUPT_TAIL_STARTS.get(str(code))
+    tail = (dates >= pd.Timestamp(tail_start)) if tail_start else pd.Series(
+        False, index=work.index
+    )
+    reasons["known_corrupt_tail"] = int(tail.sum())
+
+    ohlc_cols = [c for c in ["open", "high", "low", "close"]
+                 if c in work.columns]
+    nonpositive = (work[ohlc_cols] <= 0).any(axis=1) if ohlc_cols else pd.Series(
+        False, index=work.index
+    )
+    reasons["nonpositive_ohlc"] = int(nonpositive.sum())
+
+    if all(c in work.columns for c in ["open", "high", "low", "close"]):
+        invalid_ohlc = (
+            (work["low"] > work[["open", "close", "high"]].min(axis=1))
+            | (work["high"] < work[["open", "close", "low"]].max(axis=1))
+        )
+    else:
+        invalid_ohlc = pd.Series(False, index=work.index)
+    reasons["invalid_ohlc"] = int(invalid_ohlc.sum())
+
+    weekend = dates.dt.weekday >= 5
+    reasons["weekend"] = int(weekend.sum())
+    negative_volume = (work["volume"] < 0) if "volume" in work.columns else pd.Series(
+        False, index=work.index
+    )
+    negative_amount = (work["amount"] < 0) if "amount" in work.columns else pd.Series(
+        False, index=work.index
+    )
+    reasons["negative_volume"] = int(negative_volume.sum())
+    reasons["negative_amount"] = int(negative_amount.sum())
+
+    remove = (tail | nonpositive | invalid_ohlc | weekend |
+              negative_volume | negative_amount | dates.isna())
+    cleaned = work.loc[~remove].sort_values("date").reset_index(drop=True)
+    return cleaned, {
+        "code": str(code),
+        "input_rows": int(len(work)),
+        "removed_rows": int(remove.sum()),
+        "output_rows": int(len(cleaned)),
+        "reasons": reasons,
+        "tail_start": tail_start,
+    }
+
+
+def reconcile_unadjusted_fields(unadjusted: pd.DataFrame,
+                                qfq: pd.DataFrame):
+    """用同一 data_store 中复权日线的同日成交字段补未复权表缺失值。
+
+    amount/turnover 不改变价格口径；amount 只接受正值，turnover 接受非负值。
+    不做跨日插值，也不使用旧 data_cache/unadjusted。
+    """
+    base = unadjusted.copy()
+    base["date"] = pd.to_datetime(base["date"], errors="coerce")
+    source = qfq.copy()
+    source["date"] = pd.to_datetime(source["date"], errors="coerce")
+    fields = [f for f in ["amount", "turnover"] if f in source.columns]
+    if not fields:
+        return base, {"filled": {"amount": 0, "turnover": 0}}
+
+    source = source[["date"] + fields].drop_duplicates("date", keep="last")
+    source = source.rename(columns={f: f"{f}__qfq" for f in fields})
+    merged = base.merge(source, on="date", how="left", sort=False)
+    filled = {"amount": 0, "turnover": 0}
+    for field in fields:
+        if field not in merged.columns:
+            merged[field] = np.nan
+        candidate = merged[f"{field}__qfq"]
+        valid = candidate.notna()
+        if field == "amount":
+            valid &= candidate > 0
+        else:
+            valid &= candidate >= 0
+        mask = merged[field].isna() & valid
+        merged.loc[mask, field] = candidate[mask]
+        filled[field] = int(mask.sum())
+        merged = merged.drop(columns=[f"{field}__qfq"])
+    return merged, {"filled": filled}
+
+
+def _new_backup_dir(root: str) -> str:
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(root, f"backup_data_unification_{stamp}")
+    os.makedirs(path, exist_ok=False)
+    return path
+
+
+def canonicalize_data_store():
+    """清理两个正式日线目录，并将未复权字段与同源复权表对齐。"""
+    backup_dir = _new_backup_dir(DATA_STORE)
+    reports = []
+    total_purged = 0
+    total_filled = {"amount": 0, "turnover": 0}
+
+    # 先清理复权根目录，再清理唯一正式未复权目录。
+    for directory in [DATA_STORE, os.path.join(DATA_STORE, "unadjusted")]:
+        if not os.path.isdir(directory):
+            continue
+        rel_dir = os.path.relpath(directory, DATA_STORE)
+        for path in sorted(os.listdir(directory)):
+            if not path.endswith(".parquet") or not path[:6].isdigit():
+                continue
+            full_path = os.path.join(directory, path)
+            code = path[:-8]
+            try:
+                original = pd.read_parquet(full_path)
+                cleaned, report = purge_invalid_rows(original, code)
+                if report["removed_rows"]:
+                    backup_path = os.path.join(backup_dir, rel_dir, path)
+                    os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                    import shutil
+                    shutil.copy2(full_path, backup_path)
+                    cleaned.to_parquet(full_path, index=False, engine="pyarrow")
+                    total_purged += report["removed_rows"]
+                    reports.append({"action": "purge", **report,
+                                    "path": os.path.relpath(full_path, DATA_STORE)})
+            except Exception as exc:
+                reports.append({"action": "purge_error", "path": full_path,
+                                "error": str(exc)})
+
+    unadj_dir = os.path.join(DATA_STORE, "unadjusted")
+    for path in sorted(os.listdir(unadj_dir)) if os.path.isdir(unadj_dir) else []:
+        if not path.endswith(".parquet") or not path[:6].isdigit():
+            continue
+        code = path[:-8]
+        unadj_path = os.path.join(unadj_dir, path)
+        qfq_path = os.path.join(DATA_STORE, path)
+        if not os.path.exists(qfq_path):
+            continue
+        try:
+            unadj = pd.read_parquet(unadj_path)
+            qfq = pd.read_parquet(qfq_path, columns=["date", "amount", "turnover"])
+            repaired, report = reconcile_unadjusted_fields(unadj, qfq)
+            if sum(report["filled"].values()):
+                backup_path = os.path.join(backup_dir, "unadjusted", path)
+                os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                import shutil
+                if not os.path.exists(backup_path):
+                    shutil.copy2(unadj_path, backup_path)
+                repaired.to_parquet(unadj_path, index=False, engine="pyarrow")
+                for field in total_filled:
+                    total_filled[field] += report["filled"].get(field, 0)
+                reports.append({"action": "reconcile", "code": code,
+                                "path": os.path.relpath(unadj_path, DATA_STORE),
+                                **report})
+        except Exception as exc:
+            reports.append({"action": "reconcile_error", "path": unadj_path,
+                            "error": str(exc)})
+
+    report_path = os.path.join(DATA_STORE, "_data_unification_report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump({"canonical_unadjusted_dir": os.path.join(DATA_STORE, "unadjusted"),
+                   "backup_dir": backup_dir, "purged_rows": total_purged,
+                   "filled_fields": total_filled, "files": reports,
+                   "timestamp": datetime.now().isoformat(timespec="seconds")},
+                  f, ensure_ascii=False, indent=2, default=str)
+    log(f"口径统一完成: 删除 {total_purged} 行, 补齐 amount/turnover {total_filled}")
+    log(f"修正前备份: {backup_dir}")
+    log(f"审计报告: {report_path}")
+    return {"backup_dir": backup_dir, "purged_rows": total_purged,
+            "filled_fields": total_filled, "reports": reports}
 
 
 def log(msg: str):
@@ -479,7 +666,7 @@ def run(dry_run: bool = False,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="修复 data_store 中缺失的 amount/turnover 数据 (使用 baostock)")
+        description="修复和清理 data_store 中的日线数据")
     parser.add_argument("--dry-run", action="store_true",
                         help="仅统计待修复数量, 不实际修改")
     parser.add_argument("--limit", type=int, default=None,
@@ -488,8 +675,14 @@ def main():
                         help="断点续传: 跳过已修复的文件")
     parser.add_argument("--validate", action="store_true",
                         help="仅验证数据质量, 不修复")
+    parser.add_argument("--canonicalize", action="store_true",
+                        help="清理坏行，并用同源复权表补齐未复权 amount/turnover")
 
     args = parser.parse_args()
+
+    if args.canonicalize:
+        canonicalize_data_store()
+        return
 
     run(
         dry_run=args.dry_run,

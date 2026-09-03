@@ -1,6 +1,6 @@
 """
 Fetch unadjusted (不复权) daily OHLCV data for all cached stocks.
-Saves to data_cache/unadjusted/SYMBOL.parquet.
+Saves to data_store/unadjusted/SYMBOL.parquet.
 
 Usage: python fetch_unadjusted.py
 """
@@ -11,10 +11,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from data_cache import get_cached_symbols, CACHE_DIR
+from data_cache import get_cached_symbols, UNADJUSTED_DIR
 from data_fetcher import DataFetcher
 
-UNADJUSTED_DIR = os.path.join(CACHE_DIR, "unadjusted")
 START_DATE = "20180101"
 END_DATE = "20260710"
 

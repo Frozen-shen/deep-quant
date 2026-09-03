@@ -86,7 +86,7 @@ def load_bt_config() -> dict:
         cfg = yaml.safe_load(f)
     return {
         "rebalance_days": 20,
-        "top_k": cfg["execution"]["top_k"],            # 30
+        "top_k": cfg["execution"]["top_k"],            # 当前 config.yaml=20
         "initial_capital": cfg["execution"]["initial_capital"],
         "lot_size": cfg["execution"]["lot_size"],
         "slippage_bps": cfg["execution"]["slippage_bps"],
@@ -619,7 +619,7 @@ def main():
             "description": "修正版回测: PIT universe + 统一参数 + FDR",
             "fixes": [
                 "幸存者偏差: 每个调仓日使用 PIT universe (CSI300+CSI1000)",
-                "参数漂移: top_k 统一为 config.yaml 值 (30)",
+                "参数漂移: top_k 统一为 config.yaml 值 (当前20)",
                 "FDR: 动态校正名单 (fdr_correction_report.json, 逐折 BH)",
                 "BLIND 已污染 (trial_count>=3): 仅报告 Dev + TEST",
             ],

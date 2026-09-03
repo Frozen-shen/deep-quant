@@ -2,10 +2,10 @@
 fetch_unadjusted_batch.py — 批量获取未复权日线数据
 
 用途: 涨跌停检测需要未复权价格 (复权后10%/20%阈值失真)。
-产出: data_cache/unadjusted/{code}.parquet
+产出: data_store/unadjusted/{code}.parquet
 
 数据源: 腾讯财经 API (与 fetch_daily_data.py 相同的 tencent 源)
-当前缺口: 仅176/1550只有未复权数据, 需补充到全覆盖。
+正式目录: data_store/unadjusted (与日线主库同源)
 
 用法:
   py scripts/fetch_unadjusted_batch.py --check-only   # 查看覆盖率
@@ -22,8 +22,8 @@ import pandas as pd
 import requests
 
 BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-DATA_CACHE = BASE_DIR / "data_cache"
-UNADJ_DIR = DATA_CACHE / "unadjusted"
+DATA_STORE = BASE_DIR / "data_store"
+UNADJ_DIR = DATA_STORE / "unadjusted"
 
 RATE_LIMIT = 0.5  # 秒/请求
 

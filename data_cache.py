@@ -15,6 +15,8 @@ from data_fetcher import DataFetcher
 # 主数据目录: data_store (3000+ 只, 2018-2026, 由 fetch_daily_data.py 维护)
 # 旧 data_cache/ 目录保留但不再作为主源
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_store")
+# 唯一正式未复权日线目录。历史 data_cache/unadjusted 已冻结，不再作为输入。
+UNADJUSTED_DIR = os.path.join(CACHE_DIR, "unadjusted")
 
 # 默认股票池 (向后兼容)
 SYMBOLS = [

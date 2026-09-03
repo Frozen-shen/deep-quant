@@ -865,7 +865,7 @@ def _ffill(arr: np.ndarray) -> np.ndarray:
 
 # ── VWAP 面板 (方案B v24, 2026-08-11) ──
 # 日 VWAP = (未复权 amount/volume × 单位修正) × 复权因子, 对齐回测日线复权基准。
-# 数据源: data_cache/unadjusted/{sym}.parquet (真实量额 + 未复权 close) +
+# 数据源: data_store/unadjusted/{sym}.parquet (真实量额 + 未复权 close) +
 #         data_store/{sym}.parquet (复权 close, 计算因子 close_adj/close_u)。
 # ★ 单位自动检测 (2026-08-11 实测发现): 历史 fetch 混用 baostock/腾讯源,
 #   volume 单位不一致 (部分股票=股, 部分=手, 如 000001=手/601318=股)。
@@ -885,7 +885,10 @@ def _build_vwap_panel(symbols: list) -> dict:
     global _vwap_cache
     if _vwap_cache:
         return _vwap_cache
-    u_dir = os.path.join(BASE_DIR, "data_cache", "unadjusted")
+    # data_cache.py 将 data_store 声明为唯一正式数据根目录；不要再读取
+    # 已冻结的 data_cache/unadjusted，避免日线和 VWAP 使用不同快照。
+    from data_cache import UNADJUSTED_DIR
+    u_dir = UNADJUSTED_DIR
     adj_dir = os.path.join(BASE_DIR, "data_store")
     n_ok = 0
     for i, sym in enumerate(symbols):
