@@ -60,6 +60,22 @@ PARAM_SETS = {
     "Aggressive":    {"up_pos": 3.0, "up_neg": 0.1, "down_pos": 0.3, "down_neg": 2.0, "turn_scale": 1.0},
 }
 
+# ── 5 折验证 (--folds 模式, 2026-09-03 P4) ──
+# 基线 = Disabled (乘数全 1.0 = 无 regime 权重调整); 候选 = REGIME_PROFILES
+# 各 profile + 原敏感性参数组。核心折窗口与 run_walkforward_backtest.FOLDS
+# 前 5 折的验证窗一致 (2020~2024 五个独立年份, 同一组 p5+FDR 冻结权重 →
+# 纯 overlay 效应跨市场年份比较)。因子/权重冻结是明确限制 (非滚动重训),
+# 与 run_corrected_backtest.py 同一口径, 见验证记录说明。
+DISABLED_PARAMS = {"up_pos": 1.0, "up_neg": 1.0, "down_pos": 1.0, "down_neg": 1.0,
+                   "turn_scale": 1.0}
+CORE_FOLD_WINDOWS = [
+    ("2020-01-01", "2020-12-31"),
+    ("2021-01-01", "2021-12-31"),
+    ("2022-01-01", "2022-12-31"),
+    ("2023-01-01", "2023-12-31"),
+    ("2024-01-01", "2024-12-31"),
+]
+
 # 基准换手参数 (与 regime_detector.get_turnover_params 一致)
 BASE_TURNOVER = {
     Regime.TREND_UP:   {"hold_thresh": 8,  "n_drop": 8, "cost_threshold": 0.02, "sell_rank_buffer": 2},
@@ -187,12 +203,18 @@ def compute_composite_scores(factors, all_data, factor_cache, today,
 
 
 def run_single_backtest(factors, all_data, factor_cache, fund_panel,
-                        bt_config, regime_det, params, label):
-    """单组参数回测 (简化版: 无PIT, 无DateRangeGuard)。"""
+                        bt_config, regime_det, params, label,
+                        win_start=None, win_end=None):
+    """单组参数回测 (简化版: 无PIT, 无DateRangeGuard)。
+
+    win_start/win_end: 验证窗口 (默认 DEV_START~DEV_END)。
+    """
     from model.engine import SimpleBacktest
     from trading_rules import TradingRules
     from portfolio_ranker import PortfolioRanker
 
+    win_start = win_start or DEV_START
+    win_end = win_end or DEV_END
     bt = SimpleBacktest(
         initial_capital=bt_config["initial_capital"],
         top_k=bt_config["top_k"],
@@ -213,7 +235,7 @@ def run_single_backtest(factors, all_data, factor_cache, fund_panel,
     for df in all_data.values():
         all_dates.update(pd.to_datetime(df["date"]).dt.date.tolist())
     bt_dates = sorted(d for d in all_dates
-                      if pd.Timestamp(DEV_START).date() <= d <= pd.Timestamp(DEV_END).date())
+                      if pd.Timestamp(win_start).date() <= d <= pd.Timestamp(win_end).date())
     if not bt_dates:
         return None
 
@@ -308,8 +330,8 @@ def run_single_backtest(factors, all_data, factor_cache, fund_panel,
         bdf = pd.read_parquet(BENCH_PATH)
         bdf["date"] = pd.to_datetime(bdf["date"])
         bdf = bdf.set_index("date")
-        rs = pd.Timestamp(DEV_START)
-        re_ = pd.Timestamp(DEV_END)
+        rs = pd.Timestamp(win_start)
+        re_ = pd.Timestamp(win_end)
         bm = (bdf.index >= rs) & (bdf.index <= re_)
         bs = bdf.loc[bm, "close"]
         if len(bs) > 1:
@@ -354,11 +376,106 @@ def run_single_backtest(factors, all_data, factor_cache, fund_panel,
     }
 
 
+def run_fold_validation(factors, all_data, factor_cache, fund_panel,
+                        bt_config, regime_det):
+    """(P4, 2026-09-03) 5 个核心折窗口 × 候选组 → overlay_validation 判定。
+
+    基线 = Disabled (无 regime 权重调整); 候选 = PARAM_SETS (含生产值
+    Conservative)。结果写入 experiment_tracker + regime_robustness_folds.json。
+    明确限制: 因子/权重为 p5+FDR 冻结集 (run_corrected_backtest 口径),
+    非滚动重训 — 5 个独立市场年份上的纯 overlay 效应比较。
+    """
+    from overlay_validation import validate_overlay_candidates
+    from experiment_tracker import log_experiment
+
+    t0 = time.time()
+    labels = ["Disabled"] + list(PARAM_SETS.keys())
+    params_by = {"Disabled": DISABLED_PARAMS, **PARAM_SETS}
+    matrix = {lab: {} for lab in labels}
+    raw = []
+    for ws, we in CORE_FOLD_WINDOWS:
+        win_key = f"{ws[:4]}-{we[:4]}"
+        for lab in labels:
+            log.info("[%s] %s 折内回测开始 (%.0fs)", lab, win_key, time.time() - t0)
+            r = run_single_backtest(factors, all_data, factor_cache,
+                                    fund_panel, bt_config, regime_det,
+                                    params_by[lab], lab, win_start=ws,
+                                    win_end=we)
+            if r:
+                matrix[lab][win_key] = float(r["excess_annual"])
+                raw.append({**r, "window": win_key})
+                log.info("  %s %s: 超额 %+.2fpp (%.0fs)", lab, win_key,
+                         r["excess_annual"], time.time() - t0)
+    log.info("超额矩阵: %s", json.dumps(matrix, ensure_ascii=False))
+
+    validation = validate_overlay_candidates(
+        overlay_name="regime.profile",
+        base_excess_by_fold=matrix["Disabled"],
+        cand_excess_by_fold={k: v for k, v in matrix.items() if k != "Disabled"},
+        alpha=0.10, min_consistent_folds=3, n_folds=len(CORE_FOLD_WINDOWS))
+    for lab, verdict in validation["verdicts"].items():
+        log.info("  [判定] %-16s → %s", lab, verdict)
+
+    out = {
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "description": ("Regime profile 5 折验证 (2020~2024 核心折窗口; "
+                            "p5+FDR 冻结权重, 简化回测无 PIT; 基线=Disabled 无乘数)"),
+            "method": validation["method"],
+            "alpha": validation["alpha"],
+            "windows": CORE_FOLD_WINDOWS,
+            "n_stocks": len(all_data),
+            "total_runtime_s": round(time.time() - t0, 1),
+        },
+        "matrix_excess_annual": matrix,
+        "validation": validation,
+        "results": raw,
+    }
+    out_path = os.path.join(IC_DIR, "regime_robustness_folds.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    log.info("  结果: %s", out_path)
+
+    # experiment_tracker 留痕 (验证方法 / 通过候选 / 否决候选及理由)
+    try:
+        accepted = [k for k, v in validation["verdicts"].items() if v == "accept"]
+        rejected = {k: v for k, v in validation["verdicts"].items() if v != "accept"}
+        log_experiment(
+            script_name="run_regime_robustness --folds",
+            partition="fold_1..5 (2020-2024)",
+            config={"overlay": "regime.profile", "method": validation["method"],
+                    "alpha": validation["alpha"],
+                    "min_consistent_folds": validation["min_consistent_folds"],
+                    "baseline": "Disabled(1,1,1,1)",
+                    "candidates": sorted(matrix.keys() - {"Disabled"}),
+                    "windows": CORE_FOLD_WINDOWS},
+            results={"matrix_excess_annual": matrix,
+                     "validation": validation},
+            notes=(f"accepted={accepted} "
+                   f"rejected={rejected} "
+                   f"生产值 Conservative 判定={validation['verdicts'].get('Conservative')} "
+                   "(因子权重为 p5+FDR 冻结集, 非滚动重训; 简化引擎无 PIT/分钟)"),
+            experiments_dir=os.path.join(BASE_DIR, "experiments"),
+        )
+        log.info("  experiment_tracker 登记完成")
+    except Exception as e:
+        log.warning("experiment_tracker 登记失败: %s", e)
+
+
 def main():
     t_start = time.time()
 
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--folds", action="store_true",
+                    help="5 折验证模式 (2020~2024 核心折窗口 × 候选组, P4)")
+    args = ap.parse_args()
+
     log.info("=" * 60)
-    log.info("  Regime 参数敏感性测试")
+    if args.folds:
+        log.info("  Regime profile 5 折验证 (P4, 2026-09-03)")
+    else:
+        log.info("  Regime 参数敏感性测试")
     log.info("  期间: %s ~ %s (Development)", DEV_START, DEV_END)
     log.info("=" * 60)
 
@@ -420,6 +537,12 @@ def main():
 
     # Regime 检测器
     regime_det = RegimeDetector.from_benchmark_parquet(BENCH_PATH)
+
+    if args.folds:
+        run_fold_validation(factors, all_data, factor_cache, fund_panel,
+                            bt_config, regime_det)
+        log.info("  总耗时: %.0fs", time.time() - t_start)
+        return
 
     # 跑各组参数
     results = []
