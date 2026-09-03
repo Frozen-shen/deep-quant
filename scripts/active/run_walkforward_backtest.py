@@ -2224,6 +2224,94 @@ def build_extend_sleeve_weights(fold_out: dict, styles_cfg: dict | None) -> list
     return out or None
 
 
+def _parse_window(rng) -> tuple:
+    """把 (s, e) / [s, e] / "s ~ e" 解析为 (pd.Timestamp, pd.Timestamp)。"""
+    if isinstance(rng, str):
+        parts = rng.split("~") if "~" in rng else rng.split(",")
+        s, e = parts[0].strip(), parts[-1].strip()
+    else:
+        s, e = rng[0], rng[-1]
+    return pd.Timestamp(s), pd.Timestamp(e)
+
+
+def check_frozen_vs_rolling_divergence(
+        fold_results: dict, extend_result: dict, folds: list,
+        threshold_pp: float = 15.0) -> dict:
+    """冻结权重 (extend_val) vs 滚动重训 (级联折) 超额年化发散度监控。
+
+    背景 (2026-08-29 wf7-cascade-findings.md 人工诊断 → 本函数常态化为代码检查):
+    extend_val 用核心折冻结的稳定因子权重回测; 级联折 (fold_6/7) 则每折滚动重训
+    重选因子。两者覆盖同一区间 (2025-01~2026-06) 却给出方向相反结论
+    (v29 实际: extend 超额 +44.2pp vs fold_6/7 滚动均值 -21.1pp) —— 冻结权重
+    "恰好适配历史行情" 的幻觉会高估实盘。本检查在每次 --folds + --extend-val
+    运行后自动执行: 找到验证窗被 extend 区间完整覆盖的级联折, 比较两者超额年化,
+    |差值| 超阈值 (config fold.frozen_rolling_divergence_threshold_pp, 默认 15pp)
+    即输出警示, 要求汇报时不得把 extend_val 单独当 headline。
+
+    Args:
+      fold_results: {fold_1..fold_7: {val, excess_annual, ...}} (run_fold_analysis 输出)
+      extend_result: 冻结权重回测结果 {excess_annual, ...}
+      folds: FOLDS 全局 (list of {"train": (s,e), "val": (s,e)}), fold_results 键
+             fold_N 对应 folds[N-1]
+      threshold_pp: |extend − 滚动均值| 超此百分点数 → warning
+
+    Returns:
+      {warning, extend_excess_annual, rolling_excess_annual, abs_gap_pp,
+       rolling_folds, threshold_pp, period}
+      (无匹配级联折时 rolling_* 为 None, warning=False)
+    """
+    ev = extend_result or {}
+    ext_excess = ev.get("excess_annual")
+    ext_period = ev.get("period") or ""
+    out = {"warning": False,
+           "extend_excess_annual": ext_excess,
+           "rolling_excess_annual": None,
+           "abs_gap_pp": None,
+           "rolling_folds": [],
+           "threshold_pp": float(threshold_pp),
+           "period": ext_period}
+    if ext_excess is None:
+        return out
+    try:
+        ext_start, ext_end = _parse_window(ext_period)
+    except Exception:
+        ext_start = ext_end = None
+
+    matched, vals = [], []
+    for label, rec in sorted(fold_results.items()):
+        if not str(label).startswith("fold_"):
+            continue
+        fi = int(str(label).split("_")[1]) - 1
+        if not (0 <= fi < len(folds)):
+            continue
+        if rec.get("excess_annual") is None:
+            continue
+        try:
+            v_start, v_end = _parse_window(folds[fi]["val"])
+        except Exception:
+            v_start = v_end = None
+        # 只比"验证窗被 extend 区间覆盖(±5天边界容差, 年份首尾交易日错位)"的滚动折 —
+        # 同一段历史的两个口径 (冻结 vs 滚动)。边界容差吸收 01-02 vs 01-01 这类错位。
+        if v_start is None or ext_start is None:
+            continue
+        if (ext_start - v_start).days > 5 or (v_end - ext_end).days > 5:
+            continue
+        matched.append(label)
+        vals.append(float(rec["excess_annual"]))
+
+    if not matched:
+        return out
+    roll_avg = float(np.mean(vals))
+    gap = float(ext_excess) - roll_avg
+    out.update({
+        "rolling_folds": matched,
+        "rolling_excess_annual": roll_avg,
+        "abs_gap_pp": abs(gap),
+        "warning": abs(gap) > float(threshold_pp),
+    })
+    return out
+
+
 def run_fold_analysis(all_data, factor_panels, close_panel, calendar, cal_idx,
                       factor_names, bt_config,
                       universe_fn=get_universe,
@@ -3093,6 +3181,28 @@ def main():
                         "pool_filter_enabled": bool(
                             config.get("pool_filter", {}).get("enabled")),
                     }
+
+            # ── 冻结 vs 滚动重训发散度监控 (2026-09-03, P2) ──
+            # extend_val (冻结稳定因子权重) 与覆盖同区间的级联折 (滚动重训) 的超额
+            # 年化若发散超阈值, 警示: extend 数字不得单独作为对外 headline。
+            if results.get("extend_val") and any(
+                    k.startswith("fold_") for k in results):
+                _div_thr = float((config.get("fold") or {}).get(
+                    "frozen_rolling_divergence_threshold_pp", 15.0))
+                _div = check_frozen_vs_rolling_divergence(
+                    results, results["extend_val"], FOLDS,
+                    threshold_pp=_div_thr)
+                if _div.get("rolling_folds"):
+                    extra_meta["frozen_rolling_divergence"] = _div
+                    if _div["warning"]:
+                        log.warning("⚠️ 冻结/滚动发散警示: extend 超额 %+.1fpp vs "
+                                    "级联折 %s 滚动均值 %+.1fpp, |差值|=%.1fpp > %.1fpp — "
+                                    "extend_val 不作为对外 headline, 须同时展示滚动口径 "
+                                    "(meta.frozen_rolling_divergence)",
+                                    _div["extend_excess_annual"],
+                                    ",".join(_div["rolling_folds"]),
+                                    _div["rolling_excess_annual"],
+                                    _div["abs_gap_pp"], _div["threshold_pp"])
         else:
             for label, (s, e) in partitions_to_run.items():
                 log.info("")
@@ -3201,6 +3311,17 @@ def main():
         # pre_fdr = 仅原门槛 (≥3/5 fold 显著+方向一致), post = 双门槛 (含 BH)
         _sf_pre = extra_meta.get("stable_factors_pre_fdr", [])
         _sf_post = extra_meta.get("stable_factors", [])
+        # 冻结/滚动发散警示留痕 (2026-09-03 P2): 见 meta.frozen_rolling_divergence
+        _div_rec = extra_meta.get("frozen_rolling_divergence") or {}
+        _div_note = (""
+                     if not _div_rec.get("rolling_folds")
+                     else (f"frozen_rolling_divergence="
+                           f"{'WARNING' if _div_rec.get('warning') else 'ok'} "
+                           f"(extend {_div_rec.get('extend_excess_annual')}pp vs "
+                           f"rolling {_div_rec.get('rolling_excess_annual')}pp, "
+                           f"gap {_div_rec.get('abs_gap_pp')}pp, thr "
+                           f"{_div_rec.get('threshold_pp')}pp, "
+                           f"folds={','.join(_div_rec.get('rolling_folds', []))}) "))
         log_experiment(
             script_name="run_walkforward_backtest",
             partition=_partition,
@@ -3210,7 +3331,9 @@ def main():
                     "styles_sleeves": {k: v.get("factors") for k, v in
                                        (_styles.get("sleeves") or {}).items()},
                     "fdr": (extra_meta.get("multiple_testing") or {}).get(
-                        "alpha")},
+                        "alpha"),
+                    "frozen_rolling_divergence_threshold_pp": (
+                        _div_rec.get("threshold_pp"))},
             results={k: {"excess_annual": v.get("excess_annual"),
                          "total_return": v.get("total_return"),
                          "sharpe": v.get("sharpe"),
@@ -3220,7 +3343,8 @@ def main():
                    f"budgets={_styles.get('budgets')} "
                    f"stable_factors_pre_fdr={len(_sf_pre)} "
                    f"stable_factors_post_fdr={len(_sf_post)} "
-                   f"fdr_dropped={sorted(set(_sf_pre) - set(_sf_post))}"),
+                   f"fdr_dropped={sorted(set(_sf_pre) - set(_sf_post))} "
+                   + _div_note),
             experiments_dir=os.path.join(BASE_DIR, "experiments"),
         )
     except Exception as e:

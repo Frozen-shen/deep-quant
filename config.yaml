@@ -110,6 +110,9 @@ fold:
                            # scripts/active/run_null_calibration.py
   fdr_var_explained: 0.95  # 有效独立检验数: 因子相关矩阵主成分累计方差阈值
                            # (越高越保守; 相关因子池折算成更少独立检验)
+  frozen_rolling_divergence_threshold_pp: 15  # 冻结(extend_val)vs滚动重训(级联折)
+                           # 超额年化 |差值| 警示阈值 (百分点; 2026-09-03 P2 起默认 15,
+                           # 允许按实际分布调整, 调整须写明理由)
 
 # ── 组合层优化 (v9b) ──
 portfolio_optimizer: "equal"   # equal=等权 / inv_vol=波动率倒数加权 (v9b实验) / risk_parity=风险平价 (P0)
