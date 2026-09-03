@@ -4,7 +4,7 @@ ML 排序模型 — LightGBM Lambdarank (honest)
 学习目标: 给定每日截面股票因子值, 预测截面排名 (Top-K选股)。
 关键改进:
   1. objective=lambdarank (直接优化排序,N个pairwise loss)
-  2. 标签=截面排名 (整数, 0=最差, N-1=最好)
+  2. 标签=截面未来收益的 30 档粗排 (0=最差档, 29=最好档, 见 coarse_rank_labels)
   3. 按日期分组切分训练/验证 (保证同一天股票不跨split)
   4. L1正则化 + min_data_in_leaf 防过拟合
 
@@ -13,6 +13,13 @@ ML 排序模型 — LightGBM Lambdarank (honest)
   ranker = MLRanker()
   ranker.fit(X, y, groups)        # 训练
   scores = ranker.predict(X_new)  # 预测分数
+
+标签口径 (2026-09-03 统一):
+  全仓库唯一在跑的标签编码是 model/pipeline.py `_build_cs()` 的 30 档粗排
+  (固定 30 桶, 平滑小样本噪音), 故本模块的标签约定对齐该口径:
+  `coarse_rank_labels()` 为唯一实现, pipeline 与 from_factor_data 共用。
+  旧版"完整截面排名 0~N-1"已在 from_factor_data 中废弃 (并列时 rankdata
+  平均秩小数截断还会产生档位偏差, 粗排不存在该问题)。
 """
 
 import numpy as np
@@ -20,12 +27,34 @@ import pandas as pd
 import lightgbm as lgb
 
 
+def coarse_rank_labels(values, n_buckets: int = 30) -> np.ndarray:
+    """
+    截面未来收益 → 固定档位粗排标签 (lambdarank 用, 全仓库唯一口径)。
+
+    与 model/pipeline.py `_build_cs()` 的标签编码保持一致:
+      bucket = floor(rankdata(v) / len(v) * n_buckets), 截断到 [0, n_buckets-1]
+    (rankdata 为平均秩 1~N; 最大秩时精确等于 n_buckets, clip 防越界成第 30 桶)。
+
+    Args:
+      values: 一维截面未来收益数组
+      n_buckets: 档位数 (默认 30, 与 pipeline._build_cs 一致)
+    Returns:
+      int 数组, 值域 [0, n_buckets-1]
+    """
+    from scipy.stats import rankdata
+    ranks = rankdata(np.asarray(values, dtype=float))
+    n = len(ranks)
+    if n == 0:
+        return np.zeros(0, dtype=int)
+    return np.floor(ranks / n * n_buckets).clip(0, n_buckets - 1).astype(int)
+
+
 class MLRanker:
     """
     LightGBM Lambdarank 截面排序器。
 
     标签约定:
-      y: 整数截面排名 (0=最差, N-1=最好), 用于 lambdarank
+      y: 整数截面档位 (0=最差档, n_buckets-1=最好档), 由 coarse_rank_labels 生成
       groups: 日期ID, 同一天的样本属于同一个 ranking group
 
     排序逻辑:
@@ -51,7 +80,7 @@ class MLRanker:
 
         参数:
           X: (n_samples, n_features) 截面标准化后的因子值
-          y: (n_samples,) 整数截面排名 (0=最差, N-1=最好)
+          y: (n_samples,) 整数截面档位 (0=最差, 29=最好, coarse_rank_labels 生成)
           groups: (n_samples,) 日期分组ID, 同一天 = 同一 ranking group
           val_ratio: 按日期数 (而非样本数) 分割的验证比例
           sample_weight: (n_samples,) 样本权重 (DEnsemble迭代重训练用)
@@ -217,9 +246,9 @@ class MLRanker:
                 std[std == 0] = 1.0
                 feats = (feats - mean) / std
 
-                # 截面排名标签 (lambdarank)
-                from scipy.stats import rankdata
-                labels = rankdata(np.array(targets)) - 1  # 0~N-1
+                # 截面档位标签 (lambdarank; 口径同 model/pipeline.py `_build_cs`
+                # 的 30 档粗排, 2026-09-03 统一, 取代旧版完整排名 0~N-1)
+                labels = coarse_rank_labels(np.array(targets))
 
                 X_list.extend(feats.tolist())
                 y_list.extend(labels.tolist())
@@ -338,8 +367,7 @@ def demo():
         X_day = np.random.randn(10, 5)
         # 第一个因子有微弱预测力
         true_score = X_day[:, 0] * 0.5 + np.random.randn(10) * 0.5
-        from scipy.stats import rankdata
-        labels = rankdata(true_score) - 1  # 0~9
+        labels = coarse_rank_labels(true_score, n_buckets=10)  # 10只→10档演示
         X_list.extend(X_day.tolist())
         y_list.extend(labels.tolist())
         g_list.extend([day] * 10)

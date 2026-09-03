@@ -5,7 +5,6 @@ import os, sys, yaml, argparse
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import numpy as np, pandas as pd
-from scipy.stats import rankdata
 from data.calendar import get_trading_days
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,7 +22,12 @@ class QuantPipeline:
         dp = config["data_partition"]
         self.research_period = (pd.Timestamp(dp["research"]["start"]), pd.Timestamp(dp["research"]["end"]))
         self.dev_period = (pd.Timestamp(dp["development"]["start"]), pd.Timestamp(dp["development"]["end"]))
-        self.blind_period = (pd.Timestamp(dp["blind_test"]["start"]), pd.Timestamp(dp["blind_test"]["end"]))
+        # blind 窗口: 兼容历史 data_partition.blind_test 布局, 当前 config.yaml 的
+        # 窗口在 data_partition.blind (blind_test 顶层段只是状态标志, 无 end)。
+        # (2026-09-03 配置结构漂移修复: 旧引用 dp["blind_test"] 会 KeyError)
+        bd = dp.get("blind_test") or dp.get("blind") or {}
+        self.blind_period = (pd.Timestamp(bd.get("start", "2027-01-01")),
+                             pd.Timestamp(bd.get("end", "2027-12-31")))
         r = config["rolling"]
         self.train_months = r["train_months"]; self.test_months = r["test_months"]
         self.day_step = r["day_step"]; self.embargo_days = r["embargo_days"]
@@ -34,8 +38,10 @@ class QuantPipeline:
         self.market_filter = ex.get("market_filter", False); self.market_ma = ex.get("market_ma", 60)
         pf = config["portfolio"]
         self.hold_thresh = pf["hold_thresh"]; self.sell_rank_buffer = pf["sell_rank_buffer"]
-        self.buy_confirm_days = pf["buy_confirm_days"]; self.cost_threshold = pf["cost_threshold"]
-        self.n_drop = pf["n_drop"]
+        self.buy_confirm_days = pf["buy_confirm_days"]; self.n_drop = pf["n_drop"]
+        # cost_threshold: 2026-08-16 组合层参数 config 化后顶层键改为 bt_cost_threshold
+        # (旧扁平键随历史 config 迁移, 此处兼容读取, 2026-09-03 结构漂移修复)
+        self.cost_threshold = pf.get("cost_threshold", pf.get("bt_cost_threshold", 0.05))
         self._all_data: Dict[str, pd.DataFrame] = {}
         self._factor_cache = None; self._factor_names = []
         self._universe = None; self._index_data = None; self._index_ma = None
@@ -210,7 +216,9 @@ class QuantPipeline:
         m, s = fa.mean(axis=0, keepdims=True), fa.std(axis=0, keepdims=True); s[s == 0] = 1.0
         fn = (fa - m) / s
         rets = np.array([day_rets[s] for s in syms])
-        labels = np.floor(rankdata(rets) / len(rets) * 30).astype(int)
+        # 标签: 30档粗排 (唯一口径, 与 ml_ranker.coarse_rank_labels 共用; 2026-09-03 统一)
+        from ml_ranker import coarse_rank_labels
+        labels = coarse_rank_labels(rets)
         return fn, labels, syms
 
     def _train_model(self, X, y, group_list, train_end):
@@ -231,12 +239,26 @@ class QuantPipeline:
             members = self.cfg["model"].get("ensemble_members", ["lgb", "lgb", "lgb"])
             blend = self.cfg["model"].get("blend_method", "equal")
             model = EnsembleRanker(members=members, blend_method=blend)
+        elif model_type == "linear":
+            # linear 是生产路径类型 (IC加权线性, 见 config.yaml model.type), 本管道
+            # 只用于 ML 研究对比 — 不做任何静默降级, 直接报错, 避免落进 else 分支
+            # 去读已不存在的顶层扁平 ML 键而抛 KeyError (2026-09-03 配置漂移修复)。
+            raise ValueError(
+                "model.type='linear' 是生产路径类型, QuantPipeline 是 ML 研究对比管道; "
+                "请显式指定 model.type ∈ {l0, l1, l2, ensemble, lgb} 之一 (ML 参数从 "
+                "config.yaml model.research_lgb 读取)。"
+            )
         else:
+            # lgb 等 → LightGBM Lambdarank 研究分支。
+            # 参数读嵌套的 model.research_lgb (config.yaml 2026-08-01 起的结构),
+            # 不再假设存在于 model 顶层 (旧扁平键布局已于 b210bfe 迁移, 此处为遗留 bug)。
             from ml_ranker import MLRanker
-            mc = self.cfg["model"]
-            model = MLRanker(n_estimators=mc["n_estimators"], max_depth=mc["max_depth"],
-                             learning_rate=mc["learning_rate"], lambda_l1=mc["lambda_l1"],
-                             min_data_in_leaf=mc["min_data_in_leaf"])
+            rl = self.cfg["model"].get("research_lgb") or {}
+            model = MLRanker(n_estimators=rl.get("n_estimators", 200),
+                             max_depth=rl.get("max_depth", 6),
+                             learning_rate=rl.get("learning_rate", 0.05),
+                             lambda_l1=rl.get("lambda_l1", 0.5),
+                             min_data_in_leaf=rl.get("min_data_in_leaf", 30))
 
         model.feature_names = getattr(self, '_all_factor_names', self._factor_names)
         td = self.cfg["time_decay"]
